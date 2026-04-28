@@ -37,21 +37,72 @@ describe('doctor and status', () => {
     process.env.POSTPLUS_ACCESS_TOKEN = 'access-token-value';
     process.env.POSTPLUS_REFRESH_TOKEN = 'refresh-token-value';
     process.env.POSTPLUS_API_BASE_URL = 'https://postplus.example.com';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
 
-    const status = await generateStatusReport();
-    assert.equal(status.ok, true);
-    assert.equal(status.auth.ok, true);
-    assert.equal(status.doctor.ok, true);
-    assert.match(formatStatusReport(status), /PostPlus CLI status/);
-    assert.doesNotMatch(formatStatusReport(status), /install status/i);
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return new Response(
+          JSON.stringify({
+            accountId: 'account-1',
+            sessionExpiresAt: 1_900_000_000,
+            subscriptionStatus: 'active',
+            userEmail: 'user@example.com',
+            userId: 'user-1',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            subscriptionActive: true,
+            subscriptionStatus: 'active',
+            capabilities: [
+              {
+                id: 'wavespeed',
+                label: 'Hosted media generation',
+                ok: true,
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const status = await generateStatusReport();
+      assert.equal(status.ok, true);
+      assert.equal(status.auth.ok, true);
+      assert.equal(status.doctor.ok, true);
+      assert.match(formatStatusReport(status), /PostPlus CLI status/);
+      assert.doesNotMatch(formatStatusReport(status), /install status/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
-  it('doctor reports PostPlus Cloud readiness without skill install state', async () => {
+  it('doctor fails fast until the user signs in', async () => {
     const report = await generateDoctorReport();
     const formatted = formatDoctorReport(report);
 
-    assert.equal(report.ok, true);
+    assert.equal(report.ok, false);
     assert.match(formatted, /PostPlus Cloud/);
+    assert.match(formatted, /postplus auth login/);
     assert.doesNotMatch(formatted, /skills add/);
   });
 
