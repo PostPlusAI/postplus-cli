@@ -35,24 +35,33 @@ export async function loadPublicSkillCatalog(): Promise<PublicSkillCatalogReport
   }
 
   const indexText = await response.text();
+  const skills = parseSkillIndex(indexText);
+
+  if (skills.length === 0) {
+    throw new Error(
+      'PostPlus public skill catalog is invalid: no released skills were found.',
+    );
+  }
 
   return {
     source: POSTPLUS_SKILLS_REPO,
     indexUrl: POSTPLUS_SKILLS_INDEX_URL,
     installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
     listCommand: POSTPLUS_SKILLS_LIST_COMMAND,
-    skills: parseSkillIndex(indexText),
+    skills,
   };
 }
 
 function parseSkillIndex(indexText: string): PublicSkillCatalogEntry[] {
   const skills: PublicSkillCatalogEntry[] = [];
   let inReleasedSkills = false;
+  let sawReleasedSkillsSection = false;
   let currentSkill: string | null = null;
 
   for (const line of indexText.split('\n')) {
     if (line.trim() === '## Released Skills') {
       inReleasedSkills = true;
+      sawReleasedSkillsSection = true;
       continue;
     }
 
@@ -79,6 +88,12 @@ function parseSkillIndex(indexText: string): PublicSkillCatalogEntry[] {
         last.path = pathMatch[1] ?? null;
       }
     }
+  }
+
+  if (!sawReleasedSkillsSection) {
+    throw new Error(
+      'PostPlus public skill catalog is invalid: missing ## Released Skills section.',
+    );
   }
 
   return skills;

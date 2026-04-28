@@ -112,6 +112,42 @@ describe('public skill catalog', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('fails fast when the public skill index has no released section', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response('# Skills Index\n\n## Shared Rulebooks\n', {
+        status: 200,
+        headers: { 'content-type': 'text/markdown' },
+      });
+
+    try {
+      await assert.rejects(
+        () => loadPublicSkillCatalog(),
+        /missing ## Released Skills section/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fails fast when the public skill index has an empty release list', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response('# Skills Index\n\n## Released Skills\n', {
+        status: 200,
+        headers: { 'content-type': 'text/markdown' },
+      });
+
+    try {
+      await assert.rejects(
+        () => loadPublicSkillCatalog(),
+        /no released skills were found/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe('removed skill management commands', () => {
