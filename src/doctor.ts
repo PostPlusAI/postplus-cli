@@ -1,7 +1,7 @@
 import { resolveHostedBaseUrl } from './hosted-release.js';
 
 export type DoctorCheck = {
-  id: 'hosted_base_url' | 'release_source';
+  id: 'hosted_base_url';
   label: string;
   status: 'pass' | 'fail';
   detail: string;
@@ -26,20 +26,6 @@ function createPass(
   };
 }
 
-function createFail(
-  id: DoctorCheck['id'],
-  label: string,
-  detail: string,
-  fix: string,
-): DoctorCheck {
-  return {
-    id,
-    label,
-    status: 'fail',
-    detail,
-    fix,
-  };
-}
 export async function generateDoctorReport(): Promise<DoctorReport> {
   const hostedBaseUrl = await resolveHostedBaseUrl();
   const checks: DoctorCheck[] = [
@@ -47,11 +33,6 @@ export async function generateDoctorReport(): Promise<DoctorReport> {
       'hosted_base_url',
       'PostPlus Cloud',
       `Using ${hostedBaseUrl ?? 'https://postplus.io'}`,
-    ),
-    createPass(
-      'release_source',
-      'skill catalog',
-      'CLI commands install from the hosted PostPlus release catalog.',
     ),
   ];
 

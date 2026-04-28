@@ -3,22 +3,12 @@ import { access, chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promise
 import { homedir, platform } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-import type { PostPlusInstallTargetId } from './skills-targets.js';
-
 export type PostPlusLocalConfig = {
   accessToken?: string;
   apiBaseUrl?: string;
   accountId?: string;
-  installTarget?: 'claude-code';
-  installTargets?: PostPlusInstallTargetId[];
-  installedSkills?: string[];
-  installedSkillVersions?: Record<string, string | null>;
-  installedSkillIntegrities?: Record<string, string>;
-  lastUpdateCheckAt?: string | null;
   refreshToken?: string;
   sessionExpiresAt?: number | null;
-  skillsDir?: string;
-  skillsDirs?: Partial<Record<PostPlusInstallTargetId, string>>;
   updatedAt?: string;
   userEmail?: string | null;
   userId?: string;
@@ -261,15 +251,6 @@ export async function setLocalSession(input: {
     sessionExpiresAt: input.sessionExpiresAt,
     userEmail: input.userEmail,
     userId: input.userId,
-  }));
-}
-
-export async function setLastUpdateCheckAt(
-  checkedAt: Date = new Date(),
-): Promise<PostPlusLocalConfig> {
-  return updateLocalConfig((current) => ({
-    ...(current ?? {}),
-    lastUpdateCheckAt: checkedAt.toISOString(),
   }));
 }
 
