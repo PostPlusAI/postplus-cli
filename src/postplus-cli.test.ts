@@ -288,7 +288,7 @@ describe('removed skill management commands', () => {
 
           assert.match(
             execError.stderr ?? '',
-            /npx -y skills add PostPlusAI\/postplus-skills --skill '\*' --agent claude-code codex cursor --yes/,
+            /npx -y skills add PostPlusAI\/postplus-skills --full-depth --skill '\*' --agent claude-code codex cursor --yes/,
           );
           return true;
         },
