@@ -1,6 +1,6 @@
 export const POSTPLUS_SKILLS_REPO = 'PostPlusAI/postplus-skills';
 export const POSTPLUS_SKILLS_INSTALL_COMMAND =
-  'npx -y skills add PostPlusAI/postplus-skills --all';
+  "npx -y skills add PostPlusAI/postplus-skills --skill '*' --agent claude-code codex cursor --yes";
 export const POSTPLUS_SKILLS_LIST_COMMAND =
   'npx -y skills add PostPlusAI/postplus-skills --list';
 
