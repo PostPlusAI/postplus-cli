@@ -6,7 +6,16 @@
   "description": "PostPlus CLI for PostPlus Cloud auth, status, and diagnostics.",
   "license": "Apache-2.0",
   "files": [
-    "build/**",
+    "build/auth-lifecycle.js",
+    "build/auth-login.js",
+    "build/auth-validate.js",
+    "build/auth.js",
+    "build/doctor.js",
+    "build/hosted-release.js",
+    "build/index.js",
+    "build/local-state.js",
+    "build/skill-catalog.js",
+    "build/status.js",
     "LICENSE",
     "NOTICE",
     "README.md"
@@ -22,7 +31,7 @@
     "postplus": "./build/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node ./scripts/clean-build.mjs && tsc",
     "clean": "rm -rf .turbo node_modules build",
     "release:package": "node ./scripts/package-release.mjs",
     "start": "tsx src/index.ts",

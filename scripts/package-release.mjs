@@ -41,17 +41,24 @@ function assertNoRuntimeDependencies() {
 }
 
 function assertBuildExists() {
-  const entry = resolve(repoRoot, 'build/index.js');
+  const missingFiles = getReleaseBuildFiles().filter(
+    (fileName) => !existsSync(resolve(repoRoot, fileName)),
+  );
 
-  if (!existsSync(entry)) {
-    throw new Error('Missing build/index.js. Run pnpm build before pnpm release:package.');
+  if (missingFiles.length > 0) {
+    throw new Error(
+      [
+        'Missing release build files. Run pnpm build before pnpm release:package.',
+        ...missingFiles.map((fileName) => `  ${fileName}`),
+      ].join('\n'),
+    );
   }
 }
 
-function assertNoTestFilesInBuild() {
+function assertBuildOnlyContainsReleaseFiles() {
   const buildDir = resolve(repoRoot, 'build');
-  const forbidden = ['.test.js', '.test.mjs', '.spec.js', '.spec.mjs'];
-  const found = [];
+  const allowedFiles = new Set(getReleaseBuildFiles());
+  const unexpected = [];
 
   function walk(dir) {
     if (!existsSync(dir)) return;
@@ -60,18 +67,24 @@ function assertNoTestFilesInBuild() {
       const isDir = statSync(full).isDirectory();
       if (isDir) {
         walk(full);
-      } else if (forbidden.some((suffix) => entry.endsWith(suffix))) {
-        found.push(full.replace(repoRoot + '/', ''));
+      } else {
+        const relativePath = full.replace(repoRoot + '/', '');
+        if (!allowedFiles.has(relativePath)) {
+          unexpected.push(relativePath);
+        }
       }
     }
   }
 
   walk(buildDir);
 
-  if (found.length > 0) {
+  if (unexpected.length > 0) {
     throw new Error(
-      `Release build contains test files that must not ship:\n${found.map((f) => `  ${f}`).join('\n')}\n` +
-        'Check tsconfig.json to exclude test files from the build output.',
+      [
+        'Release build contains files that must not ship:',
+        ...unexpected.map((fileName) => `  ${fileName}`),
+        'Run pnpm build to regenerate from the current source tree.',
+      ].join('\n'),
     );
   }
 }
@@ -80,9 +93,11 @@ function copyReleaseFiles() {
   rmSync(distDir, { force: true, recursive: true });
   mkdirSync(packageRoot, { recursive: true });
 
-  cpSync(resolve(repoRoot, 'build'), resolve(packageRoot, 'build'), {
-    recursive: true,
-  });
+  for (const fileName of getReleaseBuildFiles()) {
+    const targetPath = resolve(packageRoot, fileName);
+    mkdirSync(dirname(targetPath), { recursive: true });
+    cpSync(resolve(repoRoot, fileName), targetPath);
+  }
 
   for (const fileName of ['package.json', 'README.md', 'LICENSE']) {
     cpSync(resolve(repoRoot, fileName), resolve(packageRoot, fileName));
@@ -92,6 +107,12 @@ function copyReleaseFiles() {
   cpSync(resolve(repoRoot, 'scripts/install.sh'), resolve(packageRoot, 'scripts/install.sh'));
   cpSync(resolve(repoRoot, 'scripts/install.ps1'), resolve(packageRoot, 'scripts/install.ps1'));
   writeFileSync(resolve(packageRoot, 'VERSION'), `${version}\n`);
+}
+
+function getReleaseBuildFiles() {
+  return packageJson.files.filter(
+    (fileName) => fileName.startsWith('build/') && fileName.endsWith('.js'),
+  );
 }
 
 function createArchive() {
@@ -111,7 +132,7 @@ function writeSha256(fileName) {
 
 assertNoRuntimeDependencies();
 assertBuildExists();
-assertNoTestFilesInBuild();
+assertBuildOnlyContainsReleaseFiles();
 copyReleaseFiles();
 createArchive();
 writeSha256(versionedArchive);
