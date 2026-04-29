@@ -11,7 +11,7 @@ Requires Node.js `>=20.10.0` and npm.
 ```bash
 npm install -g @postplus/cli
 postplus auth login
-npx -y skills add PostPlusAI/postplus-skills --all
+npx -y skills add PostPlusAI/postplus-skills --skill '*' --agent claude-code codex cursor --yes
 ```
 
 ## Commands
@@ -30,5 +30,5 @@ npx -y skills add PostPlusAI/postplus-skills --all
 installation commands. Use:
 
 ```bash
-npx -y skills add PostPlusAI/postplus-skills --all
+npx -y skills add PostPlusAI/postplus-skills --skill '*' --agent claude-code codex cursor --yes
 ```
