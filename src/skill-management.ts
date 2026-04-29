@@ -32,10 +32,6 @@ type SkillManagementDependencies = {
   runCommand: typeof runCommand;
 };
 
-export async function runPostPlusSkillInstall(): Promise<number> {
-  return runInteractiveCommand('npx', buildPostPlusSkillInstallArgs());
-}
-
 export async function runPostPlusSkillUpdate(): Promise<number> {
   const catalog = await loadPublicSkillCatalog();
   const skillNames = catalog.skills.map((skill) => skill.skillId);
@@ -149,20 +145,6 @@ export function formatSkillInstallStatusReport(
   }
 
   return lines.join('\n');
-}
-
-export function buildPostPlusSkillInstallArgs(): string[] {
-  return [
-    ...NPX_SKILLS,
-    'add',
-    POSTPLUS_SKILLS_REPO,
-    '--full-depth',
-    '--skill',
-    '*',
-    '--agent',
-    ...SKILLS_AGENTS,
-    '--yes',
-  ];
 }
 
 export function buildPostPlusSkillUpdateArgs(skillNames: string[]): string[] {

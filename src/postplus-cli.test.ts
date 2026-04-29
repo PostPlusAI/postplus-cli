@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { after, beforeEach, describe, it } from 'node:test';
+import { promisify } from 'node:util';
 
 import { generateAuthStatusReport } from './auth.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
@@ -11,7 +13,6 @@ import {
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
 import {
-  buildPostPlusSkillInstallArgs,
   buildPostPlusSkillUninstallArgs,
   buildPostPlusSkillUpdateArgs,
   generateSkillInstallStatusReport,
@@ -23,6 +24,7 @@ import {
 
 const tempDirs: string[] = [];
 const originalEnv = { ...process.env };
+const execFileAsync = promisify(execFile);
 
 beforeEach(async () => {
   process.env = { ...originalEnv };
@@ -344,23 +346,6 @@ describe('public skill catalog', () => {
 });
 
 describe('skill management commands', () => {
-  it('builds the public skills installer command', () => {
-    assert.deepEqual(buildPostPlusSkillInstallArgs(), [
-      '-y',
-      'skills',
-      'add',
-      'PostPlusAI/postplus-skills',
-      '--full-depth',
-      '--skill',
-      '*',
-      '--agent',
-      'claude-code',
-      'codex',
-      'cursor',
-      '--yes',
-    ]);
-  });
-
   it('builds update and uninstall commands for released PostPlus skills only', () => {
     assert.deepEqual(buildPostPlusSkillUpdateArgs(['a', 'b']), [
       '-y',
@@ -433,5 +418,27 @@ describe('skill management commands', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('does not provide postplus install as a functional installer', async () => {
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        '--import',
+        'tsx',
+        'src/index.ts',
+        'install',
+      ]),
+      (error) => {
+        const execError = error as Error & {
+          stderr?: string;
+        };
+
+        assert.match(
+          execError.stderr ?? '',
+          /npx -y skills add PostPlusAI\/postplus-skills --full-depth --skill '\*' --agent claude-code codex cursor --yes/,
+        );
+        return true;
+      },
+    );
   });
 });

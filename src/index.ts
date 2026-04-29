@@ -24,7 +24,6 @@ import {
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
 import {
-  runPostPlusSkillInstall,
   runPostPlusSkillUninstall,
   runPostPlusSkillUpdate,
 } from './skill-management.js';
@@ -60,7 +59,6 @@ Usage:
   postplus auth validate [--json]
   postplus auth logout [--json]
   postplus doctor [--json]
-  postplus install
   postplus update
   postplus uninstall
   postplus list [--json]
@@ -132,16 +130,6 @@ async function runList(json: boolean): Promise<number> {
 
   process.stdout.write(`${lines.join('\n')}\n`);
   return 0;
-}
-
-async function runSkillInstallCommand(): Promise<number> {
-  const exitCode = await runPostPlusSkillInstall();
-
-  if (exitCode === 0) {
-    await refreshUpdateCheckBaseline().catch(() => {});
-  }
-
-  return exitCode;
 }
 
 async function runSkillUpdateCommand(): Promise<number> {
@@ -248,7 +236,10 @@ async function main(): Promise<void> {
       process.exitCode = await runDoctor(json);
       return;
     case 'install':
-      process.exitCode = await runSkillInstallCommand();
+      process.stderr.write(
+        `PostPlus CLI does not install skills directly. Run \`${POSTPLUS_SKILLS_INSTALL_COMMAND}\`.\n`,
+      );
+      process.exitCode = 1;
       return;
     case 'update':
       process.exitCode = await runSkillUpdateCommand();
