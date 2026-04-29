@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release, for example v0.1.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CLI
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          path: postplus-cli
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.30.3
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20.10.0'
+          cache: pnpm
+          cache-dependency-path: postplus-cli/pnpm-lock.yaml
+          registry-url: 'https://registry.npmjs.org/'
+
+      - name: Install CLI dependencies
+        working-directory: postplus-cli
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: postplus-cli
+        run: pnpm build
+
+      - name: Test
+        working-directory: postplus-cli
+        run: pnpm test
+
+      - name: Publish to npm
+        working-directory: postplus-cli
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

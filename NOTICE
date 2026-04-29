@@ -1,0 +1,14 @@
+PostPlus CLI
+Copyright 2026 RealProductStudio
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full text.
+
+Third-Party Notices
+-------------------
+
+This project has no runtime npm dependencies. The compiled release artifact
+contains only code authored in this repository.
+
+Development tooling (TypeScript, tsx, @types/node) is used at build time only
+and is not included in the distributed artifact.
