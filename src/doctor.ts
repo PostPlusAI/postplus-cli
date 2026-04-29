@@ -205,14 +205,6 @@ async function checkHostedCapabilities(input: {
       .map(readCapabilityFailureLabel)
       .filter((value): value is string => value !== null);
 
-    if (payload.subscriptionActive !== true) {
-      const status =
-        typeof payload.subscriptionStatus === 'string'
-          ? payload.subscriptionStatus
-          : 'unknown';
-      failedLabels.unshift(`subscription ${status}`);
-    }
-
     if (payload.ok !== true || failedLabels.length > 0) {
       return createFail(
         'hosted_capabilities',
@@ -222,10 +214,15 @@ async function checkHostedCapabilities(input: {
       );
     }
 
+    const subscription =
+      typeof payload.subscriptionStatus === 'string'
+        ? payload.subscriptionStatus
+        : 'unknown';
+
     return createPass(
       'hosted_capabilities',
       'Hosted capabilities',
-      `Ready (${capabilities.length} capability checks passed)`,
+      `Ready (${capabilities.length} capability checks passed; subscription ${subscription})`,
     );
   } catch (error) {
     return createFail(
@@ -244,7 +241,7 @@ function readCapabilityFailureLabel(value: unknown): string | null {
   }
 
   const record = value as Record<string, unknown>;
-  if (record.ok === true) {
+  if (record.ok === true || record.required === false) {
     return null;
   }
 

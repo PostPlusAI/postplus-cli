@@ -96,6 +96,76 @@ describe('doctor and status', () => {
     }
   });
 
+  it('reports inactive subscriptions without failing hosted readiness', async () => {
+    process.env.POSTPLUS_ACCESS_TOKEN = 'access-token-value';
+    process.env.POSTPLUS_REFRESH_TOKEN = 'refresh-token-value';
+    process.env.POSTPLUS_API_BASE_URL = 'https://postplus.example.com';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return new Response(
+          JSON.stringify({
+            accountId: 'account-1',
+            sessionExpiresAt: 1_900_000_000,
+            subscriptionStatus: null,
+            userEmail: 'user@example.com',
+            userId: 'user-1',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            subscriptionActive: false,
+            subscriptionStatus: null,
+            capabilities: [
+              {
+                id: 'media-generation',
+                label: 'Hosted media generation',
+                ok: true,
+                required: true,
+              },
+              {
+                id: 'social-publishing',
+                label: 'Hosted social publishing',
+                ok: true,
+                required: false,
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const status = await generateStatusReport();
+      const formatted = formatStatusReport(status);
+
+      assert.equal(status.ok, true);
+      assert.match(formatted, /subscription unknown/);
+      assert.doesNotMatch(formatted, /Not ready: subscription/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('doctor fails fast until the user signs in', async () => {
     const report = await generateDoctorReport();
     const formatted = formatDoctorReport(report);

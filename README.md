@@ -1,8 +1,9 @@
 # PostPlus CLI
 
-`PostPlus CLI` signs you in to PostPlus Cloud and reports local account and
-hosted capability readiness. PostPlus skills are added from the public
-`postplus-skills` repository.
+`PostPlus CLI` signs you in to PostPlus Cloud and reports local account,
+subscription, and hosted capability readiness. An inactive or missing
+subscription is reported as account state, not a status failure. PostPlus
+skills are added from the public `postplus-skills` repository.
 
 ## Install
 
