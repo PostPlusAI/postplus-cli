@@ -65,7 +65,7 @@ describe('doctor and status', () => {
             subscriptionStatus: 'active',
             capabilities: [
               {
-                id: 'wavespeed',
+                id: 'media-generation',
                 label: 'Hosted media generation',
                 ok: true,
               },
