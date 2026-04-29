@@ -23,9 +23,13 @@ import {
   POSTPLUS_SKILLS_INSTALL_COMMAND,
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
+import {
+  runPostPlusSkillInstall,
+  runPostPlusSkillUninstall,
+  runPostPlusSkillUpdate,
+} from './skill-management.js';
 import { formatStatusReport, generateStatusReport } from './status.js';
-
-const REMOVED_SKILL_COMMAND_MESSAGE = `PostPlus CLI no longer installs skills directly. Run \`${POSTPLUS_SKILLS_INSTALL_COMMAND}\`.`;
+import { refreshUpdateCheckBaseline } from './update-check.js';
 
 function printAuthHelp(): void {
   process.stdout.write(`PostPlus CLI — auth commands
@@ -56,6 +60,9 @@ Usage:
   postplus auth validate [--json]
   postplus auth logout [--json]
   postplus doctor [--json]
+  postplus install
+  postplus update
+  postplus uninstall
   postplus list [--json]
   postplus status [--json]
   postplus help
@@ -125,6 +132,30 @@ async function runList(json: boolean): Promise<number> {
 
   process.stdout.write(`${lines.join('\n')}\n`);
   return 0;
+}
+
+async function runSkillInstallCommand(): Promise<number> {
+  const exitCode = await runPostPlusSkillInstall();
+
+  if (exitCode === 0) {
+    await refreshUpdateCheckBaseline().catch(() => {});
+  }
+
+  return exitCode;
+}
+
+async function runSkillUpdateCommand(): Promise<number> {
+  const exitCode = await runPostPlusSkillUpdate();
+
+  if (exitCode === 0) {
+    await refreshUpdateCheckBaseline().catch(() => {});
+  }
+
+  return exitCode;
+}
+
+async function runSkillUninstallCommand(): Promise<number> {
+  return runPostPlusSkillUninstall();
 }
 
 function writeJson(value: unknown): void {
@@ -217,10 +248,13 @@ async function main(): Promise<void> {
       process.exitCode = await runDoctor(json);
       return;
     case 'install':
+      process.exitCode = await runSkillInstallCommand();
+      return;
     case 'update':
+      process.exitCode = await runSkillUpdateCommand();
+      return;
     case 'uninstall':
-      process.stderr.write(`${REMOVED_SKILL_COMMAND_MESSAGE}\n`);
-      process.exitCode = 1;
+      process.exitCode = await runSkillUninstallCommand();
       return;
     case 'list':
       process.exitCode = await runList(json);

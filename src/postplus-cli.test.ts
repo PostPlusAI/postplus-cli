@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { after, beforeEach, describe, it } from 'node:test';
-import { promisify } from 'node:util';
 
 import { generateAuthStatusReport } from './auth.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
@@ -12,9 +10,17 @@ import {
   POSTPLUS_SKILLS_INSTALL_COMMAND,
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
-import { formatStatusReport, generateStatusReport } from './status.js';
+import {
+  buildPostPlusSkillInstallArgs,
+  buildPostPlusSkillUninstallArgs,
+  buildPostPlusSkillUpdateArgs,
+  generateSkillInstallStatusReport,
+} from './skill-management.js';
+import {
+  formatStatusReport,
+  generateStatusReportWithDependencies,
+} from './status.js';
 
-const execFileAsync = promisify(execFile);
 const tempDirs: string[] = [];
 const originalEnv = { ...process.env };
 
@@ -33,7 +39,7 @@ after(async () => {
 });
 
 describe('doctor and status', () => {
-  it('reports PostPlus Cloud auth readiness without skill install state', async () => {
+  it('reports PostPlus Cloud auth readiness with skill and update state', async () => {
     process.env.POSTPLUS_ACCESS_TOKEN = 'access-token-value';
     process.env.POSTPLUS_REFRESH_TOKEN = 'refresh-token-value';
     process.env.POSTPLUS_API_BASE_URL = 'https://postplus.example.com';
@@ -85,12 +91,45 @@ describe('doctor and status', () => {
     };
 
     try {
-      const status = await generateStatusReport();
+      const status = await generateStatusReportWithDependencies({
+        generateSkillStatus: async () => ({
+          ok: true,
+          error: null,
+          installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
+          installedCount: 2,
+          missingSkills: [],
+          requiredCount: 2,
+          scopes: ['project'],
+          source: 'PostPlusAI/postplus-skills',
+          updateCommand: 'postplus update',
+          uninstallCommand: 'postplus uninstall',
+        }),
+        generateUpdateStatus: async () => ({
+          checkedAt: '2026-04-29T00:00:00.000Z',
+          ok: true,
+          source: 'remote',
+          cli: {
+            currentVersion: '0.1.12',
+            latestVersion: '0.1.12',
+            updateAvailable: false,
+            updateCommand: 'npm install -g @postplus/cli',
+          },
+          skills: {
+            currentRevision: 'abc123',
+            latestRevision: 'abc123',
+            updateAvailable: false,
+            updateCommand: 'postplus update',
+          },
+          warning: null,
+        }),
+      });
       assert.equal(status.ok, true);
       assert.equal(status.auth.ok, true);
       assert.equal(status.doctor.ok, true);
+      assert.equal(status.skills.ok, true);
       assert.match(formatStatusReport(status), /PostPlus CLI status/);
-      assert.doesNotMatch(formatStatusReport(status), /install status/i);
+      assert.match(formatStatusReport(status), /PostPlus skills status/);
+      assert.match(formatStatusReport(status), /PostPlus update status/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -155,12 +194,45 @@ describe('doctor and status', () => {
     };
 
     try {
-      const status = await generateStatusReport();
+      const status = await generateStatusReportWithDependencies({
+        generateSkillStatus: async () => ({
+          ok: true,
+          error: null,
+          installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
+          installedCount: 2,
+          missingSkills: [],
+          requiredCount: 2,
+          scopes: ['project'],
+          source: 'PostPlusAI/postplus-skills',
+          updateCommand: 'postplus update',
+          uninstallCommand: 'postplus uninstall',
+        }),
+        generateUpdateStatus: async () => ({
+          checkedAt: '2026-04-29T00:00:00.000Z',
+          ok: true,
+          source: 'cache',
+          cli: {
+            currentVersion: '0.1.12',
+            latestVersion: '0.1.13',
+            updateAvailable: true,
+            updateCommand: 'npm install -g @postplus/cli',
+          },
+          skills: {
+            currentRevision: 'abc123',
+            latestRevision: 'def456',
+            updateAvailable: true,
+            updateCommand: 'postplus update',
+          },
+          warning: null,
+        }),
+      });
       const formatted = formatStatusReport(status);
 
       assert.equal(status.ok, true);
       assert.match(formatted, /subscription unknown/);
       assert.doesNotMatch(formatted, /Not ready: subscription/);
+      assert.match(formatted, /npm install -g @postplus\/cli/);
+      assert.match(formatted, /postplus update/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -271,28 +343,95 @@ describe('public skill catalog', () => {
   });
 });
 
-describe('removed skill management commands', () => {
-  for (const command of ['install', 'update', 'uninstall']) {
-    it(`fails fast for postplus ${command}`, async () => {
-      await assert.rejects(
-        execFileAsync(process.execPath, [
-          '--import',
-          'tsx',
-          'src/index.ts',
-          command,
-        ]),
-        (error) => {
-          const execError = error as Error & {
-            stderr?: string;
-          };
+describe('skill management commands', () => {
+  it('builds the public skills installer command', () => {
+    assert.deepEqual(buildPostPlusSkillInstallArgs(), [
+      '-y',
+      'skills',
+      'add',
+      'PostPlusAI/postplus-skills',
+      '--full-depth',
+      '--skill',
+      '*',
+      '--agent',
+      'claude-code',
+      'codex',
+      'cursor',
+      '--yes',
+    ]);
+  });
 
-          assert.match(
-            execError.stderr ?? '',
-            /npx -y skills add PostPlusAI\/postplus-skills --full-depth --skill '\*' --agent claude-code codex cursor --yes/,
-          );
-          return true;
+  it('builds update and uninstall commands for released PostPlus skills only', () => {
+    assert.deepEqual(buildPostPlusSkillUpdateArgs(['a', 'b']), [
+      '-y',
+      'skills',
+      'update',
+      'a',
+      'b',
+      '--yes',
+    ]);
+    assert.deepEqual(buildPostPlusSkillUninstallArgs(['a', 'b']), [
+      '-y',
+      'skills',
+      'remove',
+      'a',
+      'b',
+      '--agent',
+      'claude-code',
+      'codex',
+      'cursor',
+      '--yes',
+    ]);
+  });
+
+  it('reports missing released skills from skills list output', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        [
+          '# Skills Index',
+          '',
+          '## Released Skills',
+          '',
+          '- `demo-skill`',
+          '  - Path: `skills/demo-skill/SKILL.md`',
+          '- `missing-skill`',
+          '  - Path: `skills/missing-skill/SKILL.md`',
+        ].join('\n'),
+        {
+          status: 200,
+          headers: { 'content-type': 'text/markdown' },
         },
       );
-    });
-  }
+
+    try {
+      const report = await generateSkillInstallStatusReport({
+        runCommand: async (_command, args) => {
+          if (args.includes('--global')) {
+            return {
+              stderr: '',
+              stdout: '[]',
+            };
+          }
+
+          return {
+            stderr: '',
+            stdout: JSON.stringify([
+              {
+                agents: ['Codex'],
+                name: 'demo-skill',
+                path: '/tmp/demo-skill',
+                scope: 'project',
+              },
+            ]),
+          };
+        },
+      });
+
+      assert.equal(report.ok, false);
+      assert.deepEqual(report.missingSkills, ['missing-skill']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
