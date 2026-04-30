@@ -11,7 +11,6 @@ export type AuthLoginReport = {
   accountId: string;
   apiBaseUrl: string;
   ok: boolean;
-  sessionExpiresAt: number | null;
   userEmail: string | null;
   userId: string;
 };
@@ -92,8 +91,6 @@ export async function loginWithBrowserHandoff(): Promise<AuthLoginReport> {
       accountId: validated.accountId,
       apiBaseUrl: baseUrl,
       ok: true,
-      sessionExpiresAt:
-        validated.sessionExpiresAt ?? handoffPayload.expiresAt ?? null,
       userEmail: validated.userEmail,
       userId: validated.userId,
     };

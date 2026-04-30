@@ -1,5 +1,12 @@
 import { constants as fsConstants } from 'node:fs';
-import { access, chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import {
+  access,
+  chmod,
+  mkdir,
+  readFile,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -30,7 +37,6 @@ export type ApiBaseUrlState = {
 
 export type LocalSessionState = {
   accessToken: AuthFieldState;
-  expiresAt: number | null;
   refreshToken: AuthFieldState;
 };
 
@@ -318,18 +324,13 @@ export async function resolveRefreshTokenState(): Promise<AuthFieldState> {
 }
 
 export async function resolveLocalSessionState(): Promise<LocalSessionState> {
-  const [accessToken, refreshToken, config] = await Promise.all([
+  const [accessToken, refreshToken] = await Promise.all([
     resolveAccessTokenState(),
     resolveRefreshTokenState(),
-    readLocalConfig(),
   ]);
 
   return {
     accessToken,
-    expiresAt:
-      typeof config?.sessionExpiresAt === 'number'
-        ? config.sessionExpiresAt
-        : null,
     refreshToken,
   };
 }

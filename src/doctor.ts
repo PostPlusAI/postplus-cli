@@ -1,5 +1,8 @@
+import {
+  type FreshRemoteAuth,
+  resolveFreshRemoteAuth,
+} from './auth-session.js';
 import { resolveHostedBaseUrl } from './hosted-release.js';
-import { resolveAccessTokenState } from './local-state.js';
 
 export type DoctorCheck = {
   id: 'hosted_base_url' | 'hosted_capabilities' | 'remote_auth';
@@ -51,7 +54,6 @@ export async function generateDoctorReport(): Promise<DoctorReport> {
       `Using ${hostedBaseUrl ?? 'https://postplus.io'}`,
     ),
   ];
-  const accessToken = await resolveAccessTokenState();
 
   if (!hostedBaseUrl) {
     checks.push(
@@ -65,31 +67,33 @@ export async function generateDoctorReport(): Promise<DoctorReport> {
     return buildDoctorReport(checks);
   }
 
-  if (!accessToken.present || !accessToken.value) {
+  const auth = await resolveFreshRemoteAuth().catch((error: unknown) => {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'No PostPlus CLI session is configured.';
+
     checks.push(
       createFail(
         'remote_auth',
         'Remote auth',
-        'No PostPlus CLI session is configured.',
+        message,
         'Run `postplus auth login`.',
       ),
     );
+
+    return null;
+  });
+
+  if (!auth) {
     return buildDoctorReport(checks);
   }
 
-  const authCheck = await checkRemoteAuth({
-    accessToken: accessToken.value,
-    hostedBaseUrl,
-  });
+  const authCheck = await checkRemoteAuth(auth);
   checks.push(authCheck);
 
   if (authCheck.status === 'pass') {
-    checks.push(
-      await checkHostedCapabilities({
-        accessToken: accessToken.value,
-        hostedBaseUrl,
-      }),
-    );
+    checks.push(await checkHostedCapabilities(auth));
   }
 
   return buildDoctorReport(checks);
@@ -102,21 +106,23 @@ function buildDoctorReport(checks: DoctorCheck[]): DoctorReport {
   };
 }
 
-async function checkRemoteAuth(input: {
-  accessToken: string;
-  hostedBaseUrl: string;
-}): Promise<DoctorCheck> {
+async function checkRemoteAuth(input: FreshRemoteAuth): Promise<DoctorCheck> {
   try {
-    const response = await fetch(
-      `${input.hostedBaseUrl}/api/postplus-cli/auth/whoami`,
-      {
-        headers: {
-          accept: 'application/json',
-          authorization: `Bearer ${input.accessToken}`,
-        },
-        signal: AbortSignal.timeout(15000),
-      },
+    let response = await requestWithAuth(
+      input,
+      '/api/postplus-cli/auth/whoami',
     );
+
+    if (response.status === 401) {
+      const refreshedAuth = await resolveFreshRemoteAuth({
+        forceRefresh: true,
+      });
+      response = await requestWithAuth(
+        refreshedAuth,
+        '/api/postplus-cli/auth/whoami',
+      );
+    }
+
     const payload = (await response.json()) as {
       accountId?: unknown;
       error?: unknown;
@@ -164,21 +170,25 @@ async function checkRemoteAuth(input: {
   }
 }
 
-async function checkHostedCapabilities(input: {
-  accessToken: string;
-  hostedBaseUrl: string;
-}): Promise<DoctorCheck> {
+async function checkHostedCapabilities(
+  input: FreshRemoteAuth,
+): Promise<DoctorCheck> {
   try {
-    const response = await fetch(
-      `${input.hostedBaseUrl}/api/postplus-cli/hosted/readiness`,
-      {
-        headers: {
-          accept: 'application/json',
-          authorization: `Bearer ${input.accessToken}`,
-        },
-        signal: AbortSignal.timeout(15000),
-      },
+    let response = await requestWithAuth(
+      input,
+      '/api/postplus-cli/hosted/readiness',
     );
+
+    if (response.status === 401) {
+      const refreshedAuth = await resolveFreshRemoteAuth({
+        forceRefresh: true,
+      });
+      response = await requestWithAuth(
+        refreshedAuth,
+        '/api/postplus-cli/hosted/readiness',
+      );
+    }
+
     const payload = (await response.json()) as {
       capabilities?: unknown;
       error?: unknown;
@@ -259,6 +269,16 @@ function readErrorMessage(
   return typeof payload.error === 'string' && payload.error.trim().length > 0
     ? payload.error
     : fallback;
+}
+
+function requestWithAuth(input: FreshRemoteAuth, path: string) {
+  return fetch(`${input.apiBaseUrl}${path}`, {
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${input.accessToken}`,
+    },
+    signal: AbortSignal.timeout(15000),
+  });
 }
 
 export function formatDoctorReport(report: DoctorReport): string {

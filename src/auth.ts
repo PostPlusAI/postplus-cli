@@ -35,7 +35,6 @@ export type AuthStatusReport = {
     userEmail: string | null;
     userId: string | null;
   };
-  sessionExpiresAt: number | null;
 };
 
 export async function generateAuthStatusReport(): Promise<AuthStatusReport> {
@@ -75,7 +74,6 @@ export async function generateAuthStatusReport(): Promise<AuthStatusReport> {
       present: sessionState.refreshToken.present,
       maskedValue: maskSecret(sessionState.refreshToken.value),
     },
-    sessionExpiresAt: sessionState.expiresAt,
   };
 }
 
@@ -120,13 +118,6 @@ export function formatAuthStatusReport(report: AuthStatusReport): string {
   lines.push(`  Account: ${report.config.accountId ?? 'not bound'}`);
   lines.push(
     `  User: ${report.config.userEmail ?? report.config.userId ?? 'not bound'}`,
-  );
-  lines.push(
-    `  Session expires at: ${
-      typeof report.sessionExpiresAt === 'number'
-        ? new Date(report.sessionExpiresAt * 1000).toISOString()
-        : 'unknown'
-    }`,
   );
   lines.push('', report.ok ? 'Auth status OK.' : 'Auth status incomplete.');
 

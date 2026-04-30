@@ -1,13 +1,12 @@
+import { refreshRemoteAuthSession } from './auth-session.js';
 import { clearAuthState, generateAuthStatusReport } from './auth.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import {
   resolveAccessTokenState,
   resolveRefreshTokenState,
-  setLocalSession,
 } from './local-state.js';
 
 export type AuthRefreshReport = {
-  accessTokenExpiresAt: number | null;
   accountId: string;
   apiBaseUrl: string;
   ok: boolean;
@@ -17,82 +16,15 @@ export type AuthRefreshReport = {
 };
 
 export async function refreshRemoteAuth(): Promise<AuthRefreshReport> {
-  const [apiBaseUrl, accessTokenState, refreshTokenState] = await Promise.all([
-    requireHostedBaseUrl(),
-    resolveAccessTokenState(),
-    resolveRefreshTokenState(),
-  ]);
-
-  if (!refreshTokenState.present || !refreshTokenState.value) {
-    throw new Error(
-      'Run `postplus auth login` before refreshing PostPlus auth.',
-    );
-  }
-
-  const response = await fetch(`${apiBaseUrl}/api/postplus-cli/auth/refresh`, {
-    method: 'POST',
-    headers: {
-      accept: 'application/json',
-      ...(accessTokenState.value
-        ? { authorization: `Bearer ${accessTokenState.value}` }
-        : {}),
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      refreshToken: refreshTokenState.value,
-    }),
-    signal: AbortSignal.timeout(15000),
-  });
-  const payload = (await response.json()) as
-    | {
-        accessToken: string;
-        accountId: string;
-        refreshToken: string;
-        sessionExpiresAt: number | null;
-        subscriptionStatus: string | null;
-        userEmail: string | null;
-        userId: string;
-      }
-    | {
-        error?: string;
-      };
-
-  if (!response.ok) {
-    throw new Error(
-      'error' in payload && typeof payload.error === 'string'
-        ? payload.error
-        : 'Failed to refresh remote PostPlus auth.',
-    );
-  }
-
-  const successPayload = payload as {
-    accessToken: string;
-    accountId: string;
-    refreshToken: string;
-    sessionExpiresAt: number | null;
-    subscriptionStatus: string | null;
-    userEmail: string | null;
-    userId: string;
-  };
-
-  await setLocalSession({
-    accessToken: successPayload.accessToken,
-    accountId: successPayload.accountId,
-    apiBaseUrl,
-    refreshToken: successPayload.refreshToken,
-    sessionExpiresAt: successPayload.sessionExpiresAt,
-    userEmail: successPayload.userEmail,
-    userId: successPayload.userId,
-  });
+  const refreshed = await refreshRemoteAuthSession();
 
   return {
-    accessTokenExpiresAt: successPayload.sessionExpiresAt,
-    accountId: successPayload.accountId,
-    apiBaseUrl,
+    accountId: refreshed.accountId,
+    apiBaseUrl: refreshed.apiBaseUrl,
     ok: true,
-    subscriptionStatus: successPayload.subscriptionStatus,
-    userEmail: successPayload.userEmail,
-    userId: successPayload.userId,
+    subscriptionStatus: refreshed.subscriptionStatus,
+    userEmail: refreshed.userEmail,
+    userId: refreshed.userId,
   };
 }
 
@@ -105,11 +37,6 @@ export function formatAuthRefreshReport(report: AuthRefreshReport): string {
     `Account: ${report.accountId}`,
     `User: ${report.userEmail ?? report.userId}`,
     `Subscription: ${report.subscriptionStatus ?? 'unknown'}`,
-    `Session expires at: ${
-      typeof report.accessTokenExpiresAt === 'number'
-        ? new Date(report.accessTokenExpiresAt * 1000).toISOString()
-        : 'unknown'
-    }`,
   ].join('\n');
 }
 
@@ -121,15 +48,11 @@ export async function revokeRemoteAuth() {
   ]);
 
   if (!accessTokenState.present || !accessTokenState.value) {
-    throw new Error(
-      'Run `postplus auth login` before revoking PostPlus auth.',
-    );
+    throw new Error('Run `postplus auth login` before revoking PostPlus auth.');
   }
 
   if (!refreshTokenState.present || !refreshTokenState.value) {
-    throw new Error(
-      'Run `postplus auth login` before revoking PostPlus auth.',
-    );
+    throw new Error('Run `postplus auth login` before revoking PostPlus auth.');
   }
 
   const response = await fetch(`${apiBaseUrl}/api/postplus-cli/auth/revoke`, {

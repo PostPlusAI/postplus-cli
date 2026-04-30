@@ -14,10 +14,7 @@ import {
   formatAuthStatusReport,
   generateAuthStatusReport,
 } from './auth.js';
-import {
-  formatDoctorReport,
-  generateDoctorReport,
-} from './doctor.js';
+import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import { assertConfigFilePermissions } from './local-state.js';
 import {
   POSTPLUS_SKILLS_INSTALL_COMMAND,
@@ -189,11 +186,6 @@ async function runAuthLogin(): Promise<number> {
       `Account: ${report.accountId}`,
       `PostPlus Cloud: ${report.apiBaseUrl}`,
       `User: ${report.userEmail ?? 'unknown'}`,
-      `Session expires at: ${
-        typeof report.sessionExpiresAt === 'number'
-          ? new Date(report.sessionExpiresAt * 1000).toISOString()
-          : 'unknown'
-      }`,
       '',
     ].join('\n'),
   );

@@ -1,11 +1,9 @@
-import { requireHostedBaseUrl } from './hosted-release.js';
-import { resolveAccessTokenState } from './local-state.js';
+import { resolveFreshRemoteAuth } from './auth-session.js';
 
 export type AuthValidateReport = {
   accountId: string;
   apiBaseUrl: string;
   ok: boolean;
-  sessionExpiresAt: number | null;
   source: 'env' | 'config';
   subscriptionStatus: string | null;
   userEmail: string | null;
@@ -13,29 +11,19 @@ export type AuthValidateReport = {
 };
 
 export async function validateRemoteAuth(): Promise<AuthValidateReport> {
-  const [apiBaseUrl, accessTokenState] = await Promise.all([
-    requireHostedBaseUrl(),
-    resolveAccessTokenState(),
-  ]);
+  let auth = await resolveFreshRemoteAuth();
+  let response = await fetchWhoami(auth);
 
-  if (!accessTokenState.present || !accessTokenState.value) {
-    throw new Error(
-      'Run `postplus auth login` before validating PostPlus auth.',
-    );
+  if (response.status === 401) {
+    auth = await resolveFreshRemoteAuth({
+      forceRefresh: true,
+    });
+    response = await fetchWhoami(auth);
   }
 
-  const response = await fetch(`${apiBaseUrl}/api/postplus-cli/auth/whoami`, {
-    method: 'GET',
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${accessTokenState.value}`,
-    },
-    signal: AbortSignal.timeout(15000),
-  });
   const payload = (await response.json()) as
     | {
         accountId: string;
-        sessionExpiresAt: number | null;
         subscriptionStatus: string | null;
         userEmail: string | null;
         userId: string;
@@ -54,7 +42,6 @@ export async function validateRemoteAuth(): Promise<AuthValidateReport> {
 
   const successPayload = payload as {
     accountId: string;
-    sessionExpiresAt: number | null;
     subscriptionStatus: string | null;
     userEmail: string | null;
     userId: string;
@@ -62,13 +49,9 @@ export async function validateRemoteAuth(): Promise<AuthValidateReport> {
 
   return {
     accountId: successPayload.accountId,
-    apiBaseUrl,
+    apiBaseUrl: auth.apiBaseUrl,
     ok: true,
-    sessionExpiresAt: successPayload.sessionExpiresAt,
-    source:
-      accessTokenState.source === 'missing'
-        ? 'config'
-        : accessTokenState.source,
+    source: auth.source,
     subscriptionStatus: successPayload.subscriptionStatus,
     userEmail: successPayload.userEmail,
     userId: successPayload.userId,
@@ -84,10 +67,16 @@ export function formatAuthValidateReport(report: AuthValidateReport): string {
     `Account: ${report.accountId}`,
     `User: ${report.userEmail ?? report.userId}`,
     `Subscription: ${report.subscriptionStatus ?? 'unknown'}`,
-    `Session expires at: ${
-      typeof report.sessionExpiresAt === 'number'
-        ? new Date(report.sessionExpiresAt * 1000).toISOString()
-        : 'unknown'
-    }`,
   ].join('\n');
+}
+
+function fetchWhoami(input: { accessToken: string; apiBaseUrl: string }) {
+  return fetch(`${input.apiBaseUrl}/api/postplus-cli/auth/whoami`, {
+    method: 'GET',
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${input.accessToken}`,
+    },
+    signal: AbortSignal.timeout(15000),
+  });
 }

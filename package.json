@@ -8,6 +8,7 @@
   "files": [
     "build/auth-lifecycle.js",
     "build/auth-login.js",
+    "build/auth-session.js",
     "build/auth-validate.js",
     "build/auth.js",
     "build/command-runner.js",

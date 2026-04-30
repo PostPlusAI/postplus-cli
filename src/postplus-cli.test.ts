@@ -10,8 +10,10 @@ import {
   CLI_AUTH_HANDOFF_TIMEOUT_MS,
   createCliAuthHandoffServer,
 } from './auth-login.js';
-import { generateAuthStatusReport } from './auth.js';
+import { validateRemoteAuth } from './auth-validate.js';
+import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
+import { readLocalConfig, setLocalSession } from './local-state.js';
 import {
   POSTPLUS_SKILLS_INSTALL_COMMAND,
   loadPublicSkillCatalog,
@@ -261,7 +263,199 @@ describe('doctor and status', () => {
     assert.equal(report.accessToken.present, false);
     assert.equal(report.refreshToken.present, false);
   });
+
+  it('omits access token expiry from auth status output', async () => {
+    await setLocalSession({
+      accessToken: createTestJwt(Math.floor(Date.now() / 1_000) + 3600),
+      accountId: 'account-1',
+      apiBaseUrl: 'https://postplus.example.com',
+      refreshToken: 'refresh-token-value',
+      sessionExpiresAt: Math.floor(Date.now() / 1_000) + 3600,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+
+    const formatted = formatAuthStatusReport(await generateAuthStatusReport());
+
+    assert.doesNotMatch(formatted, /expires/i);
+  });
+
+  it('refreshes an expired session before doctor checks remote auth', async () => {
+    const refreshedAccessToken = createTestJwt(
+      Math.floor(Date.now() / 1_000) + 3600,
+    );
+    await setLocalSession({
+      accessToken: createTestJwt(Math.floor(Date.now() / 1_000) - 60),
+      accountId: 'account-1',
+      apiBaseUrl: 'https://postplus.example.com',
+      refreshToken: 'refresh-token-value',
+      sessionExpiresAt: Math.floor(Date.now() / 1_000) - 60,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      requestedUrls.push(url);
+
+      if (url.endsWith('/api/postplus-cli/auth/refresh')) {
+        assert.deepEqual(JSON.parse(String(init?.body)), {
+          refreshToken: 'refresh-token-value',
+        });
+
+        return new Response(
+          JSON.stringify({
+            accessToken: refreshedAccessToken,
+            accountId: 'account-1',
+            refreshToken: 'refresh-token-next',
+            sessionExpiresAt: Math.floor(Date.now() / 1_000) + 3600,
+            subscriptionStatus: 'active',
+            userEmail: 'user@example.com',
+            userId: 'user-1',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      assert.equal(
+        (init?.headers as Record<string, string>).authorization,
+        `Bearer ${refreshedAccessToken}`,
+      );
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return new Response(
+          JSON.stringify({
+            accountId: 'account-1',
+            subscriptionStatus: 'active',
+            userEmail: 'user@example.com',
+            userId: 'user-1',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            subscriptionActive: true,
+            subscriptionStatus: 'active',
+            capabilities: [],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const report = await generateDoctorReport();
+      const config = await readLocalConfig();
+
+      assert.equal(report.ok, true);
+      assert.deepEqual(requestedUrls, [
+        'https://postplus.example.com/api/postplus-cli/auth/refresh',
+        'https://postplus.example.com/api/postplus-cli/auth/whoami',
+        'https://postplus.example.com/api/postplus-cli/hosted/readiness',
+      ]);
+      assert.equal(config?.accessToken, refreshedAccessToken);
+      assert.equal(config?.refreshToken, 'refresh-token-next');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('refreshes an expired session before auth validate', async () => {
+    const refreshedAccessToken = createTestJwt(
+      Math.floor(Date.now() / 1_000) + 3600,
+    );
+    await setLocalSession({
+      accessToken: createTestJwt(Math.floor(Date.now() / 1_000) - 60),
+      accountId: 'account-1',
+      apiBaseUrl: 'https://postplus.example.com',
+      refreshToken: 'refresh-token-value',
+      sessionExpiresAt: Math.floor(Date.now() / 1_000) - 60,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+
+      if (url.endsWith('/api/postplus-cli/auth/refresh')) {
+        return new Response(
+          JSON.stringify({
+            accessToken: refreshedAccessToken,
+            accountId: 'account-1',
+            refreshToken: 'refresh-token-next',
+            sessionExpiresAt: Math.floor(Date.now() / 1_000) + 3600,
+            subscriptionStatus: 'active',
+            userEmail: 'user@example.com',
+            userId: 'user-1',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      assert.equal(
+        url,
+        'https://postplus.example.com/api/postplus-cli/auth/whoami',
+      );
+      assert.equal(
+        (init?.headers as Record<string, string>).authorization,
+        `Bearer ${refreshedAccessToken}`,
+      );
+
+      return new Response(
+        JSON.stringify({
+          accountId: 'account-1',
+          subscriptionStatus: 'active',
+          userEmail: 'user@example.com',
+          userId: 'user-1',
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    };
+
+    try {
+      const report = await validateRemoteAuth();
+
+      assert.equal(report.ok, true);
+      assert.equal(report.accountId, 'account-1');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
+
+function createTestJwt(exp: number): string {
+  const encode = (value: unknown) =>
+    Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+
+  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({ exp })}.signature`;
+}
 
 describe('browser auth handoff', () => {
   it('keeps the CLI handoff window at 30 minutes', () => {
