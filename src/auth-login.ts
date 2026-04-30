@@ -1,11 +1,7 @@
-import { randomUUID } from 'node:crypto';
-import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
-
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { setLocalSession } from './local-state.js';
 
-export const CLI_AUTH_HANDOFF_TIMEOUT_MS = 30 * 60 * 1000;
+export const CLI_AUTH_LOGIN_TIMEOUT_MS = 30 * 60 * 1000;
 
 export type AuthLoginReport = {
   accountId: string;
@@ -15,17 +11,35 @@ export type AuthLoginReport = {
   userId: string;
 };
 
-type BrowserHandoffPayload =
+type CliAuthLoginStartPayload =
   | {
-      error: string;
+      error?: string;
+    }
+  | {
+      expiresAt: string;
+      pollIntervalSeconds: number;
+      pollSecret: string;
       requestId: string;
+      userCode: string;
+      verificationUrl: string;
+    };
+
+type CliAuthLoginPollPayload =
+  | {
+      error?: string;
     }
   | {
       accessToken: string;
-      expiresAt: number | null;
+      accountId: string;
       refreshToken: string;
-      requestId: string;
+      sessionExpiresAt: number | null;
+      status: 'completed';
+      subscriptionStatus: string | null;
       userEmail: string | null;
+      userId: string;
+    }
+  | {
+      status: 'pending';
     };
 
 type ValidatedCliSession = {
@@ -41,74 +55,141 @@ type SessionWhoAmIErrorPayload = {
   error?: string;
 };
 
-export async function loginWithBrowserHandoff(): Promise<AuthLoginReport> {
+export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
   const baseUrl = await requireHostedBaseUrl();
-  const handoff = await createCliAuthHandoffServer({
-    allowedOrigin: new URL(baseUrl).origin,
-  });
-  const loginUrl = buildCliLoginUrl({
-    baseUrl,
-    bridgeUrl: handoff.bridgeUrl,
-    requestId: handoff.requestId,
-  });
+  const started = await startCloudAuthLogin(baseUrl);
 
   process.stdout.write(
     [
       'PostPlus CLI login',
       '',
       'Open this URL in your browser to continue:',
-      loginUrl,
+      started.verificationUrl,
       '',
-      'Waiting for browser sign-in (up to 30 minutes)...',
+      `Code: ${started.userCode}`,
+      '',
+      'Waiting for browser sign-in...',
       '',
     ].join('\n'),
   );
 
-  try {
-    const handoffPayload = await handoff.waitForPayload();
+  const handoffPayload = await waitForCloudAuthLogin({
+    apiBaseUrl: baseUrl,
+    expiresAt: started.expiresAt,
+    pollIntervalSeconds: started.pollIntervalSeconds,
+    pollSecret: started.pollSecret,
+    requestId: started.requestId,
+  });
+  const validated = await validateCliSession({
+    accessToken: handoffPayload.accessToken,
+    apiBaseUrl: baseUrl,
+  });
 
-    if ('error' in handoffPayload) {
-      throw new Error(handoffPayload.error);
-    }
+  await setLocalSession({
+    accessToken: handoffPayload.accessToken,
+    accountId: validated.accountId,
+    apiBaseUrl: baseUrl,
+    refreshToken: handoffPayload.refreshToken,
+    sessionExpiresAt:
+      validated.sessionExpiresAt ?? handoffPayload.sessionExpiresAt ?? null,
+    userEmail: validated.userEmail,
+    userId: validated.userId,
+  });
 
-    const validated = await validateCliSession({
-      accessToken: handoffPayload.accessToken,
-      apiBaseUrl: baseUrl,
-    });
-
-    await setLocalSession({
-      accessToken: handoffPayload.accessToken,
-      accountId: validated.accountId,
-      apiBaseUrl: baseUrl,
-      refreshToken: handoffPayload.refreshToken,
-      sessionExpiresAt:
-        validated.sessionExpiresAt ?? handoffPayload.expiresAt ?? null,
-      userEmail: validated.userEmail,
-      userId: validated.userId,
-    });
-
-    return {
-      accountId: validated.accountId,
-      apiBaseUrl: baseUrl,
-      ok: true,
-      userEmail: validated.userEmail,
-      userId: validated.userId,
-    };
-  } finally {
-    await handoff.close();
-  }
+  return {
+    accountId: validated.accountId,
+    apiBaseUrl: baseUrl,
+    ok: true,
+    userEmail: validated.userEmail,
+    userId: validated.userId,
+  };
 }
 
-function buildCliLoginUrl(input: {
-  baseUrl: string;
-  bridgeUrl: string;
-  requestId: string;
-}): string {
-  const nextPath = `/auth/cli-callback?bridgeUrl=${encodeURIComponent(
-    input.bridgeUrl,
-  )}&requestId=${encodeURIComponent(input.requestId)}`;
+export async function startCloudAuthLogin(apiBaseUrl: string) {
+  const response = await fetch(
+    `${apiBaseUrl}/api/postplus-cli/auth/login/start`,
+    {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(15000),
+    },
+  );
+  const payload = (await response.json()) as CliAuthLoginStartPayload;
 
-  return `${input.baseUrl}/auth/sign-in?next=${encodeURIComponent(nextPath)}`;
+  if (!response.ok) {
+    throw new Error(formatRemoteAuthLoginError(payload));
+  }
+
+  if (!isCliAuthLoginStartSuccessPayload(payload)) {
+    throw new Error('PostPlus CLI sign-in start returned incomplete data.');
+  }
+
+  return payload;
+}
+
+async function waitForCloudAuthLogin(input: {
+  apiBaseUrl: string;
+  expiresAt: string;
+  pollIntervalSeconds: number;
+  pollSecret: string;
+  requestId: string;
+}) {
+  const expiresAtMs = Date.parse(input.expiresAt);
+  const deadlineMs = Number.isFinite(expiresAtMs)
+    ? expiresAtMs
+    : Date.now() + CLI_AUTH_LOGIN_TIMEOUT_MS;
+  const pollIntervalMs = Math.max(1000, input.pollIntervalSeconds * 1000);
+
+  while (Date.now() < deadlineMs) {
+    const payload = await pollCloudAuthLogin(input);
+
+    if (payload.status === 'completed') {
+      return payload;
+    }
+
+    await delay(pollIntervalMs);
+  }
+
+  throw new Error('Timed out waiting for the cloud sign-in handoff.');
+}
+
+export async function pollCloudAuthLogin(input: {
+  apiBaseUrl: string;
+  pollSecret: string;
+  requestId: string;
+}) {
+  const response = await fetch(
+    `${input.apiBaseUrl}/api/postplus-cli/auth/login/poll`,
+    {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        pollSecret: input.pollSecret,
+        requestId: input.requestId,
+      }),
+      signal: AbortSignal.timeout(15000),
+    },
+  );
+  const payload = (await response.json()) as CliAuthLoginPollPayload;
+
+  if (!response.ok) {
+    throw new Error(formatRemoteAuthLoginError(payload));
+  }
+
+  if (isCliAuthLoginCompletedPayload(payload)) {
+    return payload;
+  }
+
+  if (isCliAuthLoginPendingPayload(payload)) {
+    return payload;
+  }
+
+  throw new Error('PostPlus CLI sign-in poll returned incomplete data.');
 }
 
 export async function validateCliSession(input: {
@@ -157,160 +238,49 @@ export function formatCliSessionAuthError(
   return 'Failed to validate the browser session for PostPlus CLI.';
 }
 
-export async function createCliAuthHandoffServer(input: {
-  allowedOrigin: string;
-}) {
-  const requestId = randomUUID();
+function isCliAuthLoginStartSuccessPayload(
+  payload: CliAuthLoginStartPayload,
+): payload is Extract<CliAuthLoginStartPayload, { requestId: string }> {
+  return (
+    'requestId' in payload &&
+    typeof payload.requestId === 'string' &&
+    typeof payload.pollSecret === 'string' &&
+    typeof payload.userCode === 'string' &&
+    typeof payload.verificationUrl === 'string' &&
+    typeof payload.expiresAt === 'string' &&
+    typeof payload.pollIntervalSeconds === 'number'
+  );
+}
 
-  return new Promise<{
-    bridgeUrl: string;
-    close: () => Promise<void>;
-    requestId: string;
-    waitForPayload: () => Promise<BrowserHandoffPayload>;
-  }>((resolve, reject) => {
-    let settled = false;
-    let cleanupTimer: NodeJS.Timeout | null = null;
-    let resolvePayload: ((payload: BrowserHandoffPayload) => void) | null =
-      null;
-    let rejectPayload: ((error: Error) => void) | null = null;
-    const payloadPromise = new Promise<BrowserHandoffPayload>(
-      (innerResolve, innerReject) => {
-        resolvePayload = innerResolve;
-        rejectPayload = innerReject;
-      },
-    );
+function isCliAuthLoginCompletedPayload(
+  payload: CliAuthLoginPollPayload,
+): payload is Extract<CliAuthLoginPollPayload, { status: 'completed' }> {
+  return (
+    'status' in payload &&
+    payload.status === 'completed' &&
+    typeof payload.accessToken === 'string' &&
+    typeof payload.refreshToken === 'string' &&
+    typeof payload.accountId === 'string' &&
+    typeof payload.userId === 'string'
+  );
+}
 
-    const server = createServer((request, response) => {
-      const origin = request.headers.origin ?? null;
-      const allowOrigin =
-        origin === input.allowedOrigin ? input.allowedOrigin : null;
+function isCliAuthLoginPendingPayload(
+  payload: CliAuthLoginPollPayload,
+): payload is Extract<CliAuthLoginPollPayload, { status: 'pending' }> {
+  return 'status' in payload && payload.status === 'pending';
+}
 
-      if (request.method === 'OPTIONS') {
-        if (!allowOrigin) {
-          response.writeHead(403);
-          response.end();
-          return;
-        }
+function formatRemoteAuthLoginError(
+  payload: CliAuthLoginStartPayload | CliAuthLoginPollPayload,
+) {
+  return 'error' in payload &&
+    typeof payload.error === 'string' &&
+    payload.error.trim().length > 0
+    ? payload.error
+    : 'PostPlus CLI sign-in failed.';
+}
 
-        response.writeHead(204, {
-          'Access-Control-Allow-Headers': 'Content-Type',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
-          'Access-Control-Allow-Private-Network': 'true',
-          'Access-Control-Allow-Origin': allowOrigin,
-          'Access-Control-Max-Age': '600',
-          Vary: 'Origin',
-        });
-        response.end();
-        return;
-      }
-
-      if (request.method !== 'POST' || request.url !== '/handoff') {
-        response.writeHead(404);
-        response.end();
-        return;
-      }
-
-      if (!allowOrigin) {
-        response.writeHead(403);
-        response.end();
-        return;
-      }
-
-      const chunks: Buffer[] = [];
-
-      request.on('data', (chunk) => {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      });
-      request.on('end', () => {
-        try {
-          const payload = JSON.parse(
-            Buffer.concat(chunks).toString('utf8'),
-          ) as BrowserHandoffPayload;
-
-          if (payload.requestId !== requestId) {
-            throw new Error('Mismatched CLI auth handoff request id.');
-          }
-
-          response.writeHead(200, {
-            'Access-Control-Allow-Origin': allowOrigin,
-            'Content-Type': 'application/json',
-            Vary: 'Origin',
-          });
-          response.end(JSON.stringify({ ok: true }));
-
-          if (!settled) {
-            settled = true;
-            resolvePayload?.(payload);
-          }
-        } catch (error) {
-          response.writeHead(400, {
-            'Access-Control-Allow-Origin': allowOrigin,
-            'Content-Type': 'application/json',
-            Vary: 'Origin',
-          });
-          response.end(
-            JSON.stringify({
-              error:
-                error instanceof Error
-                  ? error.message
-                  : 'Invalid CLI auth handoff payload.',
-            }),
-          );
-        }
-      });
-    });
-
-    server.on('error', (error) => {
-      if (!settled) {
-        settled = true;
-        reject(error);
-      } else {
-        rejectPayload?.(error as Error);
-      }
-    });
-
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-
-      if (!address || typeof address === 'string') {
-        const error = new Error('Failed to bind the local CLI auth bridge.');
-        if (!settled) {
-          settled = true;
-          reject(error);
-        }
-        return;
-      }
-
-      cleanupTimer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          rejectPayload?.(
-            new Error('Timed out waiting for the browser sign-in handoff.'),
-          );
-        }
-        server.close();
-      }, CLI_AUTH_HANDOFF_TIMEOUT_MS);
-
-      resolve({
-        bridgeUrl: `http://127.0.0.1:${(address as AddressInfo).port}/handoff`,
-        close: async () =>
-          new Promise<void>((innerResolve, innerReject) => {
-            if (cleanupTimer) {
-              clearTimeout(cleanupTimer);
-            }
-
-            server.close((error) => {
-              if (error) {
-                innerReject(error);
-                return;
-              }
-
-              innerResolve();
-            });
-          }),
-        requestId,
-        waitForPayload: () => payloadPromise,
-      });
-    });
-  });
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

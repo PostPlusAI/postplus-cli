@@ -7,8 +7,9 @@ import { after, beforeEach, describe, it } from 'node:test';
 import { promisify } from 'node:util';
 
 import {
-  CLI_AUTH_HANDOFF_TIMEOUT_MS,
-  createCliAuthHandoffServer,
+  CLI_AUTH_LOGIN_TIMEOUT_MS,
+  pollCloudAuthLogin,
+  startCloudAuthLogin,
 } from './auth-login.js';
 import { validateRemoteAuth } from './auth-validate.js';
 import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
@@ -48,14 +49,25 @@ after(async () => {
 
 describe('doctor and status', () => {
   it('reports PostPlus Cloud auth readiness with skill and update state', async () => {
-    process.env.POSTPLUS_ACCESS_TOKEN = 'access-token-value';
-    process.env.POSTPLUS_REFRESH_TOKEN = 'refresh-token-value';
-    process.env.POSTPLUS_API_BASE_URL = 'https://postplus.example.com';
+    await setLocalSession({
+      accessToken: 'access-token-value',
+      accountId: 'account-1',
+      apiBaseUrl: 'https://postplus.example.com',
+      refreshToken: 'refresh-token-value',
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input) => {
+    globalThis.fetch = async (input, init) => {
       const url = String(input);
 
       if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        assert.equal(
+          (init?.headers as Record<string, string>).authorization,
+          'Bearer access-token-value',
+        );
+
         return new Response(
           JSON.stringify({
             accountId: 'account-1',
@@ -144,9 +156,15 @@ describe('doctor and status', () => {
   });
 
   it('reports inactive subscriptions without failing hosted readiness', async () => {
-    process.env.POSTPLUS_ACCESS_TOKEN = 'access-token-value';
-    process.env.POSTPLUS_REFRESH_TOKEN = 'refresh-token-value';
-    process.env.POSTPLUS_API_BASE_URL = 'https://postplus.example.com';
+    await setLocalSession({
+      accessToken: 'access-token-value',
+      accountId: 'account-1',
+      apiBaseUrl: 'https://postplus.example.com',
+      refreshToken: 'refresh-token-value',
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input) => {
       const url = String(input);
@@ -281,11 +299,16 @@ describe('doctor and status', () => {
   });
 
   it('refreshes an expired session before doctor checks remote auth', async () => {
+    process.env.POSTPLUS_ACCESS_TOKEN = 'stale-env-access-token';
+    process.env.POSTPLUS_REFRESH_TOKEN = 'stale-env-refresh-token';
     const refreshedAccessToken = createTestJwt(
       Math.floor(Date.now() / 1_000) + 3600,
     );
+    const configAccessToken = createTestJwt(
+      Math.floor(Date.now() / 1_000) - 60,
+    );
     await setLocalSession({
-      accessToken: createTestJwt(Math.floor(Date.now() / 1_000) - 60),
+      accessToken: configAccessToken,
       accountId: 'account-1',
       apiBaseUrl: 'https://postplus.example.com',
       refreshToken: 'refresh-token-value',
@@ -301,6 +324,10 @@ describe('doctor and status', () => {
       requestedUrls.push(url);
 
       if (url.endsWith('/api/postplus-cli/auth/refresh')) {
+        assert.equal(
+          (init?.headers as Record<string, string>).authorization,
+          `Bearer ${configAccessToken}`,
+        );
         assert.deepEqual(JSON.parse(String(init?.body)), {
           refreshToken: 'refresh-token-value',
         });
@@ -457,61 +484,108 @@ function createTestJwt(exp: number): string {
   return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({ exp })}.signature`;
 }
 
-describe('browser auth handoff', () => {
-  it('keeps the CLI handoff window at 30 minutes', () => {
-    assert.equal(CLI_AUTH_HANDOFF_TIMEOUT_MS, 30 * 60 * 1000);
+describe('cloud auth handoff', () => {
+  it('keeps the CLI login window at 30 minutes', () => {
+    assert.equal(CLI_AUTH_LOGIN_TIMEOUT_MS, 30 * 60 * 1000);
   });
 
-  it('allows private network preflight from the configured hosted origin', async () => {
-    const handoff = await createCliAuthHandoffServer({
-      allowedOrigin: 'https://postplus.example.com',
-    });
+  it('starts a cloud sign-in request without binding a local bridge', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(
+        String(input),
+        'https://postplus.example.com/api/postplus-cli/auth/login/start',
+      );
+      assert.equal(init?.method, 'POST');
+
+      return new Response(
+        JSON.stringify({
+          expiresAt: '2026-04-30T09:00:00.000Z',
+          pollIntervalSeconds: 3,
+          pollSecret: 'poll-secret',
+          requestId: 'request-1',
+          userCode: '123456',
+          verificationUrl:
+            'https://postplus.example.com/auth/cli-login?requestId=request-1&userCode=123456',
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    };
 
     try {
-      const response = await fetch(handoff.bridgeUrl, {
-        method: 'OPTIONS',
-        headers: {
-          Origin: 'https://postplus.example.com',
-          'Access-Control-Request-Headers': 'content-type',
-          'Access-Control-Request-Method': 'POST',
-          'Access-Control-Request-Private-Network': 'true',
-        },
-      });
+      const started = await startCloudAuthLogin('https://postplus.example.com');
 
-      assert.equal(response.status, 204);
-      assert.equal(
-        response.headers.get('access-control-allow-origin'),
-        'https://postplus.example.com',
-      );
-      assert.equal(
-        response.headers.get('access-control-allow-private-network'),
-        'true',
-      );
+      assert.equal(started.requestId, 'request-1');
+      assert.equal(started.pollSecret, 'poll-secret');
+      assert.equal(started.userCode, '123456');
     } finally {
-      await handoff.close();
+      globalThis.fetch = originalFetch;
     }
   });
 
-  it('rejects private network preflight from a different origin', async () => {
-    const handoff = await createCliAuthHandoffServer({
-      allowedOrigin: 'https://postplus.example.com',
-    });
+  it('polls a completed cloud sign-in request', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(
+        String(input),
+        'https://postplus.example.com/api/postplus-cli/auth/login/poll',
+      );
+      assert.equal(init?.method, 'POST');
+
+      return new Response(
+        JSON.stringify({
+          accessToken: 'access-token-value',
+          accountId: 'account-1',
+          refreshToken: 'refresh-token-value',
+          sessionExpiresAt: 1_900_000_000,
+          status: 'completed',
+          subscriptionStatus: 'active',
+          userEmail: 'user@example.com',
+          userId: 'user-1',
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    };
 
     try {
-      const response = await fetch(handoff.bridgeUrl, {
-        method: 'OPTIONS',
-        headers: {
-          Origin: 'https://evil.example.com',
-          'Access-Control-Request-Headers': 'content-type',
-          'Access-Control-Request-Method': 'POST',
-          'Access-Control-Request-Private-Network': 'true',
-        },
+      const completed = await pollCloudAuthLogin({
+        apiBaseUrl: 'https://postplus.example.com',
+        pollSecret: 'poll-secret',
+        requestId: 'request-1',
       });
 
-      assert.equal(response.status, 403);
-      assert.equal(response.headers.get('access-control-allow-origin'), null);
+      assert.equal(completed.status, 'completed');
+      assert.equal(completed.accessToken, 'access-token-value');
+      assert.equal(completed.refreshToken, 'refresh-token-value');
     } finally {
-      await handoff.close();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('keeps pending cloud sign-in requests pollable', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ status: 'pending' }), {
+        status: 202,
+        headers: { 'content-type': 'application/json' },
+      });
+
+    try {
+      const pending = await pollCloudAuthLogin({
+        apiBaseUrl: 'https://postplus.example.com',
+        pollSecret: 'poll-secret',
+        requestId: 'request-1',
+      });
+
+      assert.equal(pending.status, 'pending');
+    } finally {
+      globalThis.fetch = originalFetch;
     }
   });
 });

@@ -4,7 +4,7 @@ export type AuthValidateReport = {
   accountId: string;
   apiBaseUrl: string;
   ok: boolean;
-  source: 'env' | 'config';
+  source: 'config';
   subscriptionStatus: string | null;
   userEmail: string | null;
   userId: string;

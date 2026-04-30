@@ -12,7 +12,7 @@ export type FreshRemoteAuth = {
   accessToken: string;
   apiBaseUrl: string;
   refreshed: boolean;
-  source: 'env' | 'config';
+  source: 'config';
 };
 
 export type RemoteAuthRefreshResult = {
@@ -64,7 +64,7 @@ export async function resolveFreshRemoteAuth(
       accessToken: accessTokenState.value,
       apiBaseUrl,
       refreshed: false,
-      source: accessTokenState.source === 'env' ? 'env' : 'config',
+      source: 'config',
     };
   }
 
@@ -96,7 +96,7 @@ export async function resolveFreshRemoteAuth(
       accessToken: existingAccessToken,
       apiBaseUrl,
       refreshed: false,
-      source: accessTokenState.source === 'env' ? 'env' : 'config',
+      source: 'config',
     };
   }
 

@@ -6,20 +6,18 @@ import {
   readLocalConfig,
   resolveApiBaseUrlState,
   resolveLocalSessionState,
-  setLocalAccessToken,
   setLocalApiBaseUrl,
-  setLocalRefreshToken,
 } from './local-state.js';
 
 export type AuthStatusReport = {
   ok: boolean;
   accessToken: {
-    source: 'env' | 'config' | 'missing';
+    source: 'config' | 'missing';
     present: boolean;
     maskedValue: string | null;
   };
   refreshToken: {
-    source: 'env' | 'config' | 'missing';
+    source: 'config' | 'missing';
     present: boolean;
     maskedValue: string | null;
   };
@@ -122,20 +120,6 @@ export function formatAuthStatusReport(report: AuthStatusReport): string {
   lines.push('', report.ok ? 'Auth status OK.' : 'Auth status incomplete.');
 
   return lines.join('\n');
-}
-
-export async function configureAccessToken(
-  accessToken: string,
-): Promise<AuthStatusReport> {
-  await setLocalAccessToken(accessToken);
-  return generateAuthStatusReport();
-}
-
-export async function configureRefreshToken(
-  refreshToken: string,
-): Promise<AuthStatusReport> {
-  await setLocalRefreshToken(refreshToken);
-  return generateAuthStatusReport();
 }
 
 export async function configureApiBaseUrl(

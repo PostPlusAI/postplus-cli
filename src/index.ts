@@ -4,7 +4,7 @@ import {
   refreshRemoteAuth,
   revokeRemoteAuthAndReport,
 } from './auth-lifecycle.js';
-import { loginWithBrowserHandoff } from './auth-login.js';
+import { loginWithCloudHandoff } from './auth-login.js';
 import {
   formatAuthValidateReport,
   validateRemoteAuth,
@@ -178,7 +178,7 @@ async function runAuthRevoke(json: boolean): Promise<number> {
 }
 
 async function runAuthLogin(): Promise<number> {
-  const report = await loginWithBrowserHandoff();
+  const report = await loginWithCloudHandoff();
   process.stdout.write(
     [
       '',

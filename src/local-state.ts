@@ -22,7 +22,7 @@ export type PostPlusLocalConfig = {
 };
 
 export type AuthFieldState = {
-  source: 'env' | 'config' | 'missing';
+  source: 'config' | 'missing';
   present: boolean;
   value: string | null;
 };
@@ -178,34 +178,6 @@ export async function clearLocalAuthState(): Promise<PostPlusLocalConfig> {
   });
 }
 
-export async function setLocalAccessToken(
-  accessToken: string,
-): Promise<PostPlusLocalConfig> {
-  const normalizedAccessToken = accessToken.trim();
-  if (normalizedAccessToken.length === 0) {
-    throw new Error('POSTPLUS_ACCESS_TOKEN cannot be empty.');
-  }
-
-  return updateLocalConfig((current) => ({
-    ...(current ?? {}),
-    accessToken: normalizedAccessToken,
-  }));
-}
-
-export async function setLocalRefreshToken(
-  refreshToken: string,
-): Promise<PostPlusLocalConfig> {
-  const normalizedRefreshToken = refreshToken.trim();
-  if (normalizedRefreshToken.length === 0) {
-    throw new Error('POSTPLUS_REFRESH_TOKEN cannot be empty.');
-  }
-
-  return updateLocalConfig((current) => ({
-    ...(current ?? {}),
-    refreshToken: normalizedRefreshToken,
-  }));
-}
-
 export async function setLocalApiBaseUrl(
   apiBaseUrl: string,
 ): Promise<PostPlusLocalConfig> {
@@ -237,11 +209,11 @@ export async function setLocalSession(input: {
   const apiBaseUrl = input.apiBaseUrl.trim().replace(/\/+$/, '');
 
   if (accessToken.length === 0) {
-    throw new Error('POSTPLUS_ACCESS_TOKEN cannot be empty.');
+    throw new Error('PostPlus CLI access token cannot be empty.');
   }
 
   if (refreshToken.length === 0) {
-    throw new Error('POSTPLUS_REFRESH_TOKEN cannot be empty.');
+    throw new Error('PostPlus CLI refresh token cannot be empty.');
   }
 
   if (apiBaseUrl.length === 0) {
@@ -270,15 +242,6 @@ export async function hasLocalConfigFile(): Promise<boolean> {
 }
 
 export async function resolveAccessTokenState(): Promise<AuthFieldState> {
-  const envValue = process.env.POSTPLUS_ACCESS_TOKEN?.trim();
-  if (envValue && envValue.length > 0) {
-    return {
-      source: 'env',
-      present: true,
-      value: envValue,
-    };
-  }
-
   const config = await readLocalConfig();
   const configValue = config?.accessToken?.trim();
   if (configValue && configValue.length > 0) {
@@ -297,15 +260,6 @@ export async function resolveAccessTokenState(): Promise<AuthFieldState> {
 }
 
 export async function resolveRefreshTokenState(): Promise<AuthFieldState> {
-  const envValue = process.env.POSTPLUS_REFRESH_TOKEN?.trim();
-  if (envValue && envValue.length > 0) {
-    return {
-      source: 'env',
-      present: true,
-      value: envValue,
-    };
-  }
-
   const config = await readLocalConfig();
   const configValue = config?.refreshToken?.trim();
   if (configValue && configValue.length > 0) {
