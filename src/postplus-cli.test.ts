@@ -685,6 +685,7 @@ describe('skill management commands', () => {
       'update',
       'a',
       'b',
+      '--global',
       '--yes',
     ]);
     assert.deepEqual(buildPostPlusSkillUninstallArgs(['a', 'b']), [
@@ -693,6 +694,7 @@ describe('skill management commands', () => {
       'remove',
       'a',
       'b',
+      '--global',
       '--agent',
       ...POSTPLUS_SKILLS_AGENT_TARGETS,
       '--yes',
@@ -765,7 +767,7 @@ describe('skill management commands', () => {
 
         assert.match(
           execError.stderr ?? '',
-          /npx -y skills add PostPlusAI\/postplus-skills --full-depth --skill '\*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn --yes/,
+          /npx -y skills add PostPlusAI\/postplus-skills --global --full-depth --skill '\*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn --yes/,
         );
         return true;
       },

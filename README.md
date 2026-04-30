@@ -33,8 +33,11 @@ Requires Node.js and npm.
 ```bash
 npm install -g @postplus/cli
 postplus auth login
-npx -y skills add PostPlusAI/postplus-skills --full-depth --skill '*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn --yes
+npx -y skills add PostPlusAI/postplus-skills --global --full-depth --skill '*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn --yes
 ```
+
+Start a new agent session or restart the local agent app after installation so
+the global skills are loaded.
 
 Useful checks:
 

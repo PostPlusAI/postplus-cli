@@ -148,7 +148,7 @@ export function formatSkillInstallStatusReport(
 }
 
 export function buildPostPlusSkillUpdateArgs(skillNames: string[]): string[] {
-  return [...NPX_SKILLS, 'update', ...skillNames, '--yes'];
+  return [...NPX_SKILLS, 'update', ...skillNames, '--global', '--yes'];
 }
 
 export function buildPostPlusSkillUninstallArgs(skillNames: string[]): string[] {
@@ -156,6 +156,7 @@ export function buildPostPlusSkillUninstallArgs(skillNames: string[]): string[] 
     ...NPX_SKILLS,
     'remove',
     ...skillNames,
+    '--global',
     '--agent',
     ...POSTPLUS_SKILLS_AGENT_TARGETS,
     '--yes',
