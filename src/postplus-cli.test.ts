@@ -6,6 +6,10 @@ import { resolve } from 'node:path';
 import { after, beforeEach, describe, it } from 'node:test';
 import { promisify } from 'node:util';
 
+import {
+  CLI_AUTH_HANDOFF_TIMEOUT_MS,
+  createCliAuthHandoffServer,
+} from './auth-login.js';
 import { generateAuthStatusReport } from './auth.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import {
@@ -256,6 +260,65 @@ describe('doctor and status', () => {
     assert.equal(report.ok, false);
     assert.equal(report.accessToken.present, false);
     assert.equal(report.refreshToken.present, false);
+  });
+});
+
+describe('browser auth handoff', () => {
+  it('keeps the CLI handoff window at 30 minutes', () => {
+    assert.equal(CLI_AUTH_HANDOFF_TIMEOUT_MS, 30 * 60 * 1000);
+  });
+
+  it('allows private network preflight from the configured hosted origin', async () => {
+    const handoff = await createCliAuthHandoffServer({
+      allowedOrigin: 'https://postplus.example.com',
+    });
+
+    try {
+      const response = await fetch(handoff.bridgeUrl, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://postplus.example.com',
+          'Access-Control-Request-Headers': 'content-type',
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Private-Network': 'true',
+        },
+      });
+
+      assert.equal(response.status, 204);
+      assert.equal(
+        response.headers.get('access-control-allow-origin'),
+        'https://postplus.example.com',
+      );
+      assert.equal(
+        response.headers.get('access-control-allow-private-network'),
+        'true',
+      );
+    } finally {
+      await handoff.close();
+    }
+  });
+
+  it('rejects private network preflight from a different origin', async () => {
+    const handoff = await createCliAuthHandoffServer({
+      allowedOrigin: 'https://postplus.example.com',
+    });
+
+    try {
+      const response = await fetch(handoff.bridgeUrl, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://evil.example.com',
+          'Access-Control-Request-Headers': 'content-type',
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Private-Network': 'true',
+        },
+      });
+
+      assert.equal(response.status, 403);
+      assert.equal(response.headers.get('access-control-allow-origin'), null);
+    } finally {
+      await handoff.close();
+    }
   });
 });
 

@@ -5,6 +5,8 @@ import type { AddressInfo } from 'node:net';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { setLocalSession } from './local-state.js';
 
+export const CLI_AUTH_HANDOFF_TIMEOUT_MS = 30 * 60 * 1000;
+
 export type AuthLoginReport = {
   accountId: string;
   apiBaseUrl: string;
@@ -58,7 +60,7 @@ export async function loginWithBrowserHandoff(): Promise<AuthLoginReport> {
       'Open this URL in your browser to continue:',
       loginUrl,
       '',
-      'Waiting for browser sign-in...',
+      'Waiting for browser sign-in (up to 30 minutes)...',
       '',
     ].join('\n'),
   );
@@ -158,7 +160,9 @@ export function formatCliSessionAuthError(
   return 'Failed to validate the browser session for PostPlus CLI.';
 }
 
-async function createCliAuthHandoffServer(input: { allowedOrigin: string }) {
+export async function createCliAuthHandoffServer(input: {
+  allowedOrigin: string;
+}) {
   const requestId = randomUUID();
 
   return new Promise<{
@@ -194,6 +198,7 @@ async function createCliAuthHandoffServer(input: { allowedOrigin: string }) {
         response.writeHead(204, {
           'Access-Control-Allow-Headers': 'Content-Type',
           'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Private-Network': 'true',
           'Access-Control-Allow-Origin': allowOrigin,
           'Access-Control-Max-Age': '600',
           Vary: 'Origin',
@@ -279,18 +284,15 @@ async function createCliAuthHandoffServer(input: { allowedOrigin: string }) {
         return;
       }
 
-      cleanupTimer = setTimeout(
-        () => {
-          if (!settled) {
-            settled = true;
-            rejectPayload?.(
-              new Error('Timed out waiting for the browser sign-in handoff.'),
-            );
-          }
-          server.close();
-        },
-        5 * 60 * 1000,
-      );
+      cleanupTimer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          rejectPayload?.(
+            new Error('Timed out waiting for the browser sign-in handoff.'),
+          );
+        }
+        server.close();
+      }, CLI_AUTH_HANDOFF_TIMEOUT_MS);
 
       resolve({
         bridgeUrl: `http://127.0.0.1:${(address as AddressInfo).port}/handoff`,
