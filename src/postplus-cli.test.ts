@@ -16,6 +16,7 @@ import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import { readLocalConfig, setLocalSession } from './local-state.js';
 import {
+  POSTPLUS_SKILLS_AGENT_TARGETS,
   POSTPLUS_SKILLS_INSTALL_COMMAND,
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
@@ -693,9 +694,7 @@ describe('skill management commands', () => {
       'a',
       'b',
       '--agent',
-      'claude-code',
-      'codex',
-      'cursor',
+      ...POSTPLUS_SKILLS_AGENT_TARGETS,
       '--yes',
     ]);
   });
@@ -766,7 +765,7 @@ describe('skill management commands', () => {
 
         assert.match(
           execError.stderr ?? '',
-          /npx -y skills add PostPlusAI\/postplus-skills --full-depth --skill '\*' --agent claude-code codex cursor --yes/,
+          /npx -y skills add PostPlusAI\/postplus-skills --full-depth --skill '\*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn --yes/,
         );
         return true;
       },

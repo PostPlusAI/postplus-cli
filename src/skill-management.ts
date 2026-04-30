@@ -1,11 +1,11 @@
 import {
+  POSTPLUS_SKILLS_AGENT_TARGETS,
   POSTPLUS_SKILLS_INSTALL_COMMAND,
   POSTPLUS_SKILLS_REPO,
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
 import { runCommand, runInteractiveCommand } from './command-runner.js';
 
-const SKILLS_AGENTS = ['claude-code', 'codex', 'cursor'];
 const NPX_SKILLS = ['-y', 'skills'];
 
 export type InstalledSkillEntry = {
@@ -157,7 +157,7 @@ export function buildPostPlusSkillUninstallArgs(skillNames: string[]): string[] 
     'remove',
     ...skillNames,
     '--agent',
-    ...SKILLS_AGENTS,
+    ...POSTPLUS_SKILLS_AGENT_TARGETS,
     '--yes',
   ];
 }

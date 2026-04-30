@@ -1,6 +1,16 @@
 export const POSTPLUS_SKILLS_REPO = 'PostPlusAI/postplus-skills';
+export const POSTPLUS_SKILLS_AGENT_TARGETS = [
+  'claude-code',
+  'codex',
+  'cursor',
+  'github-copilot',
+  'windsurf',
+  'trae',
+  'trae-cn',
+] as const;
+const POSTPLUS_SKILLS_AGENT_ARGS = POSTPLUS_SKILLS_AGENT_TARGETS.join(' ');
 export const POSTPLUS_SKILLS_INSTALL_COMMAND =
-  "npx -y skills add PostPlusAI/postplus-skills --full-depth --skill '*' --agent claude-code codex cursor --yes";
+  `npx -y skills add PostPlusAI/postplus-skills --full-depth --skill '*' --agent ${POSTPLUS_SKILLS_AGENT_ARGS} --yes`;
 export const POSTPLUS_SKILLS_LIST_COMMAND =
   'npx -y skills add PostPlusAI/postplus-skills --list --full-depth';
 
