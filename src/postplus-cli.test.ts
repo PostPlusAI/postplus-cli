@@ -853,7 +853,7 @@ describe('public skill catalog', () => {
 });
 
 describe('local dependency diagnostics', () => {
-  it('reports missing dependencies from the public skill catalog without installing them', async () => {
+  it('reports missing dependencies from the public skill catalog for agent bootstrap', async () => {
     const calls: string[][] = [];
     const report = await generateLocalDependencyReport({
       loadCatalog: async () => ({

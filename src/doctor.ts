@@ -119,7 +119,7 @@ async function checkLocalDependencies(): Promise<DoctorCheck> {
         'local_dependencies',
         'Local dependencies',
         detail,
-        'Install the missing host binaries or Python modules, then rerun `postplus doctor`.',
+        'Run the affected PostPlus skill in a local agent. The installed postplus-shared rules tell the agent how to bootstrap approved missing media dependencies.',
       );
     }
 
