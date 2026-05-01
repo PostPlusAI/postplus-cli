@@ -20,6 +20,7 @@ import {
 } from './update-check.js';
 
 export type StatusReport = {
+  schemaVersion: 1;
   ok: boolean;
   doctor: DoctorReport;
   auth: AuthStatusReport;
@@ -53,6 +54,7 @@ export async function generateStatusReportWithDependencies(dependencies: {
   ]);
 
   return {
+    schemaVersion: 1,
     ok: doctor.ok && auth.ok && skills.ok && updates.ok,
     doctor,
     auth,

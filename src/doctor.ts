@@ -21,6 +21,7 @@ export type DoctorCheck = {
 };
 
 export type DoctorReport = {
+  schemaVersion: 1;
   ok: boolean;
   checks: DoctorCheck[];
 };
@@ -136,6 +137,7 @@ async function checkLocalDependencies(): Promise<DoctorCheck> {
 
 function buildDoctorReport(checks: DoctorCheck[]): DoctorReport {
   return {
+    schemaVersion: 1,
     ok: checks.every((check) => check.status === 'pass'),
     checks,
   };

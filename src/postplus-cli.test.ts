@@ -186,7 +186,9 @@ describe('doctor and status', () => {
           warning: null,
         }),
       });
+      assert.equal(status.schemaVersion, 1);
       assert.equal(status.ok, true);
+      assert.equal(status.doctor.schemaVersion, 1);
       assert.equal(status.auth.ok, true);
       assert.equal(status.doctor.ok, true);
       assert.equal(status.skills.ok, true);
@@ -386,6 +388,7 @@ describe('doctor and status', () => {
       const report = await generateDoctorReport();
       const formatted = formatDoctorReport(report);
 
+      assert.equal(report.schemaVersion, 1);
       assert.equal(report.ok, false);
       assert.match(
         formatted,
@@ -415,6 +418,7 @@ describe('doctor and status', () => {
       const report = await generateDoctorReport();
       const formatted = formatDoctorReport(report);
 
+      assert.equal(report.schemaVersion, 1);
       assert.equal(report.ok, false);
       assert.match(formatted, /PostPlus Cloud/);
       assert.match(formatted, /postplus auth login/);
