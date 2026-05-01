@@ -14,7 +14,11 @@ import {
 import { validateRemoteAuth } from './auth-validate.js';
 import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
-import { readLocalConfig, setLocalSession } from './local-state.js';
+import {
+  readLocalConfig,
+  setLocalSession,
+  writeManagedSkillBaseline,
+} from './local-state.js';
 import {
   POSTPLUS_SKILLS_AGENT_TARGETS,
   POSTPLUS_SKILLS_INSTALL_COMMAND,
@@ -24,6 +28,8 @@ import {
   buildPostPlusSkillUninstallArgs,
   buildPostPlusSkillUpdateArgs,
   generateSkillInstallStatusReport,
+  runPostPlusSkillUninstall,
+  runPostPlusSkillUpdate,
 } from './skill-management.js';
 import {
   formatStatusReport,
@@ -118,8 +124,10 @@ describe('doctor and status', () => {
           error: null,
           installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
           installedCount: 2,
+          managedRevision: 'catalog-1',
           missingSkills: [],
           requiredCount: 2,
+          retiredManagedSkills: [],
           scopes: ['project'],
           source: 'PostPlusAI/postplus-skills',
           updateCommand: 'postplus update',
@@ -227,8 +235,10 @@ describe('doctor and status', () => {
           error: null,
           installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
           installedCount: 2,
+          managedRevision: 'catalog-1',
           missingSkills: [],
           requiredCount: 2,
+          retiredManagedSkills: [],
           scopes: ['project'],
           source: 'PostPlusAI/postplus-skills',
           updateCommand: 'postplus update',
@@ -671,31 +681,31 @@ describe('cloud auth handoff', () => {
 });
 
 describe('public skill catalog', () => {
-  it('loads and parses the public skill index', async () => {
+  it('loads and parses the public skill catalog', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
       new Response(
-        [
-          '# Skills Index',
-          '',
-          '## Shared Rulebooks',
-          '',
-          '- `shared-release-shell-rules`',
-          '  - Path: `skills/shared-release-shell-rules.md`',
-          '',
-          '## Released Skills',
-          '',
-          '### Demo',
-          'Demo family.',
-          '',
-          '- `demo-skill`',
-          '  - Path: `skills/demo-skill/SKILL.md`',
-          '- `second-skill`',
-          '  - Path: `skills/second-skill/SKILL.md`',
-        ].join('\n'),
+        JSON.stringify({
+          schemaVersion: 1,
+          revision: 'catalog-1',
+          source: 'PostPlusAI/postplus-skills',
+          primaryIndex: 'skills/INDEX.md',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+            {
+              name: 'second-skill',
+              path: 'skills/second-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
         {
           status: 200,
-          headers: { 'content-type': 'text/markdown' },
+          headers: { 'content-type': 'application/json' },
         },
       );
 
@@ -703,6 +713,7 @@ describe('public skill catalog', () => {
       const catalog = await loadPublicSkillCatalog();
 
       assert.equal(catalog.source, 'PostPlusAI/postplus-skills');
+      assert.equal(catalog.revision, 'catalog-1');
       assert.equal(catalog.installCommand, POSTPLUS_SKILLS_INSTALL_COMMAND);
       assert.deepEqual(catalog.skills, [
         {
@@ -719,31 +730,39 @@ describe('public skill catalog', () => {
     }
   });
 
-  it('fails fast when the public skill index has no released section', async () => {
+  it('fails fast when the public skill catalog metadata is invalid', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
-      new Response('# Skills Index\n\n## Shared Rulebooks\n', {
+      new Response(JSON.stringify({ schemaVersion: 1, skills: [] }), {
         status: 200,
-        headers: { 'content-type': 'text/markdown' },
+        headers: { 'content-type': 'application/json' },
       });
 
     try {
       await assert.rejects(
         () => loadPublicSkillCatalog(),
-        /missing ## Released Skills section/,
+        /metadata is invalid/,
       );
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it('fails fast when the public skill index has an empty release list', async () => {
+  it('fails fast when the public skill catalog has an empty release list', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
-      new Response('# Skills Index\n\n## Released Skills\n', {
-        status: 200,
-        headers: { 'content-type': 'text/markdown' },
-      });
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          revision: 'catalog-1',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
 
     try {
       await assert.rejects(
@@ -784,19 +803,26 @@ describe('skill management commands', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
       new Response(
-        [
-          '# Skills Index',
-          '',
-          '## Released Skills',
-          '',
-          '- `demo-skill`',
-          '  - Path: `skills/demo-skill/SKILL.md`',
-          '- `missing-skill`',
-          '  - Path: `skills/missing-skill/SKILL.md`',
-        ].join('\n'),
+        JSON.stringify({
+          schemaVersion: 1,
+          revision: 'catalog-1',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+            {
+              name: 'missing-skill',
+              path: 'skills/missing-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
         {
           status: 200,
-          headers: { 'content-type': 'text/markdown' },
+          headers: { 'content-type': 'application/json' },
         },
       );
 
@@ -826,6 +852,162 @@ describe('skill management commands', () => {
 
       assert.equal(report.ok, false);
       assert.deepEqual(report.missingSkills, ['missing-skill']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('reports retired skills from the managed baseline', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          revision: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await writeManagedSkillBaseline({
+        revision: 'catalog-1',
+        skillNames: ['demo-skill', 'retired-skill'],
+      });
+      const report = await generateSkillInstallStatusReport({
+        runCommand: async () => ({
+          stderr: '',
+          stdout: JSON.stringify([
+            {
+              agents: ['Codex'],
+              name: 'demo-skill',
+              path: '/tmp/demo-skill',
+              scope: 'global',
+            },
+          ]),
+        }),
+      });
+
+      assert.equal(report.ok, true);
+      assert.equal(report.managedRevision, 'catalog-1');
+      assert.deepEqual(report.retiredManagedSkills, ['retired-skill']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('updates current skills, removes retired managed skills, then advances the baseline', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          revision: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+            {
+              name: 'new-skill',
+              path: 'skills/new-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    const calls: string[][] = [];
+
+    try {
+      await writeManagedSkillBaseline({
+        revision: 'catalog-1',
+        skillNames: ['demo-skill', 'retired-skill'],
+      });
+      const exitCode = await runPostPlusSkillUpdate({
+        runInteractiveCommand: async (_command, args) => {
+          calls.push(args);
+          return 0;
+        },
+      });
+      const config = await readLocalConfig();
+
+      assert.equal(exitCode, 0);
+      assert.equal(calls.length, 2);
+      assert.deepEqual(
+        calls[0],
+        buildPostPlusSkillUpdateArgs(['demo-skill', 'new-skill']),
+      );
+      assert.deepEqual(
+        calls[1],
+        buildPostPlusSkillUninstallArgs(['retired-skill']),
+      );
+      assert.deepEqual(config?.managedSkills?.skillNames, [
+        'demo-skill',
+        'new-skill',
+      ]);
+      assert.equal(config?.managedSkills?.revision, 'catalog-2');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('uninstalls current and retired managed skills before clearing the baseline', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          revision: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    const calls: string[][] = [];
+
+    try {
+      await writeManagedSkillBaseline({
+        revision: 'catalog-1',
+        skillNames: ['demo-skill', 'retired-skill'],
+      });
+      const exitCode = await runPostPlusSkillUninstall({
+        runInteractiveCommand: async (_command, args) => {
+          calls.push(args);
+          return 0;
+        },
+      });
+      const config = await readLocalConfig();
+
+      assert.equal(exitCode, 0);
+      assert.deepEqual(calls, [
+        buildPostPlusSkillUninstallArgs(['demo-skill', 'retired-skill']),
+      ]);
+      assert.equal(config?.managedSkills, undefined);
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -1,10 +1,15 @@
+import { runCommand, runInteractiveCommand } from './command-runner.js';
+import {
+  clearManagedSkillBaseline,
+  readManagedSkillBaseline,
+  writeManagedSkillBaseline,
+} from './local-state.js';
 import {
   POSTPLUS_SKILLS_AGENT_TARGETS,
   POSTPLUS_SKILLS_INSTALL_COMMAND,
   POSTPLUS_SKILLS_REPO,
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
-import { runCommand, runInteractiveCommand } from './command-runner.js';
 
 const NPX_SKILLS = ['-y', 'skills'];
 
@@ -24,37 +29,88 @@ export type SkillInstallStatusReport = {
   source: string;
   error: string | null;
   installCommand: string;
+  managedRevision: string | null;
   updateCommand: string;
   uninstallCommand: string;
+  retiredManagedSkills: string[];
 };
 
 type SkillManagementDependencies = {
   runCommand: typeof runCommand;
 };
 
-export async function runPostPlusSkillUpdate(): Promise<number> {
+type SkillMutationDependencies = {
+  runInteractiveCommand: typeof runInteractiveCommand;
+};
+
+export async function runPostPlusSkillUpdate(
+  dependencies: SkillMutationDependencies = {
+    runInteractiveCommand,
+  },
+): Promise<number> {
   const catalog = await loadPublicSkillCatalog();
   const skillNames = catalog.skills.map((skill) => skill.skillId);
+  const baseline = await readManagedSkillBaseline();
+  const retiredSkillNames = baseline.skillNames.filter(
+    (skillName) => !skillNames.includes(skillName),
+  );
 
   if (skillNames.length === 0) {
     throw new Error('PostPlus public skill catalog has no released skills.');
   }
 
-  return runInteractiveCommand('npx', buildPostPlusSkillUpdateArgs(skillNames));
+  const updateExitCode = await dependencies.runInteractiveCommand(
+    'npx',
+    buildPostPlusSkillUpdateArgs(skillNames),
+  );
+
+  if (updateExitCode !== 0) {
+    return updateExitCode;
+  }
+
+  if (retiredSkillNames.length > 0) {
+    const removeExitCode = await dependencies.runInteractiveCommand(
+      'npx',
+      buildPostPlusSkillUninstallArgs(retiredSkillNames),
+    );
+
+    if (removeExitCode !== 0) {
+      return removeExitCode;
+    }
+  }
+
+  await writeManagedSkillBaseline({
+    revision: catalog.revision,
+    skillNames,
+  });
+
+  return 0;
 }
 
-export async function runPostPlusSkillUninstall(): Promise<number> {
+export async function runPostPlusSkillUninstall(
+  dependencies: SkillMutationDependencies = {
+    runInteractiveCommand,
+  },
+): Promise<number> {
   const catalog = await loadPublicSkillCatalog();
   const skillNames = catalog.skills.map((skill) => skill.skillId);
+  const baseline = await readManagedSkillBaseline();
+  const allKnownSkillNames = mergeSkillNames(skillNames, baseline.skillNames);
 
-  if (skillNames.length === 0) {
+  if (allKnownSkillNames.length === 0) {
     throw new Error('PostPlus public skill catalog has no released skills.');
   }
 
-  return runInteractiveCommand(
+  const exitCode = await dependencies.runInteractiveCommand(
     'npx',
-    buildPostPlusSkillUninstallArgs(skillNames),
+    buildPostPlusSkillUninstallArgs(allKnownSkillNames),
   );
+
+  if (exitCode === 0) {
+    await clearManagedSkillBaseline();
+  }
+
+  return exitCode;
 }
 
 export async function generateSkillInstallStatusReport(
@@ -64,13 +120,19 @@ export async function generateSkillInstallStatusReport(
 ): Promise<SkillInstallStatusReport> {
   const catalog = await loadPublicSkillCatalog();
   const requiredSkills = new Set(catalog.skills.map((skill) => skill.skillId));
+  const baseline = await readManagedSkillBaseline();
+  const retiredManagedSkills = baseline.skillNames.filter(
+    (skillName) => !requiredSkills.has(skillName),
+  );
 
   try {
     const installed = await listInstalledSkills(dependencies);
     const postPlusInstalled = installed.filter((skill) =>
       requiredSkills.has(skill.name),
     );
-    const installedNames = new Set(postPlusInstalled.map((skill) => skill.name));
+    const installedNames = new Set(
+      postPlusInstalled.map((skill) => skill.name),
+    );
     const missingSkills = [...requiredSkills].filter(
       (skill) => !installedNames.has(skill),
     );
@@ -87,8 +149,10 @@ export async function generateSkillInstallStatusReport(
       error: null,
       installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
       installedCount: installedNames.size,
+      managedRevision: baseline.revision,
       missingSkills,
       requiredCount: requiredSkills.size,
+      retiredManagedSkills,
       scopes,
       source: POSTPLUS_SKILLS_REPO,
       updateCommand: formatPostPlusSkillUpdateCommand(),
@@ -103,8 +167,10 @@ export async function generateSkillInstallStatusReport(
           : 'Failed to inspect installed PostPlus skills.',
       installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
       installedCount: 0,
+      managedRevision: baseline.revision,
       missingSkills: [...requiredSkills],
       requiredCount: requiredSkills.size,
+      retiredManagedSkills,
       scopes: [],
       source: POSTPLUS_SKILLS_REPO,
       updateCommand: formatPostPlusSkillUpdateCommand(),
@@ -131,9 +197,17 @@ export function formatSkillInstallStatusReport(
   }
 
   lines.push(`  Source: ${report.source}`);
+  lines.push(`  Managed baseline: ${report.managedRevision ?? 'none'}`);
   lines.push(
     `  Scope: ${report.scopes.length > 0 ? report.scopes.join(', ') : 'none detected'}`,
   );
+
+  if (report.retiredManagedSkills.length > 0) {
+    lines.push(
+      `  Retired managed skills: ${formatSkillList(report.retiredManagedSkills, 8)}`,
+      `  Cleanup: ${report.updateCommand}`,
+    );
+  }
 
   if (report.missingSkills.length > 0) {
     lines.push(
@@ -151,7 +225,9 @@ export function buildPostPlusSkillUpdateArgs(skillNames: string[]): string[] {
   return [...NPX_SKILLS, 'update', ...skillNames, '--global', '--yes'];
 }
 
-export function buildPostPlusSkillUninstallArgs(skillNames: string[]): string[] {
+export function buildPostPlusSkillUninstallArgs(
+  skillNames: string[],
+): string[] {
   return [
     ...NPX_SKILLS,
     'remove',
@@ -169,6 +245,10 @@ export function formatPostPlusSkillUpdateCommand(): string {
 
 export function formatPostPlusSkillUninstallCommand(): string {
   return 'postplus uninstall';
+}
+
+function mergeSkillNames(left: string[], right: string[]): string[] {
+  return [...new Set([...left, ...right])].sort((a, b) => a.localeCompare(b));
 }
 
 async function listInstalledSkills(
@@ -239,5 +319,7 @@ function formatSkillList(skills: string[], limit: number): string {
   const visible = skills.slice(0, limit);
   const rest = skills.length - visible.length;
 
-  return rest > 0 ? `${visible.join(', ')} (+${rest} more)` : visible.join(', ');
+  return rest > 0
+    ? `${visible.join(', ')} (+${rest} more)`
+    : visible.join(', ');
 }

@@ -1,9 +1,11 @@
-import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { getPostPlusConfigDir } from './local-state.js';
-import { POSTPLUS_SKILLS_REPO } from './skill-catalog.js';
+import {
+  POSTPLUS_SKILLS_REPO,
+  loadPublicSkillCatalog,
+} from './skill-catalog.js';
 
 const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_CHECK_CACHE_FILE = 'update-check.json';
@@ -11,8 +13,6 @@ const NPM_PACKAGE_NAME = '@postplus/cli';
 const NPM_LATEST_URL = `https://registry.npmjs.org/${encodeURIComponent(
   NPM_PACKAGE_NAME,
 )}/latest`;
-const POSTPLUS_SKILLS_MAIN_URL =
-  'https://api.github.com/repos/PostPlusAI/postplus-skills/commits/main';
 
 export type UpdateStatusReport = {
   checkedAt: string | null;
@@ -96,7 +96,7 @@ export async function generateUpdateStatusReport(
       currentVersion,
       previousSkillRevision: input.resetSkillBaseline
         ? latestSkillRevision
-        : cache?.skills.latestRevision ?? latestSkillRevision,
+        : (cache?.skills.latestRevision ?? latestSkillRevision),
       source: 'remote',
     });
   } catch (error) {
@@ -193,7 +193,8 @@ function buildUpdateReport(input: {
       currentVersion: input.currentVersion,
       latestVersion: input.cache.cli.latestVersion,
       updateAvailable:
-        compareVersions(input.cache.cli.latestVersion, input.currentVersion) > 0,
+        compareVersions(input.cache.cli.latestVersion, input.currentVersion) >
+        0,
       updateCommand: 'npm install -g @postplus/cli',
     },
     skills: {
@@ -243,30 +244,18 @@ async function fetchLatestCliVersion(fetchFn: typeof fetch): Promise<string> {
   return payload.version.trim();
 }
 
-async function fetchLatestSkillRevision(fetchFn: typeof fetch): Promise<string> {
-  const response = await fetchFn(POSTPLUS_SKILLS_MAIN_URL, {
-    headers: {
-      accept: 'application/vnd.github+json',
-      'user-agent': `postplus-cli-update-check/${await readCurrentCliVersion()}`,
-    },
-    signal: AbortSignal.timeout(15_000),
-  });
-
-  if (!response.ok) {
+async function fetchLatestSkillRevision(
+  fetchFn: typeof fetch,
+): Promise<string> {
+  try {
+    return (await loadPublicSkillCatalog(fetchFn)).revision;
+  } catch (error) {
     throw new Error(
-      `Failed to check latest ${POSTPLUS_SKILLS_REPO} revision (${response.status}).`,
+      `Failed to check latest ${POSTPLUS_SKILLS_REPO} revision: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     );
   }
-
-  const payload = (await response.json()) as { sha?: unknown };
-
-  if (typeof payload.sha === 'string' && payload.sha.trim()) {
-    return payload.sha.trim();
-  }
-
-  return createHash('sha256')
-    .update(JSON.stringify(payload))
-    .digest('hex');
 }
 
 async function readUpdateCheckCache(): Promise<UpdateCheckCache | null> {

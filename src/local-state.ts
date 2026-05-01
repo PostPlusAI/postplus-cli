@@ -14,6 +14,11 @@ export type PostPlusLocalConfig = {
   accessToken?: string;
   apiBaseUrl?: string;
   accountId?: string;
+  managedSkills?: {
+    revision: string;
+    skillNames: string[];
+    updatedAt?: string;
+  };
   refreshToken?: string;
   sessionExpiresAt?: number | null;
   updatedAt?: string;
@@ -174,6 +179,54 @@ export async function clearLocalAuthState(): Promise<PostPlusLocalConfig> {
     delete next.sessionExpiresAt;
     delete next.userEmail;
     delete next.userId;
+    return next;
+  });
+}
+
+export async function readManagedSkillBaseline(): Promise<{
+  revision: string | null;
+  skillNames: string[];
+}> {
+  const config = await readLocalConfig();
+  const managedSkills = config?.managedSkills;
+
+  if (
+    !managedSkills ||
+    typeof managedSkills.revision !== 'string' ||
+    !Array.isArray(managedSkills.skillNames)
+  ) {
+    return {
+      revision: null,
+      skillNames: [],
+    };
+  }
+
+  return {
+    revision: managedSkills.revision,
+    skillNames: normalizeSkillNames(managedSkills.skillNames),
+  };
+}
+
+export async function writeManagedSkillBaseline(input: {
+  revision: string;
+  skillNames: string[];
+}): Promise<PostPlusLocalConfig> {
+  return updateLocalConfig((current) => ({
+    ...(current ?? {}),
+    managedSkills: {
+      revision: input.revision,
+      skillNames: normalizeSkillNames(input.skillNames),
+      updatedAt: new Date().toISOString(),
+    },
+  }));
+}
+
+export async function clearManagedSkillBaseline(): Promise<PostPlusLocalConfig> {
+  return updateLocalConfig((current) => {
+    const next = {
+      ...(current ?? {}),
+    };
+    delete next.managedSkills;
     return next;
   });
 }
@@ -341,4 +394,10 @@ function omitLegacyAuthFields(
   };
 
   return rest;
+}
+
+function normalizeSkillNames(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort(
+    (left, right) => left.localeCompare(right),
+  );
 }
