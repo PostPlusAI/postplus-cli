@@ -25,7 +25,7 @@ import {
   runPostPlusSkillUpdate,
 } from './skill-management.js';
 import { formatStatusReport, generateStatusReport } from './status.js';
-import { refreshUpdateCheckBaseline } from './update-check.js';
+import { refreshUpdateCheckCache } from './update-check.js';
 
 function printAuthHelp(): void {
   process.stdout.write(`PostPlus CLI — auth commands
@@ -133,7 +133,7 @@ async function runSkillUpdateCommand(): Promise<number> {
   const exitCode = await runPostPlusSkillUpdate();
 
   if (exitCode === 0) {
-    await refreshUpdateCheckBaseline().catch(() => {});
+    await refreshUpdateCheckCache().catch(() => {});
   }
 
   return exitCode;

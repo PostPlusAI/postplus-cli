@@ -1,7 +1,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { getPostPlusConfigDir } from './local-state.js';
+import {
+  getPostPlusConfigDir,
+  readManagedSkillBaseline,
+} from './local-state.js';
 import {
   POSTPLUS_SKILLS_REPO,
   loadPublicSkillCatalog,
@@ -51,13 +54,13 @@ type UpdateCheckDependencies = {
 export async function generateUpdateStatusReport(
   input: {
     force?: boolean;
-    resetSkillBaseline?: boolean;
   } = {},
   dependencies: UpdateCheckDependencies = {
     fetchFn: fetch,
   },
 ): Promise<UpdateStatusReport> {
   const currentVersion = await readCurrentCliVersion();
+  const managedSkillBaseline = await readManagedSkillBaseline();
   const cache = await readUpdateCheckCache();
 
   if (
@@ -69,7 +72,7 @@ export async function generateUpdateStatusReport(
     return buildUpdateReport({
       cache,
       currentVersion,
-      previousSkillRevision: cache.skills.latestRevision,
+      currentSkillRevision: managedSkillBaseline.revision,
       source: 'cache',
     });
   }
@@ -94,9 +97,7 @@ export async function generateUpdateStatusReport(
     return buildUpdateReport({
       cache: nextCache,
       currentVersion,
-      previousSkillRevision: input.resetSkillBaseline
-        ? latestSkillRevision
-        : (cache?.skills.latestRevision ?? latestSkillRevision),
+      currentSkillRevision: managedSkillBaseline.revision,
       source: 'remote',
     });
   } catch (error) {
@@ -108,7 +109,7 @@ export async function generateUpdateStatusReport(
         ...buildUpdateReport({
           cache,
           currentVersion,
-          previousSkillRevision: cache.skills.latestRevision,
+          currentSkillRevision: managedSkillBaseline.revision,
           source: 'cache',
         }),
         warning,
@@ -126,7 +127,7 @@ export async function generateUpdateStatusReport(
         updateCommand: 'npm install -g @postplus/cli',
       },
       skills: {
-        currentRevision: null,
+        currentRevision: managedSkillBaseline.revision,
         latestRevision: null,
         updateAvailable: false,
         updateCommand: 'postplus update',
@@ -136,10 +137,9 @@ export async function generateUpdateStatusReport(
   }
 }
 
-export async function refreshUpdateCheckBaseline(): Promise<void> {
+export async function refreshUpdateCheckCache(): Promise<void> {
   await generateUpdateStatusReport({
     force: true,
-    resetSkillBaseline: true,
   });
 }
 
@@ -182,7 +182,7 @@ export function formatUpdateStatusReport(report: UpdateStatusReport): string {
 function buildUpdateReport(input: {
   cache: UpdateCheckCache;
   currentVersion: string;
-  previousSkillRevision: string;
+  currentSkillRevision: string | null;
   source: 'cache' | 'remote';
 }): UpdateStatusReport {
   return {
@@ -198,10 +198,10 @@ function buildUpdateReport(input: {
       updateCommand: 'npm install -g @postplus/cli',
     },
     skills: {
-      currentRevision: input.previousSkillRevision,
+      currentRevision: input.currentSkillRevision,
       latestRevision: input.cache.skills.latestRevision,
       updateAvailable:
-        input.cache.skills.latestRevision !== input.previousSkillRevision,
+        input.cache.skills.latestRevision !== input.currentSkillRevision,
       updateCommand: 'postplus update',
     },
     warning: null,

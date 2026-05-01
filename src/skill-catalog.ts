@@ -118,7 +118,13 @@ function parsePublicSkillCatalog(
           .filter(Boolean)
       : [];
 
-    if (!skillId || !path || skill.status !== 'released') {
+    const status = typeof skill.status === 'string' ? skill.status.trim() : '';
+
+    if (
+      !skillId ||
+      !path ||
+      !(status === 'released' || status.startsWith('released/'))
+    ) {
       throw new Error('PostPlus public skill catalog has an invalid skill.');
     }
 

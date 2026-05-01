@@ -36,6 +36,7 @@ import {
   formatStatusReport,
   generateStatusReportWithDependencies,
 } from './status.js';
+import { generateUpdateStatusReport } from './update-check.js';
 
 const tempDirs: string[] = [];
 const originalEnv = { ...process.env };
@@ -773,7 +774,7 @@ describe('public skill catalog', () => {
             {
               name: 'second-skill',
               path: 'skills/second-skill/SKILL.md',
-              status: 'released',
+              status: 'released/router',
             },
           ],
         }),
@@ -904,6 +905,63 @@ describe('local dependency diagnostics', () => {
         skillIds: ['demo-skill'],
       },
     ]);
+  });
+});
+
+describe('update checks', () => {
+  it('compares the public skill revision with the managed skill baseline', async () => {
+    await writeManagedSkillBaseline({
+      revision: 'catalog-1',
+      skillNames: ['demo-skill'],
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (url.includes('registry.npmjs.org')) {
+        return new Response(JSON.stringify({ version: '0.1.18' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      if (isPublicCatalogUrl(url)) {
+        return new Response(
+          JSON.stringify({
+            schemaVersion: 1,
+            revision: 'catalog-2',
+            source: 'PostPlusAI/postplus-skills',
+            skills: [
+              {
+                name: 'demo-skill',
+                path: 'skills/demo-skill/SKILL.md',
+                status: 'released/router',
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const report = await generateUpdateStatusReport({ force: true });
+
+      assert.equal(report.skills.currentRevision, 'catalog-1');
+      assert.equal(report.skills.latestRevision, 'catalog-2');
+      assert.equal(report.skills.updateAvailable, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
