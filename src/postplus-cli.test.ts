@@ -265,6 +265,85 @@ describe('doctor and status', () => {
     }
   });
 
+  it('formats nested hosted readiness check failures', async () => {
+    await setLocalSession({
+      accessToken: 'access-token-value',
+      accountId: 'account-1',
+      apiBaseUrl: 'https://postplus.example.com',
+      refreshToken: 'refresh-token-value',
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return new Response(
+          JSON.stringify({
+            accountId: 'account-1',
+            subscriptionStatus: 'active',
+            userEmail: 'user@example.com',
+            userId: 'user-1',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            subscriptionActive: true,
+            subscriptionStatus: 'active',
+            capabilities: [
+              {
+                checks: [
+                  {
+                    id: 'provider_configuration',
+                    label: 'Provider configuration',
+                    ok: false,
+                    required: true,
+                  },
+                ],
+                id: 'media-generation:image-nano-banana-2-text',
+                label: 'Media generation: image-nano-banana-2-text',
+                ok: false,
+                required: true,
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const report = await generateDoctorReport();
+      const formatted = formatDoctorReport(report);
+
+      assert.equal(report.ok, false);
+      assert.match(
+        formatted,
+        /Media generation: image-nano-banana-2-text \(Provider configuration\)/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('doctor fails fast until the user signs in', async () => {
     const report = await generateDoctorReport();
     const formatted = formatDoctorReport(report);

@@ -255,11 +255,38 @@ function readCapabilityFailureLabel(value: unknown): string | null {
     return null;
   }
 
+  const label =
+    typeof record.label === 'string'
+      ? record.label
+      : typeof record.id === 'string'
+        ? record.id
+        : 'unknown capability';
+  const failedChecks = Array.isArray(record.checks)
+    ? record.checks
+        .map(readReadinessCheckFailureLabel)
+        .filter((check): check is string => check !== null)
+    : [];
+
+  return failedChecks.length > 0
+    ? `${label} (${failedChecks.join(', ')})`
+    : label;
+}
+
+function readReadinessCheckFailureLabel(value: unknown): string | null {
+  if (!value || typeof value !== 'object') {
+    return 'invalid readiness check';
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.ok === true || record.required === false) {
+    return null;
+  }
+
   return typeof record.label === 'string'
     ? record.label
     : typeof record.id === 'string'
       ? record.id
-      : 'unknown capability';
+      : 'unknown check';
 }
 
 function readErrorMessage(
