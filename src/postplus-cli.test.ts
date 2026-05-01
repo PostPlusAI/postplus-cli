@@ -316,6 +316,105 @@ describe('doctor and status', () => {
     }
   });
 
+  it('keeps status usable when only task-specific local dependencies are missing', async () => {
+    const status = await generateStatusReportWithDependencies({
+      generateDoctor: async () => ({
+        schemaVersion: 1,
+        ok: false,
+        requiredOk: true,
+        checks: [
+          {
+            id: 'local_dependencies',
+            label: 'Task-specific local media dependencies',
+            status: 'fail',
+            severity: 'task_specific',
+            detail: 'Missing 1/2: ffmpeg for frame-extraction',
+            fix: 'Run the affected PostPlus skill in a local agent.',
+            metadata: {
+              bootstrapRule: 'postplus-shared',
+              missingDependencies: [
+                {
+                  dependency: 'ffmpeg',
+                  detail: 'not found',
+                  skillIds: ['frame-extraction'],
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      generateAuthStatus: async () => ({
+        ok: true,
+        accessToken: {
+          source: 'config',
+          present: true,
+          maskedValue: 'abc',
+        },
+        refreshToken: {
+          source: 'config',
+          present: true,
+          maskedValue: 'def',
+        },
+        apiBaseUrl: {
+          source: 'default',
+          present: true,
+          value: 'https://postplus.io',
+        },
+        config: {
+          path: '/tmp/postplus/config.json',
+          exists: true,
+          accountId: 'account-1',
+          userEmail: 'user@example.com',
+          userId: 'user-1',
+        },
+      }),
+      generateSkillStatus: async () => ({
+        ok: true,
+        error: null,
+        installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
+        installedCount: 1,
+        managedRevision: 'catalog-1',
+        missingSkills: [],
+        requiredCount: 1,
+        retiredManagedSkills: [],
+        scopes: ['global'],
+        source: 'PostPlusAI/postplus-skills',
+        updateCommand: 'postplus update',
+        uninstallCommand: 'postplus uninstall',
+      }),
+      generateUpdateStatus: async () => ({
+        checkedAt: '2026-04-29T00:00:00.000Z',
+        ok: true,
+        source: 'cache',
+        cli: {
+          currentVersion: '0.1.19',
+          latestVersion: '0.1.19',
+          updateAvailable: false,
+          updateCommand: 'npm install -g @postplus/cli',
+        },
+        skills: {
+          currentRevision: 'catalog-1',
+          latestRevision: 'catalog-1',
+          updateAvailable: false,
+          updateCommand: 'postplus update',
+        },
+        warning: null,
+      }),
+    });
+
+    const formatted = formatStatusReport(status);
+
+    assert.equal(status.ok, true);
+    assert.equal(status.doctor.ok, false);
+    assert.equal(status.doctor.requiredOk, true);
+    assert.match(formatted, /Overall: OK \(task-specific checks need attention\)/);
+    assert.match(formatted, /\[WARN\] Task-specific local media dependencies/);
+    assert.match(
+      formatted,
+      /Doctor incomplete: task-specific checks need attention\./,
+    );
+  });
+
   it('formats nested hosted readiness check failures', async () => {
     await setLocalSession({
       accessToken: 'access-token-value',
@@ -825,6 +924,24 @@ describe('public skill catalog', () => {
     }
   });
 
+  it('fails with a catalog-specific error when the catalog endpoint returns HTML', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response('<!DOCTYPE html><html></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+
+    try {
+      await assert.rejects(
+        () => loadPublicSkillCatalog(),
+        /returned HTML instead of JSON/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('fails fast when the public skill catalog has an empty release list', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
@@ -1047,6 +1164,65 @@ describe('skill management commands', () => {
     }
   });
 
+  it('lists project and global skills sequentially to avoid npx cache races', async () => {
+    const originalFetch = globalThis.fetch;
+    let activeListCalls = 0;
+    const calls: string[][] = [];
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          revision: 'catalog-1',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      const report = await generateSkillInstallStatusReport({
+        runCommand: async (_command, args) => {
+          activeListCalls += 1;
+          assert.equal(activeListCalls, 1);
+          calls.push(args);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          activeListCalls -= 1;
+
+          return {
+            stderr: '',
+            stdout: args.includes('--global')
+              ? JSON.stringify([
+                  {
+                    agents: ['Codex'],
+                    name: 'demo-skill',
+                    path: '/tmp/demo-skill',
+                    scope: 'global',
+                  },
+                ])
+              : '[]',
+          };
+        },
+      });
+
+      assert.equal(report.ok, true);
+      assert.deepEqual(calls, [
+        ['-y', 'skills', 'list', '--json'],
+        ['-y', 'skills', 'list', '--json', '--global'],
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('reports retired skills from the managed baseline', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
@@ -1223,5 +1399,23 @@ describe('skill management commands', () => {
         return true;
       },
     );
+  });
+
+  it('prints the installed CLI version', async () => {
+    const { stdout: versionStdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'version',
+    ]);
+    const { stdout: flagStdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      '--version',
+    ]);
+
+    assert.match(versionStdout.trim(), /^\d+\.\d+\.\d+$/);
+    assert.equal(flagStdout, versionStdout);
   });
 });

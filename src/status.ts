@@ -55,7 +55,7 @@ export async function generateStatusReportWithDependencies(dependencies: {
 
   return {
     schemaVersion: 1,
-    ok: doctor.ok && auth.ok && skills.ok && updates.ok,
+    ok: doctor.requiredOk && auth.ok && skills.ok && updates.ok,
     doctor,
     auth,
     skills,
@@ -64,10 +64,19 @@ export async function generateStatusReportWithDependencies(dependencies: {
 }
 
 export function formatStatusReport(report: StatusReport): string {
+  const taskSpecificChecksNeedAttention =
+    report.doctor.requiredOk && !report.doctor.ok;
+
   return [
     'PostPlus CLI status',
     '',
-    `Overall: ${report.ok ? 'OK' : 'INCOMPLETE'}`,
+    `Overall: ${
+      report.ok
+        ? taskSpecificChecksNeedAttention
+          ? 'OK (task-specific checks need attention)'
+          : 'OK'
+        : 'INCOMPLETE'
+    }`,
     '',
     formatDoctorReport(report.doctor),
     '',

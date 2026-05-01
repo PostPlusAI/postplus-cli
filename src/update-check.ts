@@ -208,7 +208,7 @@ function buildUpdateReport(input: {
   };
 }
 
-async function readCurrentCliVersion(): Promise<string> {
+export async function readCurrentCliVersion(): Promise<string> {
   const packageJsonPath = new URL('../package.json', import.meta.url);
   const raw = await readFile(packageJsonPath, 'utf8');
   const parsed = JSON.parse(raw) as { version?: unknown };

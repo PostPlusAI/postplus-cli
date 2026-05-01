@@ -25,7 +25,10 @@ import {
   runPostPlusSkillUpdate,
 } from './skill-management.js';
 import { formatStatusReport, generateStatusReport } from './status.js';
-import { refreshUpdateCheckCache } from './update-check.js';
+import {
+  readCurrentCliVersion,
+  refreshUpdateCheckCache,
+} from './update-check.js';
 
 function printAuthHelp(): void {
   process.stdout.write(`PostPlus CLI — auth commands
@@ -60,6 +63,7 @@ Usage:
   postplus uninstall
   postplus list [--json]
   postplus status [--json]
+  postplus version
   postplus help
 
 Skills:
@@ -126,6 +130,11 @@ async function runList(json: boolean): Promise<number> {
   }
 
   process.stdout.write(`${lines.join('\n')}\n`);
+  return 0;
+}
+
+async function runVersion(): Promise<number> {
+  process.stdout.write(`${await readCurrentCliVersion()}\n`);
   return 0;
 }
 
@@ -213,6 +222,11 @@ async function main(): Promise<void> {
     case '-h':
       printHelp();
       process.exitCode = 0;
+      return;
+    case '--version':
+    case '-v':
+    case 'version':
+      process.exitCode = await runVersion();
       return;
     case 'help': {
       const [helpTopic] = rest;

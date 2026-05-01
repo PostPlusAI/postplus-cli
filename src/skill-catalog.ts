@@ -50,7 +50,8 @@ export async function loadPublicSkillCatalog(
     );
   }
 
-  const payload = (await response.json()) as unknown;
+  const raw = await response.text();
+  const payload = parseJsonResponse(raw, POSTPLUS_SKILLS_CATALOG_URL);
   const catalog = parsePublicSkillCatalog(payload);
 
   return {
@@ -60,6 +61,25 @@ export async function loadPublicSkillCatalog(
     installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
     listCommand: POSTPLUS_SKILLS_LIST_COMMAND,
   };
+}
+
+function parseJsonResponse(raw: string, url: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    const trimmed = raw.trimStart();
+    if (trimmed.startsWith('<')) {
+      throw new Error(
+        `PostPlus public skill catalog returned HTML instead of JSON: ${url}`,
+      );
+    }
+
+    throw new Error(
+      error instanceof Error
+        ? `PostPlus public skill catalog returned invalid JSON: ${error.message}`
+        : 'PostPlus public skill catalog returned invalid JSON.',
+    );
+  }
 }
 
 function parsePublicSkillCatalog(

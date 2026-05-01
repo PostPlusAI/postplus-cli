@@ -254,10 +254,8 @@ function mergeSkillNames(left: string[], right: string[]): string[] {
 async function listInstalledSkills(
   dependencies: SkillManagementDependencies,
 ): Promise<InstalledSkillEntry[]> {
-  const [project, global] = await Promise.all([
-    listInstalledSkillsForScope(dependencies, []),
-    listInstalledSkillsForScope(dependencies, ['--global']),
-  ]);
+  const project = await listInstalledSkillsForScope(dependencies, []);
+  const global = await listInstalledSkillsForScope(dependencies, ['--global']);
   const byKey = new Map<string, InstalledSkillEntry>();
 
   for (const skill of [...project, ...global]) {

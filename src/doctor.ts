@@ -16,13 +16,25 @@ export type DoctorCheck = {
     | 'remote_auth';
   label: string;
   status: 'pass' | 'fail';
+  severity: 'required' | 'task_specific';
   detail: string;
   fix?: string;
+  metadata?: DoctorCheckMetadata;
+};
+
+export type DoctorCheckMetadata = {
+  bootstrapRule?: string;
+  missingDependencies?: {
+    dependency: string;
+    detail: string;
+    skillIds: string[];
+  }[];
 };
 
 export type DoctorReport = {
   schemaVersion: 1;
   ok: boolean;
+  requiredOk: boolean;
   checks: DoctorCheck[];
 };
 
@@ -30,11 +42,13 @@ function createPass(
   id: DoctorCheck['id'],
   label: string,
   detail: string,
+  severity: DoctorCheck['severity'] = 'required',
 ): DoctorCheck {
   return {
     id,
     label,
     status: 'pass',
+    severity,
     detail,
   };
 }
@@ -44,13 +58,19 @@ function createFail(
   label: string,
   detail: string,
   fix?: string,
+  input: {
+    severity?: DoctorCheck['severity'];
+    metadata?: DoctorCheckMetadata;
+  } = {},
 ): DoctorCheck {
   return {
     id,
     label,
     status: 'fail',
+    severity: input.severity ?? 'required',
     detail,
     fix,
+    metadata: input.metadata,
   };
 }
 
@@ -117,9 +137,22 @@ async function checkLocalDependencies(): Promise<DoctorCheck> {
     if (!report.ok) {
       return createFail(
         'local_dependencies',
-        'Local dependencies',
+        'Task-specific local media dependencies',
         detail,
         'Run the affected PostPlus skill in a local agent. The installed postplus-shared rules tell the agent how to bootstrap approved missing media dependencies.',
+        {
+          severity: 'task_specific',
+          metadata: {
+            bootstrapRule: 'postplus-shared',
+            missingDependencies: report.checks
+              .filter((check) => !check.ok)
+              .map((check) => ({
+                dependency: check.dependency,
+                detail: check.detail,
+                skillIds: check.skillIds,
+              })),
+          },
+        },
       );
     }
 
@@ -136,9 +169,14 @@ async function checkLocalDependencies(): Promise<DoctorCheck> {
 }
 
 function buildDoctorReport(checks: DoctorCheck[]): DoctorReport {
+  const requiredOk = checks.every(
+    (check) => check.severity !== 'required' || check.status === 'pass',
+  );
+
   return {
     schemaVersion: 1,
     ok: checks.every((check) => check.status === 'pass'),
+    requiredOk,
     checks,
   };
 }
@@ -349,14 +387,26 @@ export function formatDoctorReport(report: DoctorReport): string {
   const lines = ['PostPlus CLI doctor', ''];
 
   for (const check of report.checks) {
-    const marker = check.status === 'pass' ? '[PASS]' : '[FAIL]';
+    const marker =
+      check.status === 'pass'
+        ? '[PASS]'
+        : check.severity === 'task_specific'
+          ? '[WARN]'
+          : '[FAIL]';
     lines.push(`${marker} ${check.label}: ${check.detail}`);
     if (check.fix) {
       lines.push(`  Fix: ${check.fix}`);
     }
   }
 
-  lines.push('', report.ok ? 'Doctor passed.' : 'Doctor failed.');
+  lines.push(
+    '',
+    report.ok
+      ? 'Doctor passed.'
+      : report.requiredOk
+        ? 'Doctor incomplete: task-specific checks need attention.'
+        : 'Doctor failed.',
+  );
 
   return lines.join('\n');
 }
