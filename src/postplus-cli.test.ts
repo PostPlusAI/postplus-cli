@@ -14,6 +14,7 @@ import {
 import { validateRemoteAuth } from './auth-validate.js';
 import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
+import { generateLocalDependencyReport } from './local-dependencies.js';
 import {
   readLocalConfig,
   setLocalSession,
@@ -39,6 +40,35 @@ import {
 const tempDirs: string[] = [];
 const originalEnv = { ...process.env };
 const execFileAsync = promisify(execFile);
+
+function isPublicCatalogUrl(url: string): boolean {
+  return url.includes('PostPlusAI/postplus-skills/main/skills/catalog.json');
+}
+
+function createPublicCatalogResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      schemaVersion: 1,
+      revision: 'catalog-1',
+      source: 'PostPlusAI/postplus-skills',
+      primaryIndex: 'skills/INDEX.md',
+      skills: [
+        {
+          name: 'demo-skill',
+          path: 'skills/demo-skill/SKILL.md',
+          requirements: {
+            localDependencies: [],
+          },
+          status: 'released',
+        },
+      ],
+    }),
+    {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    },
+  );
+}
 
 beforeEach(async () => {
   process.env = { ...originalEnv };
@@ -68,6 +98,10 @@ describe('doctor and status', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
       const url = String(input);
+
+      if (isPublicCatalogUrl(url)) {
+        return createPublicCatalogResponse();
+      }
 
       if (url.endsWith('/api/postplus-cli/auth/whoami')) {
         assert.equal(
@@ -177,6 +211,10 @@ describe('doctor and status', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input) => {
       const url = String(input);
+
+      if (isPublicCatalogUrl(url)) {
+        return createPublicCatalogResponse();
+      }
 
       if (url.endsWith('/api/postplus-cli/auth/whoami')) {
         return new Response(
@@ -289,6 +327,10 @@ describe('doctor and status', () => {
     globalThis.fetch = async (input) => {
       const url = String(input);
 
+      if (isPublicCatalogUrl(url)) {
+        return createPublicCatalogResponse();
+      }
+
       if (url.endsWith('/api/postplus-cli/auth/whoami')) {
         return new Response(
           JSON.stringify({
@@ -355,13 +397,31 @@ describe('doctor and status', () => {
   });
 
   it('doctor fails fast until the user signs in', async () => {
-    const report = await generateDoctorReport();
-    const formatted = formatDoctorReport(report);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
 
-    assert.equal(report.ok, false);
-    assert.match(formatted, /PostPlus Cloud/);
-    assert.match(formatted, /postplus auth login/);
-    assert.doesNotMatch(formatted, /skills add/);
+      if (isPublicCatalogUrl(url)) {
+        return createPublicCatalogResponse();
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const report = await generateDoctorReport();
+      const formatted = formatDoctorReport(report);
+
+      assert.equal(report.ok, false);
+      assert.match(formatted, /PostPlus Cloud/);
+      assert.match(formatted, /postplus auth login/);
+      assert.doesNotMatch(formatted, /skills add/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('auth status remains incomplete until the user signs in', async () => {
@@ -412,6 +472,10 @@ describe('doctor and status', () => {
     globalThis.fetch = async (input, init) => {
       const url = String(input);
       requestedUrls.push(url);
+
+      if (isPublicCatalogUrl(url)) {
+        return createPublicCatalogResponse();
+      }
 
       if (url.endsWith('/api/postplus-cli/auth/refresh')) {
         assert.equal(
@@ -485,11 +549,14 @@ describe('doctor and status', () => {
       const config = await readLocalConfig();
 
       assert.equal(report.ok, true);
-      assert.deepEqual(requestedUrls, [
-        'https://postplus.example.com/api/postplus-cli/auth/refresh',
-        'https://postplus.example.com/api/postplus-cli/auth/whoami',
-        'https://postplus.example.com/api/postplus-cli/hosted/readiness',
-      ]);
+      assert.deepEqual(
+        requestedUrls.filter((url) => !isPublicCatalogUrl(url)),
+        [
+          'https://postplus.example.com/api/postplus-cli/auth/refresh',
+          'https://postplus.example.com/api/postplus-cli/auth/whoami',
+          'https://postplus.example.com/api/postplus-cli/hosted/readiness',
+        ],
+      );
       assert.equal(config?.accessToken, refreshedAccessToken);
       assert.equal(config?.refreshToken, 'refresh-token-next');
     } finally {
@@ -694,6 +761,9 @@ describe('public skill catalog', () => {
             {
               name: 'demo-skill',
               path: 'skills/demo-skill/SKILL.md',
+              requirements: {
+                localDependencies: ['ffmpeg', 'python3:yt_dlp'],
+              },
               status: 'released',
             },
             {
@@ -717,10 +787,12 @@ describe('public skill catalog', () => {
       assert.equal(catalog.installCommand, POSTPLUS_SKILLS_INSTALL_COMMAND);
       assert.deepEqual(catalog.skills, [
         {
+          localDependencies: ['ffmpeg', 'python3:yt_dlp'],
           skillId: 'demo-skill',
           path: 'skills/demo-skill/SKILL.md',
         },
         {
+          localDependencies: [],
           skillId: 'second-skill',
           path: 'skills/second-skill/SKILL.md',
         },
@@ -772,6 +844,62 @@ describe('public skill catalog', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe('local dependency diagnostics', () => {
+  it('reports missing dependencies from the public skill catalog without installing them', async () => {
+    const calls: string[][] = [];
+    const report = await generateLocalDependencyReport({
+      loadCatalog: async () => ({
+        catalogUrl: 'https://example.com/skills/catalog.json',
+        indexUrl: 'https://example.com/skills/INDEX.md',
+        installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
+        listCommand: 'npx -y skills add PostPlusAI/postplus-skills --list',
+        revision: 'catalog-1',
+        source: 'PostPlusAI/postplus-skills',
+        skills: [
+          {
+            localDependencies: ['ffmpeg', 'python3:yt_dlp'],
+            path: 'skills/demo-skill/SKILL.md',
+            skillId: 'demo-skill',
+          },
+          {
+            localDependencies: ['ffmpeg'],
+            path: 'skills/second-skill/SKILL.md',
+            skillId: 'second-skill',
+          },
+        ],
+      }),
+      runDependencyCheck: async (command, args) => {
+        calls.push([command, ...args]);
+
+        if (command === 'python3') {
+          throw new Error('module not found');
+        }
+      },
+    });
+
+    assert.equal(report.ok, false);
+    assert.equal(report.requiredCount, 2);
+    assert.deepEqual(calls, [
+      ['ffmpeg', '--version'],
+      ['python3', '-c', 'import importlib; importlib.import_module("yt_dlp")'],
+    ]);
+    assert.deepEqual(report.checks, [
+      {
+        dependency: 'ffmpeg',
+        detail: 'available',
+        ok: true,
+        skillIds: ['demo-skill', 'second-skill'],
+      },
+      {
+        dependency: 'python3:yt_dlp',
+        detail: 'module not found',
+        ok: false,
+        skillIds: ['demo-skill'],
+      },
+    ]);
   });
 });
 

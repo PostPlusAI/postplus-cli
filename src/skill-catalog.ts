@@ -19,6 +19,7 @@ const POSTPLUS_SKILLS_CATALOG_URL =
   'https://raw.githubusercontent.com/PostPlusAI/postplus-skills/main/skills/catalog.json';
 
 export type PublicSkillCatalogEntry = {
+  localDependencies: string[];
   skillId: string;
   path: string | null;
 };
@@ -104,12 +105,25 @@ function parsePublicSkillCatalog(
       typeof skill.path === 'string' && skill.path.trim()
         ? skill.path.trim()
         : null;
+    const requirements =
+      skill.requirements &&
+      typeof skill.requirements === 'object' &&
+      !Array.isArray(skill.requirements)
+        ? (skill.requirements as Record<string, unknown>)
+        : {};
+    const localDependencies = Array.isArray(requirements.localDependencies)
+      ? requirements.localDependencies
+          .filter((value): value is string => typeof value === 'string')
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : [];
 
     if (!skillId || !path || skill.status !== 'released') {
       throw new Error('PostPlus public skill catalog has an invalid skill.');
     }
 
     return {
+      localDependencies,
       skillId,
       path,
     };

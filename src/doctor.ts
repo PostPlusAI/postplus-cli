@@ -3,9 +3,17 @@ import {
   resolveFreshRemoteAuth,
 } from './auth-session.js';
 import { resolveHostedBaseUrl } from './hosted-release.js';
+import {
+  formatLocalDependencyReport,
+  generateLocalDependencyReport,
+} from './local-dependencies.js';
 
 export type DoctorCheck = {
-  id: 'hosted_base_url' | 'hosted_capabilities' | 'remote_auth';
+  id:
+    | 'hosted_base_url'
+    | 'hosted_capabilities'
+    | 'local_dependencies'
+    | 'remote_auth';
   label: string;
   status: 'pass' | 'fail';
   detail: string;
@@ -54,6 +62,7 @@ export async function generateDoctorReport(): Promise<DoctorReport> {
       `Using ${hostedBaseUrl ?? 'https://postplus.io'}`,
     ),
   ];
+  checks.push(await checkLocalDependencies());
 
   if (!hostedBaseUrl) {
     checks.push(
@@ -97,6 +106,32 @@ export async function generateDoctorReport(): Promise<DoctorReport> {
   }
 
   return buildDoctorReport(checks);
+}
+
+async function checkLocalDependencies(): Promise<DoctorCheck> {
+  try {
+    const report = await generateLocalDependencyReport();
+    const detail = formatLocalDependencyReport(report);
+
+    if (!report.ok) {
+      return createFail(
+        'local_dependencies',
+        'Local dependencies',
+        detail,
+        'Install the missing host binaries or Python modules, then rerun `postplus doctor`.',
+      );
+    }
+
+    return createPass('local_dependencies', 'Local dependencies', detail);
+  } catch (error) {
+    return createFail(
+      'local_dependencies',
+      'Local dependencies',
+      error instanceof Error
+        ? error.message
+        : 'Failed to check local dependencies.',
+    );
+  }
 }
 
 function buildDoctorReport(checks: DoctorCheck[]): DoctorReport {
