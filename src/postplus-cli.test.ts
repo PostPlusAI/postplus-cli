@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { after, beforeEach, describe, it } from 'node:test';
@@ -114,7 +114,7 @@ describe('doctor and status', () => {
           (init?.headers as Record<string, string>)[
             POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.cliVersion
           ],
-          '0.1.21',
+          '0.1.22',
         );
         assert.equal(
           (init?.headers as Record<string, string>)[
@@ -207,7 +207,7 @@ describe('doctor and status', () => {
         }),
       });
       assert.equal(status.schemaVersion, 1);
-      assert.equal((await readLocalConfig())?.cliVersion, '0.1.21');
+      assert.equal((await readLocalConfig())?.cliVersion, '0.1.22');
       assert.equal(status.ok, true);
       assert.equal(status.doctor.schemaVersion, 1);
       assert.equal(status.auth.ok, true);
@@ -403,8 +403,8 @@ describe('doctor and status', () => {
           ok: true,
           source: 'remote',
           cli: {
-            currentVersion: '0.1.21',
-            latestVersion: '0.1.21',
+            currentVersion: '0.1.22',
+            latestVersion: '0.1.22',
             updateAvailable: false,
             updateCommand: 'npm install -g @postplus/cli',
           },
@@ -515,7 +515,10 @@ describe('doctor and status', () => {
     assert.equal(status.ok, true);
     assert.equal(status.doctor.ok, false);
     assert.equal(status.doctor.requiredOk, true);
-    assert.match(formatted, /Overall: OK \(task-specific checks need attention\)/);
+    assert.match(
+      formatted,
+      /Overall: OK \(task-specific checks need attention\)/,
+    );
     assert.match(formatted, /\[WARN\] Task-specific local media dependencies/);
     assert.match(
       formatted,
@@ -649,10 +652,7 @@ describe('doctor and status', () => {
       refreshToken: 'legacy-refresh-token',
     });
 
-    await assert.rejects(
-      () => validateRemoteAuth(),
-      /postplus auth login/,
-    );
+    await assert.rejects(() => validateRemoteAuth(), /postplus auth login/);
   });
 
   it('shows CLI session expiry in auth status output', async () => {
@@ -1475,7 +1475,7 @@ describe('skill management commands', () => {
         'new-skill',
       ]);
       assert.equal(config?.managedSkills?.revision, 'catalog-2');
-      assert.equal(config?.cliVersion, '0.1.21');
+      assert.equal(config?.cliVersion, '0.1.22');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1565,5 +1565,39 @@ describe('skill management commands', () => {
 
     assert.match(versionStdout.trim(), /^\d+\.\d+\.\d+$/);
     assert.equal(flagStdout, versionStdout);
+  });
+});
+
+describe('release packaging', () => {
+  it('publishes every runtime build module emitted from src', async () => {
+    const sourceEntries = await readdir(resolve(process.cwd(), 'src'), {
+      withFileTypes: true,
+    });
+    const runtimeBuildFiles = sourceEntries
+      .filter((entry) => {
+        if (!entry.isFile()) return false;
+        if (!entry.name.endsWith('.ts')) return false;
+        if (entry.name.endsWith('.test.ts')) return false;
+        if (entry.name.endsWith('.spec.ts')) return false;
+        return true;
+      })
+      .map((entry) => `build/${entry.name.replace(/\.ts$/, '.js')}`)
+      .sort();
+
+    const packageJson = JSON.parse(
+      await readFile(resolve(process.cwd(), 'package.json'), 'utf8'),
+    ) as { files?: unknown };
+    assert.ok(Array.isArray(packageJson.files));
+
+    const packageFiles = new Set(
+      packageJson.files.filter(
+        (file): file is string => typeof file === 'string',
+      ),
+    );
+    const missingFiles = runtimeBuildFiles.filter(
+      (file) => !packageFiles.has(file),
+    );
+
+    assert.deepEqual(missingFiles, []);
   });
 });
