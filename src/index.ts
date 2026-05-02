@@ -27,8 +27,8 @@ import {
 import { formatStatusReport, generateStatusReport } from './status.js';
 import {
   readCurrentCliVersion,
-  refreshUpdateCheckCache,
-} from './update-check.js';
+} from './client-compatibility.js';
+import { refreshUpdateCheckCache } from './update-check.js';
 
 function printAuthHelp(): void {
   process.stdout.write(`PostPlus CLI — auth commands

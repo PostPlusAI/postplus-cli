@@ -1,3 +1,8 @@
+import {
+  buildPostPlusClientCompatibilityHeaders,
+  formatPostPlusClientUpgradeError,
+  writeCurrentCliVersionToLocalConfig,
+} from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { setLocalSession } from './local-state.js';
 
@@ -93,6 +98,7 @@ export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
     userEmail: validated.userEmail,
     userId: validated.userId,
   });
+  await writeCurrentCliVersionToLocalConfig();
 
   return {
     accountId: validated.accountId,
@@ -104,12 +110,14 @@ export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
 }
 
 export async function startCloudAuthLogin(apiBaseUrl: string) {
+  const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
   const response = await fetch(
     `${apiBaseUrl}/api/postplus-cli/auth/login/start`,
     {
       method: 'POST',
       headers: {
         accept: 'application/json',
+        ...compatibilityHeaders,
       },
       signal: AbortSignal.timeout(15000),
     },
@@ -158,12 +166,14 @@ export async function pollCloudAuthLogin(input: {
   pollSecret: string;
   requestId: string;
 }) {
+  const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
   const response = await fetch(
     `${input.apiBaseUrl}/api/postplus-cli/auth/login/poll`,
     {
       method: 'POST',
       headers: {
         accept: 'application/json',
+        ...compatibilityHeaders,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
@@ -194,12 +204,14 @@ export async function validateCliSession(input: {
   apiBaseUrl: string;
   cliSessionToken: string;
 }): Promise<ValidatedCliSession> {
+  const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
   const response = await fetch(
     `${input.apiBaseUrl}/api/postplus-cli/auth/whoami`,
     {
       method: 'GET',
       headers: {
         accept: 'application/json',
+        ...compatibilityHeaders,
         authorization: `Bearer ${input.cliSessionToken}`,
       },
       signal: AbortSignal.timeout(15000),
@@ -227,6 +239,10 @@ export function formatCliSessionAuthError(
       'Finish the PostPlus CLI server registration flow, then run `postplus auth login` again.',
       'Once the environment is ready, the CLI will automatically obtain and store its session.',
     ].join(' ');
+  }
+
+  if (payload.code === 'postplus_client_upgrade_required') {
+    return formatPostPlusClientUpgradeError(payload);
   }
 
   if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
@@ -271,6 +287,10 @@ function isCliAuthLoginPendingPayload(
 function formatRemoteAuthLoginError(
   payload: CliAuthLoginStartPayload | CliAuthLoginPollPayload,
 ) {
+  if ('code' in payload && payload.code === 'postplus_client_upgrade_required') {
+    return formatPostPlusClientUpgradeError(payload);
+  }
+
   return 'error' in payload &&
     typeof payload.error === 'string' &&
     payload.error.trim().length > 0

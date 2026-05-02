@@ -2,6 +2,10 @@ import {
   type FreshRemoteAuth,
   resolveFreshRemoteAuth,
 } from './auth-session.js';
+import {
+  buildPostPlusClientCompatibilityHeaders,
+  formatPostPlusClientUpgradeError,
+} from './client-compatibility.js';
 import { resolveHostedBaseUrl } from './hosted-release.js';
 import {
   formatLocalDependencyReport,
@@ -365,18 +369,25 @@ function readReadinessCheckFailureLabel(value: unknown): string | null {
 }
 
 function readErrorMessage(
-  payload: { error?: unknown },
+  payload: { code?: unknown; compatibility?: unknown; error?: unknown },
   fallback: string,
 ): string {
+  if (payload.code === 'postplus_client_upgrade_required') {
+    return formatPostPlusClientUpgradeError(payload);
+  }
+
   return typeof payload.error === 'string' && payload.error.trim().length > 0
     ? payload.error
     : fallback;
 }
 
-function requestWithAuth(input: FreshRemoteAuth, path: string) {
+async function requestWithAuth(input: FreshRemoteAuth, path: string) {
+  const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
+
   return fetch(`${input.apiBaseUrl}${path}`, {
     headers: {
       accept: 'application/json',
+      ...compatibilityHeaders,
       authorization: `Bearer ${input.cliSessionToken}`,
     },
     signal: AbortSignal.timeout(15000),

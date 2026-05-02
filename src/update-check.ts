@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { readCurrentCliVersion } from './client-compatibility.js';
 import {
   getPostPlusConfigDir,
   readManagedSkillBaseline,
@@ -206,18 +207,6 @@ function buildUpdateReport(input: {
     },
     warning: null,
   };
-}
-
-export async function readCurrentCliVersion(): Promise<string> {
-  const packageJsonPath = new URL('../package.json', import.meta.url);
-  const raw = await readFile(packageJsonPath, 'utf8');
-  const parsed = JSON.parse(raw) as { version?: unknown };
-
-  if (typeof parsed.version !== 'string' || !parsed.version.trim()) {
-    throw new Error('Could not read the current PostPlus CLI version.');
-  }
-
-  return parsed.version.trim();
 }
 
 async function fetchLatestCliVersion(fetchFn: typeof fetch): Promise<string> {

@@ -13,6 +13,7 @@ import { dirname, join, resolve } from 'node:path';
 export type PostPlusLocalConfig = {
   accessToken?: string;
   apiBaseUrl?: string;
+  cliVersion?: string;
   accountId?: string;
   cliSessionToken?: string;
   managedSkills?: {

@@ -1,3 +1,8 @@
+import {
+  buildPostPlusClientCompatibilityHeaders,
+  formatPostPlusClientUpgradeError,
+  writeCurrentCliVersionToLocalConfig,
+} from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import {
   resolveCliSessionTokenState,
@@ -31,7 +36,9 @@ type RemoteAuthRefreshPayload =
       userId: string;
     }
   | {
+      code?: string;
       error?: string;
+      compatibility?: unknown;
     };
 
 export async function resolveFreshRemoteAuth(
@@ -87,10 +94,12 @@ export async function refreshRemoteAuthSession(input?: {
     throw new Error('Run `postplus auth login` before refreshing PostPlus auth.');
   }
 
+  const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
   const response = await fetch(`${apiBaseUrl}/api/postplus-cli/auth/refresh`, {
     method: 'POST',
     headers: {
       accept: 'application/json',
+      ...compatibilityHeaders,
       authorization: `Bearer ${cliSessionToken}`,
       'content-type': 'application/json',
     },
@@ -100,6 +109,13 @@ export async function refreshRemoteAuthSession(input?: {
   const payload = (await response.json()) as RemoteAuthRefreshPayload;
 
   if (!response.ok) {
+    if (
+      'code' in payload &&
+      payload.code === 'postplus_client_upgrade_required'
+    ) {
+      throw new Error(formatPostPlusClientUpgradeError(payload));
+    }
+
     throw new Error(
       'error' in payload && typeof payload.error === 'string'
         ? payload.error
@@ -119,6 +135,7 @@ export async function refreshRemoteAuthSession(input?: {
     userEmail: payload.userEmail,
     userId: payload.userId,
   });
+  await writeCurrentCliVersionToLocalConfig();
 
   return {
     ...payload,

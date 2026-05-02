@@ -1,4 +1,8 @@
 import { resolveFreshRemoteAuth } from './auth-session.js';
+import {
+  buildPostPlusClientCompatibilityHeaders,
+  formatPostPlusClientUpgradeError,
+} from './client-compatibility.js';
 
 export type AuthValidateReport = {
   accountId: string;
@@ -33,6 +37,13 @@ export async function validateRemoteAuth(): Promise<AuthValidateReport> {
       };
 
   if (!response.ok) {
+    if (
+      'code' in payload &&
+      payload.code === 'postplus_client_upgrade_required'
+    ) {
+      throw new Error(formatPostPlusClientUpgradeError(payload));
+    }
+
     throw new Error(
       'error' in payload && typeof payload.error === 'string'
         ? payload.error
@@ -70,11 +81,17 @@ export function formatAuthValidateReport(report: AuthValidateReport): string {
   ].join('\n');
 }
 
-function fetchWhoami(input: { apiBaseUrl: string; cliSessionToken: string }) {
+async function fetchWhoami(input: {
+  apiBaseUrl: string;
+  cliSessionToken: string;
+}) {
+  const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
+
   return fetch(`${input.apiBaseUrl}/api/postplus-cli/auth/whoami`, {
     method: 'GET',
     headers: {
       accept: 'application/json',
+      ...compatibilityHeaders,
       authorization: `Bearer ${input.cliSessionToken}`,
     },
     signal: AbortSignal.timeout(15000),

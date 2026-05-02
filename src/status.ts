@@ -3,6 +3,7 @@ import {
   formatAuthStatusReport,
   generateAuthStatusReport,
 } from './auth.js';
+import { writeCurrentCliVersionToLocalConfig } from './client-compatibility.js';
 import {
   type DoctorReport,
   formatDoctorReport,
@@ -38,6 +39,8 @@ export async function generateStatusReportWithDependencies(dependencies: {
   generateSkillStatus?: typeof generateSkillInstallStatusReport;
   generateUpdateStatus?: typeof generateUpdateStatusReport;
 } = {}): Promise<StatusReport> {
+  await writeCurrentCliVersionToLocalConfig();
+
   const generateAuthStatus =
     dependencies.generateAuthStatus ?? generateAuthStatusReport;
   const generateDoctor = dependencies.generateDoctor ?? generateDoctorReport;

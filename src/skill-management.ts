@@ -1,4 +1,5 @@
 import { runCommand, runInteractiveCommand } from './command-runner.js';
+import { writeCurrentCliVersionToLocalConfig } from './client-compatibility.js';
 import {
   clearManagedSkillBaseline,
   readManagedSkillBaseline,
@@ -83,6 +84,7 @@ export async function runPostPlusSkillUpdate(
     revision: catalog.revision,
     skillNames,
   });
+  await writeCurrentCliVersionToLocalConfig();
 
   return 0;
 }

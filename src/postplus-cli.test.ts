@@ -13,6 +13,7 @@ import {
 } from './auth-login.js';
 import { validateRemoteAuth } from './auth-validate.js';
 import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
+import { POSTPLUS_CLIENT_COMPATIBILITY_HEADERS } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import { generateLocalDependencyReport } from './local-dependencies.js';
 import {
@@ -109,6 +110,24 @@ describe('doctor and status', () => {
           (init?.headers as Record<string, string>).authorization,
           'Bearer cli-session-token-value',
         );
+        assert.equal(
+          (init?.headers as Record<string, string>)[
+            POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.cliVersion
+          ],
+          '0.1.21',
+        );
+        assert.equal(
+          (init?.headers as Record<string, string>)[
+            POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.contractVersion
+          ],
+          '1',
+        );
+        assert.equal(
+          (init?.headers as Record<string, string>)[
+            POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.runtime
+          ],
+          'postplus-cli',
+        );
 
         return new Response(
           JSON.stringify({
@@ -188,6 +207,7 @@ describe('doctor and status', () => {
         }),
       });
       assert.equal(status.schemaVersion, 1);
+      assert.equal((await readLocalConfig())?.cliVersion, '0.1.21');
       assert.equal(status.ok, true);
       assert.equal(status.doctor.schemaVersion, 1);
       assert.equal(status.auth.ok, true);
@@ -310,6 +330,99 @@ describe('doctor and status', () => {
       assert.doesNotMatch(formatted, /Not ready: subscription/);
       assert.match(formatted, /npm install -g @postplus\/cli/);
       assert.match(formatted, /postplus update/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('surfaces server upgrade guidance in status output', async () => {
+    await setLocalSession({
+      cliSessionToken: 'cli-session-token-value',
+      accountId: 'account-1',
+      apiBaseUrl: 'https://postplus.example.com',
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (isPublicCatalogUrl(url)) {
+        return createPublicCatalogResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return new Response(
+          JSON.stringify({
+            code: 'postplus_client_upgrade_required',
+            error: 'Your PostPlus CLI or PostPlus skills are out of date.',
+            compatibility: {
+              upgrade: {
+                cli: {
+                  command: 'npm install -g @postplus/cli',
+                },
+                restartAgentSession: true,
+                skills: {
+                  command: 'postplus update',
+                },
+              },
+            },
+          }),
+          {
+            status: 426,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const status = await generateStatusReportWithDependencies({
+        generateSkillStatus: async () => ({
+          ok: true,
+          error: null,
+          installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
+          installedCount: 1,
+          managedRevision: 'catalog-1',
+          missingSkills: [],
+          requiredCount: 1,
+          retiredManagedSkills: [],
+          scopes: ['global'],
+          source: 'PostPlusAI/postplus-skills',
+          updateCommand: 'postplus update',
+          uninstallCommand: 'postplus uninstall',
+        }),
+        generateUpdateStatus: async () => ({
+          checkedAt: '2026-04-29T00:00:00.000Z',
+          ok: true,
+          source: 'remote',
+          cli: {
+            currentVersion: '0.1.21',
+            latestVersion: '0.1.21',
+            updateAvailable: false,
+            updateCommand: 'npm install -g @postplus/cli',
+          },
+          skills: {
+            currentRevision: 'catalog-1',
+            latestRevision: 'catalog-1',
+            updateAvailable: false,
+            updateCommand: 'postplus update',
+          },
+          warning: null,
+        }),
+      });
+      const formatted = formatStatusReport(status);
+
+      assert.equal(status.ok, false);
+      assert.match(formatted, /npm install -g @postplus\/cli/);
+      assert.match(formatted, /postplus update/);
+      assert.match(formatted, /restart your agent session/i);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1362,6 +1475,7 @@ describe('skill management commands', () => {
         'new-skill',
       ]);
       assert.equal(config?.managedSkills?.revision, 'catalog-2');
+      assert.equal(config?.cliVersion, '0.1.21');
     } finally {
       globalThis.fetch = originalFetch;
     }

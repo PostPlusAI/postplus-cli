@@ -1,5 +1,9 @@
 import { refreshRemoteAuthSession } from './auth-session.js';
 import { clearAuthState, generateAuthStatusReport } from './auth.js';
+import {
+  buildPostPlusClientCompatibilityHeaders,
+  formatPostPlusClientUpgradeError,
+} from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { resolveCliSessionTokenState } from './local-state.js';
 
@@ -47,10 +51,12 @@ export async function revokeRemoteAuth() {
     throw new Error('Run `postplus auth login` before revoking PostPlus auth.');
   }
 
+  const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
   const response = await fetch(`${apiBaseUrl}/api/postplus-cli/auth/revoke`, {
     method: 'POST',
     headers: {
       accept: 'application/json',
+      ...compatibilityHeaders,
       authorization: `Bearer ${cliSessionTokenState.value}`,
       'content-type': 'application/json',
     },
@@ -66,6 +72,13 @@ export async function revokeRemoteAuth() {
       };
 
   if (!response.ok) {
+    if (
+      'code' in payload &&
+      payload.code === 'postplus_client_upgrade_required'
+    ) {
+      throw new Error(formatPostPlusClientUpgradeError(payload));
+    }
+
     throw new Error(
       'error' in payload && typeof payload.error === 'string'
         ? payload.error
