@@ -14,6 +14,7 @@ export type PostPlusLocalConfig = {
   accessToken?: string;
   apiBaseUrl?: string;
   accountId?: string;
+  cliSessionToken?: string;
   managedSkills?: {
     revision: string;
     skillNames: string[];
@@ -41,8 +42,7 @@ export type ApiBaseUrlState = {
 };
 
 export type LocalSessionState = {
-  accessToken: AuthFieldState;
-  refreshToken: AuthFieldState;
+  cliSessionToken: AuthFieldState;
 };
 
 function resolveConfigProfile(): string | null {
@@ -174,6 +174,7 @@ export async function clearLocalAuthState(): Promise<PostPlusLocalConfig> {
     delete next.accessToken;
     delete next.accountId;
     delete next.apiKey;
+    delete next.cliSessionToken;
     delete next.machineId;
     delete next.refreshToken;
     delete next.sessionExpiresAt;
@@ -249,24 +250,18 @@ export async function setLocalApiBaseUrl(
 }
 
 export async function setLocalSession(input: {
-  accessToken: string;
   accountId: string;
   apiBaseUrl: string;
-  refreshToken: string;
+  cliSessionToken: string;
   sessionExpiresAt: number | null;
   userEmail: string | null;
   userId: string;
 }): Promise<PostPlusLocalConfig> {
-  const accessToken = input.accessToken.trim();
-  const refreshToken = input.refreshToken.trim();
+  const cliSessionToken = input.cliSessionToken.trim();
   const apiBaseUrl = input.apiBaseUrl.trim().replace(/\/+$/, '');
 
-  if (accessToken.length === 0) {
-    throw new Error('PostPlus CLI access token cannot be empty.');
-  }
-
-  if (refreshToken.length === 0) {
-    throw new Error('PostPlus CLI refresh token cannot be empty.');
+  if (cliSessionToken.length === 0) {
+    throw new Error('PostPlus CLI session token cannot be empty.');
   }
 
   if (apiBaseUrl.length === 0) {
@@ -275,10 +270,9 @@ export async function setLocalSession(input: {
 
   return updateLocalConfig((current) => ({
     ...omitLegacyAuthFields(current),
-    accessToken,
     accountId: input.accountId,
     apiBaseUrl,
-    refreshToken,
+    cliSessionToken,
     sessionExpiresAt: input.sessionExpiresAt,
     userEmail: input.userEmail,
     userId: input.userId,
@@ -292,6 +286,24 @@ export async function hasLocalConfigFile(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function resolveCliSessionTokenState(): Promise<AuthFieldState> {
+  const config = await readLocalConfig();
+  const configValue = config?.cliSessionToken?.trim();
+  if (configValue && configValue.length > 0) {
+    return {
+      source: 'config',
+      present: true,
+      value: configValue,
+    };
+  }
+
+  return {
+    source: 'missing',
+    present: false,
+    value: null,
+  };
 }
 
 export async function resolveAccessTokenState(): Promise<AuthFieldState> {
@@ -331,14 +343,10 @@ export async function resolveRefreshTokenState(): Promise<AuthFieldState> {
 }
 
 export async function resolveLocalSessionState(): Promise<LocalSessionState> {
-  const [accessToken, refreshToken] = await Promise.all([
-    resolveAccessTokenState(),
-    resolveRefreshTokenState(),
-  ]);
+  const cliSessionToken = await resolveCliSessionTokenState();
 
   return {
-    accessToken,
-    refreshToken,
+    cliSessionToken,
   };
 }
 
@@ -386,7 +394,9 @@ function omitLegacyAuthFields(
 ): PostPlusLocalConfig {
   const {
     apiKey: _apiKey,
+    accessToken: _accessToken,
     machineId: _machineId,
+    refreshToken: _refreshToken,
     ...rest
   } = (current ?? {}) as PostPlusLocalConfig & {
     apiKey?: string;

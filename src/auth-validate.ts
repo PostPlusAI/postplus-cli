@@ -70,12 +70,12 @@ export function formatAuthValidateReport(report: AuthValidateReport): string {
   ].join('\n');
 }
 
-function fetchWhoami(input: { accessToken: string; apiBaseUrl: string }) {
+function fetchWhoami(input: { apiBaseUrl: string; cliSessionToken: string }) {
   return fetch(`${input.apiBaseUrl}/api/postplus-cli/auth/whoami`, {
     method: 'GET',
     headers: {
       accept: 'application/json',
-      authorization: `Bearer ${input.accessToken}`,
+      authorization: `Bearer ${input.cliSessionToken}`,
     },
     signal: AbortSignal.timeout(15000),
   });

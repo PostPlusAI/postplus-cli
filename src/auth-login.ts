@@ -29,9 +29,8 @@ type CliAuthLoginPollPayload =
       error?: string;
     }
   | {
-      accessToken: string;
       accountId: string;
-      refreshToken: string;
+      cliSessionToken: string;
       sessionExpiresAt: number | null;
       status: 'completed';
       subscriptionStatus: string | null;
@@ -81,15 +80,14 @@ export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
     requestId: started.requestId,
   });
   const validated = await validateCliSession({
-    accessToken: handoffPayload.accessToken,
     apiBaseUrl: baseUrl,
+    cliSessionToken: handoffPayload.cliSessionToken,
   });
 
   await setLocalSession({
-    accessToken: handoffPayload.accessToken,
     accountId: validated.accountId,
     apiBaseUrl: baseUrl,
-    refreshToken: handoffPayload.refreshToken,
+    cliSessionToken: handoffPayload.cliSessionToken,
     sessionExpiresAt:
       validated.sessionExpiresAt ?? handoffPayload.sessionExpiresAt ?? null,
     userEmail: validated.userEmail,
@@ -193,8 +191,8 @@ export async function pollCloudAuthLogin(input: {
 }
 
 export async function validateCliSession(input: {
-  accessToken: string;
   apiBaseUrl: string;
+  cliSessionToken: string;
 }): Promise<ValidatedCliSession> {
   const response = await fetch(
     `${input.apiBaseUrl}/api/postplus-cli/auth/whoami`,
@@ -202,7 +200,7 @@ export async function validateCliSession(input: {
       method: 'GET',
       headers: {
         accept: 'application/json',
-        authorization: `Bearer ${input.accessToken}`,
+        authorization: `Bearer ${input.cliSessionToken}`,
       },
       signal: AbortSignal.timeout(15000),
     },
@@ -258,8 +256,7 @@ function isCliAuthLoginCompletedPayload(
   return (
     'status' in payload &&
     payload.status === 'completed' &&
-    typeof payload.accessToken === 'string' &&
-    typeof payload.refreshToken === 'string' &&
+    typeof payload.cliSessionToken === 'string' &&
     typeof payload.accountId === 'string' &&
     typeof payload.userId === 'string'
   );

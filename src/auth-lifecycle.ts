@@ -1,10 +1,7 @@
 import { refreshRemoteAuthSession } from './auth-session.js';
 import { clearAuthState, generateAuthStatusReport } from './auth.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
-import {
-  resolveAccessTokenState,
-  resolveRefreshTokenState,
-} from './local-state.js';
+import { resolveCliSessionTokenState } from './local-state.js';
 
 export type AuthRefreshReport = {
   accountId: string;
@@ -41,17 +38,12 @@ export function formatAuthRefreshReport(report: AuthRefreshReport): string {
 }
 
 export async function revokeRemoteAuth() {
-  const [apiBaseUrl, accessTokenState, refreshTokenState] = await Promise.all([
+  const [apiBaseUrl, cliSessionTokenState] = await Promise.all([
     requireHostedBaseUrl(),
-    resolveAccessTokenState(),
-    resolveRefreshTokenState(),
+    resolveCliSessionTokenState(),
   ]);
 
-  if (!accessTokenState.present || !accessTokenState.value) {
-    throw new Error('Run `postplus auth login` before revoking PostPlus auth.');
-  }
-
-  if (!refreshTokenState.present || !refreshTokenState.value) {
+  if (!cliSessionTokenState.present || !cliSessionTokenState.value) {
     throw new Error('Run `postplus auth login` before revoking PostPlus auth.');
   }
 
@@ -59,12 +51,10 @@ export async function revokeRemoteAuth() {
     method: 'POST',
     headers: {
       accept: 'application/json',
-      authorization: `Bearer ${accessTokenState.value}`,
+      authorization: `Bearer ${cliSessionTokenState.value}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      refreshToken: refreshTokenState.value,
-    }),
+    body: JSON.stringify({}),
     signal: AbortSignal.timeout(15000),
   });
   const payload = (await response.json()) as

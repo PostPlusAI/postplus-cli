@@ -11,12 +11,7 @@ import {
 
 export type AuthStatusReport = {
   ok: boolean;
-  accessToken: {
-    source: 'config' | 'missing';
-    present: boolean;
-    maskedValue: string | null;
-  };
-  refreshToken: {
+  cliSessionToken: {
     source: 'config' | 'missing';
     present: boolean;
     maskedValue: string | null;
@@ -30,6 +25,7 @@ export type AuthStatusReport = {
     path: string;
     exists: boolean;
     accountId: string | null;
+    sessionExpiresAt: number | null;
     userEmail: string | null;
     userId: string | null;
   };
@@ -45,14 +41,11 @@ export async function generateAuthStatusReport(): Promise<AuthStatusReport> {
     ]);
 
   return {
-    ok:
-      sessionState.accessToken.present &&
-      sessionState.refreshToken.present &&
-      apiBaseUrlState.present,
-    accessToken: {
-      source: sessionState.accessToken.source,
-      present: sessionState.accessToken.present,
-      maskedValue: maskSecret(sessionState.accessToken.value),
+    ok: sessionState.cliSessionToken.present && apiBaseUrlState.present,
+    cliSessionToken: {
+      source: sessionState.cliSessionToken.source,
+      present: sessionState.cliSessionToken.present,
+      maskedValue: maskSecret(sessionState.cliSessionToken.value),
     },
     apiBaseUrl: {
       source: apiBaseUrlState.source,
@@ -63,14 +56,13 @@ export async function generateAuthStatusReport(): Promise<AuthStatusReport> {
       path: getPostPlusConfigPath(),
       exists: configExists,
       accountId: config?.accountId?.trim() || null,
+      sessionExpiresAt:
+        typeof config?.sessionExpiresAt === 'number'
+          ? config.sessionExpiresAt
+          : null,
       userEmail:
         typeof config?.userEmail === 'string' ? config.userEmail.trim() : null,
       userId: config?.userId?.trim() || null,
-    },
-    refreshToken: {
-      source: sessionState.refreshToken.source,
-      present: sessionState.refreshToken.present,
-      maskedValue: maskSecret(sessionState.refreshToken.value),
     },
   };
 }
@@ -79,23 +71,13 @@ export function formatAuthStatusReport(report: AuthStatusReport): string {
   const lines = ['PostPlus CLI auth status', ''];
 
   lines.push(
-    report.accessToken.present
-      ? `[PASS] Access token: present (${report.accessToken.source})`
-      : '[FAIL] Access token: missing',
+    report.cliSessionToken.present
+      ? `[PASS] CLI session token: present (${report.cliSessionToken.source})`
+      : '[FAIL] CLI session token: missing',
   );
   lines.push(
-    report.accessToken.maskedValue
-      ? `  Value: ${report.accessToken.maskedValue}`
-      : '  Value: not configured',
-  );
-  lines.push(
-    report.refreshToken.present
-      ? `[PASS] Refresh token: present (${report.refreshToken.source})`
-      : '[FAIL] Refresh token: missing',
-  );
-  lines.push(
-    report.refreshToken.maskedValue
-      ? `  Value: ${report.refreshToken.maskedValue}`
+    report.cliSessionToken.maskedValue
+      ? `  Value: ${report.cliSessionToken.maskedValue}`
       : '  Value: not configured',
   );
   lines.push(
@@ -116,6 +98,13 @@ export function formatAuthStatusReport(report: AuthStatusReport): string {
   lines.push(`  Account: ${report.config.accountId ?? 'not bound'}`);
   lines.push(
     `  User: ${report.config.userEmail ?? report.config.userId ?? 'not bound'}`,
+  );
+  lines.push(
+    `  Expires: ${
+      report.config.sessionExpiresAt
+        ? new Date(report.config.sessionExpiresAt * 1000).toISOString()
+        : 'unknown'
+    }`,
   );
   lines.push('', report.ok ? 'Auth status OK.' : 'Auth status incomplete.');
 

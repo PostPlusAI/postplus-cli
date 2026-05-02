@@ -377,7 +377,7 @@ function requestWithAuth(input: FreshRemoteAuth, path: string) {
   return fetch(`${input.apiBaseUrl}${path}`, {
     headers: {
       accept: 'application/json',
-      authorization: `Bearer ${input.accessToken}`,
+      authorization: `Bearer ${input.cliSessionToken}`,
     },
     signal: AbortSignal.timeout(15000),
   });

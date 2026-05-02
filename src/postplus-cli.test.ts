@@ -18,6 +18,7 @@ import { generateLocalDependencyReport } from './local-dependencies.js';
 import {
   readLocalConfig,
   setLocalSession,
+  writeLocalConfig,
   writeManagedSkillBaseline,
 } from './local-state.js';
 import {
@@ -88,10 +89,9 @@ after(async () => {
 describe('doctor and status', () => {
   it('reports PostPlus Cloud auth readiness with skill and update state', async () => {
     await setLocalSession({
-      accessToken: 'access-token-value',
+      cliSessionToken: 'cli-session-token-value',
       accountId: 'account-1',
       apiBaseUrl: 'https://postplus.example.com',
-      refreshToken: 'refresh-token-value',
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
       userId: 'user-1',
@@ -107,7 +107,7 @@ describe('doctor and status', () => {
       if (url.endsWith('/api/postplus-cli/auth/whoami')) {
         assert.equal(
           (init?.headers as Record<string, string>).authorization,
-          'Bearer access-token-value',
+          'Bearer cli-session-token-value',
         );
 
         return new Response(
@@ -203,10 +203,9 @@ describe('doctor and status', () => {
 
   it('reports inactive subscriptions without failing hosted readiness', async () => {
     await setLocalSession({
-      accessToken: 'access-token-value',
+      cliSessionToken: 'cli-session-token-value',
       accountId: 'account-1',
       apiBaseUrl: 'https://postplus.example.com',
-      refreshToken: 'refresh-token-value',
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
       userId: 'user-1',
@@ -345,15 +344,10 @@ describe('doctor and status', () => {
       }),
       generateAuthStatus: async () => ({
         ok: true,
-        accessToken: {
+        cliSessionToken: {
           source: 'config',
           present: true,
           maskedValue: 'abc',
-        },
-        refreshToken: {
-          source: 'config',
-          present: true,
-          maskedValue: 'def',
         },
         apiBaseUrl: {
           source: 'default',
@@ -364,6 +358,7 @@ describe('doctor and status', () => {
           path: '/tmp/postplus/config.json',
           exists: true,
           accountId: 'account-1',
+          sessionExpiresAt: 1_900_000_000,
           userEmail: 'user@example.com',
           userId: 'user-1',
         },
@@ -417,10 +412,9 @@ describe('doctor and status', () => {
 
   it('formats nested hosted readiness check failures', async () => {
     await setLocalSession({
-      accessToken: 'access-token-value',
+      cliSessionToken: 'cli-session-token-value',
       accountId: 'account-1',
       apiBaseUrl: 'https://postplus.example.com',
-      refreshToken: 'refresh-token-value',
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
       userId: 'user-1',
@@ -532,16 +526,27 @@ describe('doctor and status', () => {
     const report = await generateAuthStatusReport();
 
     assert.equal(report.ok, false);
-    assert.equal(report.accessToken.present, false);
-    assert.equal(report.refreshToken.present, false);
+    assert.equal(report.cliSessionToken.present, false);
   });
 
-  it('omits access token expiry from auth status output', async () => {
+  it('does not accept legacy Supabase token config as CLI auth', async () => {
+    await writeLocalConfig({
+      accessToken: 'legacy-access-token',
+      apiBaseUrl: 'https://postplus.example.com',
+      refreshToken: 'legacy-refresh-token',
+    });
+
+    await assert.rejects(
+      () => validateRemoteAuth(),
+      /postplus auth login/,
+    );
+  });
+
+  it('shows CLI session expiry in auth status output', async () => {
     await setLocalSession({
-      accessToken: createTestJwt(Math.floor(Date.now() / 1_000) + 3600),
       accountId: 'account-1',
       apiBaseUrl: 'https://postplus.example.com',
-      refreshToken: 'refresh-token-value',
+      cliSessionToken: 'cli-session-token-value',
       sessionExpiresAt: Math.floor(Date.now() / 1_000) + 3600,
       userEmail: 'user@example.com',
       userId: 'user-1',
@@ -549,30 +554,25 @@ describe('doctor and status', () => {
 
     const formatted = formatAuthStatusReport(await generateAuthStatusReport());
 
-    assert.doesNotMatch(formatted, /expires/i);
+    assert.match(formatted, /Expires:/);
   });
 
-  it('refreshes an expired session before doctor checks remote auth', async () => {
+  it('refreshes a rejected CLI session before doctor checks remote auth', async () => {
     process.env.POSTPLUS_ACCESS_TOKEN = 'stale-env-access-token';
     process.env.POSTPLUS_REFRESH_TOKEN = 'stale-env-refresh-token';
-    const refreshedAccessToken = createTestJwt(
-      Math.floor(Date.now() / 1_000) + 3600,
-    );
-    const configAccessToken = createTestJwt(
-      Math.floor(Date.now() / 1_000) - 60,
-    );
     await setLocalSession({
-      accessToken: configAccessToken,
       accountId: 'account-1',
       apiBaseUrl: 'https://postplus.example.com',
-      refreshToken: 'refresh-token-value',
-      sessionExpiresAt: Math.floor(Date.now() / 1_000) - 60,
+      cliSessionToken: 'cli-session-token-value',
+      sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
       userId: 'user-1',
     });
 
     const originalFetch = globalThis.fetch;
     const requestedUrls: string[] = [];
+    let readinessCount = 0;
+    let refreshCount = 0;
     globalThis.fetch = async (input, init) => {
       const url = String(input);
       requestedUrls.push(url);
@@ -582,19 +582,19 @@ describe('doctor and status', () => {
       }
 
       if (url.endsWith('/api/postplus-cli/auth/refresh')) {
+        refreshCount += 1;
         assert.equal(
           (init?.headers as Record<string, string>).authorization,
-          `Bearer ${configAccessToken}`,
+          refreshCount === 1
+            ? 'Bearer cli-session-token-value'
+            : 'Bearer cli-session-token-refreshed',
         );
-        assert.deepEqual(JSON.parse(String(init?.body)), {
-          refreshToken: 'refresh-token-value',
-        });
+        assert.deepEqual(JSON.parse(String(init?.body)), {});
 
         return new Response(
           JSON.stringify({
-            accessToken: refreshedAccessToken,
             accountId: 'account-1',
-            refreshToken: 'refresh-token-next',
+            cliSessionToken: 'cli-session-token-refreshed',
             sessionExpiresAt: Math.floor(Date.now() / 1_000) + 3600,
             subscriptionStatus: 'active',
             userEmail: 'user@example.com',
@@ -607,12 +607,27 @@ describe('doctor and status', () => {
         );
       }
 
-      assert.equal(
-        (init?.headers as Record<string, string>).authorization,
-        `Bearer ${refreshedAccessToken}`,
-      );
-
       if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        assert.equal(
+          (init?.headers as Record<string, string>).authorization,
+          requestedUrls.filter((value) =>
+            value.endsWith('/api/postplus-cli/auth/whoami'),
+          ).length === 1
+            ? 'Bearer cli-session-token-value'
+            : 'Bearer cli-session-token-refreshed',
+        );
+
+        if (
+          requestedUrls.filter((value) =>
+            value.endsWith('/api/postplus-cli/auth/whoami'),
+          ).length === 1
+        ) {
+          return new Response(JSON.stringify({ error: 'expired' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+
         return new Response(
           JSON.stringify({
             accountId: 'account-1',
@@ -628,6 +643,21 @@ describe('doctor and status', () => {
       }
 
       if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+        readinessCount += 1;
+        assert.equal(
+          (init?.headers as Record<string, string>).authorization,
+          readinessCount === 1
+            ? 'Bearer cli-session-token-value'
+            : 'Bearer cli-session-token-refreshed',
+        );
+
+        if (readinessCount === 1) {
+          return new Response(JSON.stringify({ error: 'expired' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+
         return new Response(
           JSON.stringify({
             ok: true,
@@ -656,42 +686,45 @@ describe('doctor and status', () => {
       assert.deepEqual(
         requestedUrls.filter((url) => !isPublicCatalogUrl(url)),
         [
+          'https://postplus.example.com/api/postplus-cli/auth/whoami',
           'https://postplus.example.com/api/postplus-cli/auth/refresh',
           'https://postplus.example.com/api/postplus-cli/auth/whoami',
           'https://postplus.example.com/api/postplus-cli/hosted/readiness',
+          'https://postplus.example.com/api/postplus-cli/auth/refresh',
+          'https://postplus.example.com/api/postplus-cli/hosted/readiness',
         ],
       );
-      assert.equal(config?.accessToken, refreshedAccessToken);
-      assert.equal(config?.refreshToken, 'refresh-token-next');
+      assert.equal(config?.cliSessionToken, 'cli-session-token-refreshed');
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it('refreshes an expired session before auth validate', async () => {
-    const refreshedAccessToken = createTestJwt(
-      Math.floor(Date.now() / 1_000) + 3600,
-    );
+  it('refreshes a rejected CLI session before auth validate', async () => {
     await setLocalSession({
-      accessToken: createTestJwt(Math.floor(Date.now() / 1_000) - 60),
       accountId: 'account-1',
       apiBaseUrl: 'https://postplus.example.com',
-      refreshToken: 'refresh-token-value',
-      sessionExpiresAt: Math.floor(Date.now() / 1_000) - 60,
+      cliSessionToken: 'cli-session-token-value',
+      sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
       userId: 'user-1',
     });
 
     const originalFetch = globalThis.fetch;
+    let whoamiCount = 0;
     globalThis.fetch = async (input, init) => {
       const url = String(input);
 
       if (url.endsWith('/api/postplus-cli/auth/refresh')) {
+        assert.equal(
+          (init?.headers as Record<string, string>).authorization,
+          'Bearer cli-session-token-value',
+        );
+
         return new Response(
           JSON.stringify({
-            accessToken: refreshedAccessToken,
             accountId: 'account-1',
-            refreshToken: 'refresh-token-next',
+            cliSessionToken: 'cli-session-token-refreshed',
             sessionExpiresAt: Math.floor(Date.now() / 1_000) + 3600,
             subscriptionStatus: 'active',
             userEmail: 'user@example.com',
@@ -708,10 +741,20 @@ describe('doctor and status', () => {
         url,
         'https://postplus.example.com/api/postplus-cli/auth/whoami',
       );
+      whoamiCount += 1;
       assert.equal(
         (init?.headers as Record<string, string>).authorization,
-        `Bearer ${refreshedAccessToken}`,
+        whoamiCount === 1
+          ? 'Bearer cli-session-token-value'
+          : 'Bearer cli-session-token-refreshed',
       );
+
+      if (whoamiCount === 1) {
+        return new Response(JSON.stringify({ error: 'expired' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
 
       return new Response(
         JSON.stringify({
@@ -737,13 +780,6 @@ describe('doctor and status', () => {
     }
   });
 });
-
-function createTestJwt(exp: number): string {
-  const encode = (value: unknown) =>
-    Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
-
-  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({ exp })}.signature`;
-}
 
 describe('cloud auth handoff', () => {
   it('keeps the CLI login window at 30 minutes', () => {
@@ -798,9 +834,8 @@ describe('cloud auth handoff', () => {
 
       return new Response(
         JSON.stringify({
-          accessToken: 'access-token-value',
           accountId: 'account-1',
-          refreshToken: 'refresh-token-value',
+          cliSessionToken: 'cli-session-token-value',
           sessionExpiresAt: 1_900_000_000,
           status: 'completed',
           subscriptionStatus: 'active',
@@ -822,8 +857,7 @@ describe('cloud auth handoff', () => {
       });
 
       assert.equal(completed.status, 'completed');
-      assert.equal(completed.accessToken, 'access-token-value');
-      assert.equal(completed.refreshToken, 'refresh-token-value');
+      assert.equal(completed.cliSessionToken, 'cli-session-token-value');
     } finally {
       globalThis.fetch = originalFetch;
     }
