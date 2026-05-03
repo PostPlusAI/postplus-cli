@@ -33,12 +33,14 @@ export async function generateStatusReport(): Promise<StatusReport> {
   return generateStatusReportWithDependencies();
 }
 
-export async function generateStatusReportWithDependencies(dependencies: {
-  generateAuthStatus?: typeof generateAuthStatusReport;
-  generateDoctor?: typeof generateDoctorReport;
-  generateSkillStatus?: typeof generateSkillInstallStatusReport;
-  generateUpdateStatus?: typeof generateUpdateStatusReport;
-} = {}): Promise<StatusReport> {
+export async function generateStatusReportWithDependencies(
+  dependencies: {
+    generateAuthStatus?: typeof generateAuthStatusReport;
+    generateDoctor?: typeof generateDoctorReport;
+    generateSkillStatus?: typeof generateSkillInstallStatusReport;
+    generateUpdateStatus?: typeof generateUpdateStatusReport;
+  } = {},
+): Promise<StatusReport> {
   await writeCurrentCliVersionToLocalConfig();
 
   const generateAuthStatus =

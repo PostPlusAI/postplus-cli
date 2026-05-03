@@ -29,8 +29,8 @@ export type UpdateStatusReport = {
     updateCommand: string;
   };
   skills: {
-    currentRevision: string | null;
-    latestRevision: string | null;
+    currentReleaseId: string | null;
+    latestReleaseId: string | null;
     updateAvailable: boolean;
     updateCommand: string;
   };
@@ -44,7 +44,7 @@ type UpdateCheckCache = {
     latestVersion: string;
   };
   skills: {
-    latestRevision: string;
+    latestReleaseId: string;
   };
 };
 
@@ -73,15 +73,15 @@ export async function generateUpdateStatusReport(
     return buildUpdateReport({
       cache,
       currentVersion,
-      currentSkillRevision: managedSkillBaseline.revision,
+      currentSkillsReleaseId: managedSkillBaseline.releaseId,
       source: 'cache',
     });
   }
 
   try {
-    const [latestCliVersion, latestSkillRevision] = await Promise.all([
+    const [latestCliVersion, latestSkillsReleaseId] = await Promise.all([
       fetchLatestCliVersion(dependencies.fetchFn),
-      fetchLatestSkillRevision(dependencies.fetchFn),
+      fetchLatestSkillReleaseId(dependencies.fetchFn),
     ]);
     const nextCache = {
       checkedAt: new Date().toISOString(),
@@ -90,7 +90,7 @@ export async function generateUpdateStatusReport(
         latestVersion: latestCliVersion,
       },
       skills: {
-        latestRevision: latestSkillRevision,
+        latestReleaseId: latestSkillsReleaseId,
       },
     };
     await writeUpdateCheckCache(nextCache);
@@ -98,7 +98,7 @@ export async function generateUpdateStatusReport(
     return buildUpdateReport({
       cache: nextCache,
       currentVersion,
-      currentSkillRevision: managedSkillBaseline.revision,
+      currentSkillsReleaseId: managedSkillBaseline.releaseId,
       source: 'remote',
     });
   } catch (error) {
@@ -110,7 +110,7 @@ export async function generateUpdateStatusReport(
         ...buildUpdateReport({
           cache,
           currentVersion,
-          currentSkillRevision: managedSkillBaseline.revision,
+          currentSkillsReleaseId: managedSkillBaseline.releaseId,
           source: 'cache',
         }),
         warning,
@@ -128,8 +128,8 @@ export async function generateUpdateStatusReport(
         updateCommand: 'npm install -g @postplus/cli',
       },
       skills: {
-        currentRevision: managedSkillBaseline.revision,
-        latestRevision: null,
+        currentReleaseId: managedSkillBaseline.releaseId,
+        latestReleaseId: null,
         updateAvailable: false,
         updateCommand: 'postplus update',
       },
@@ -160,8 +160,8 @@ export function formatUpdateStatusReport(report: UpdateStatusReport): string {
   const skillMarker = report.skills.updateAvailable ? '[WARN]' : '[PASS]';
   lines.push(
     `${skillMarker} Skills: ${
-      report.skills.latestRevision
-        ? `release ${shortRevision(report.skills.latestRevision)}`
+      report.skills.latestReleaseId
+        ? `release ${shortReleaseId(report.skills.latestReleaseId)}`
         : 'release unknown'
     }`,
   );
@@ -183,7 +183,7 @@ export function formatUpdateStatusReport(report: UpdateStatusReport): string {
 function buildUpdateReport(input: {
   cache: UpdateCheckCache;
   currentVersion: string;
-  currentSkillRevision: string | null;
+  currentSkillsReleaseId: string | null;
   source: 'cache' | 'remote';
 }): UpdateStatusReport {
   return {
@@ -199,10 +199,10 @@ function buildUpdateReport(input: {
       updateCommand: 'npm install -g @postplus/cli',
     },
     skills: {
-      currentRevision: input.currentSkillRevision,
-      latestRevision: input.cache.skills.latestRevision,
+      currentReleaseId: input.currentSkillsReleaseId,
+      latestReleaseId: input.cache.skills.latestReleaseId,
       updateAvailable:
-        input.cache.skills.latestRevision !== input.currentSkillRevision,
+        input.cache.skills.latestReleaseId !== input.currentSkillsReleaseId,
       updateCommand: 'postplus update',
     },
     warning: null,
@@ -233,14 +233,14 @@ async function fetchLatestCliVersion(fetchFn: typeof fetch): Promise<string> {
   return payload.version.trim();
 }
 
-async function fetchLatestSkillRevision(
+async function fetchLatestSkillReleaseId(
   fetchFn: typeof fetch,
 ): Promise<string> {
   try {
-    return (await loadPublicSkillCatalog(fetchFn)).revision;
+    return (await loadPublicSkillCatalog(fetchFn)).releaseId;
   } catch (error) {
     throw new Error(
-      `Failed to check latest ${POSTPLUS_SKILLS_REPO} revision: ${
+      `Failed to check latest ${POSTPLUS_SKILLS_REPO} releaseId: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -256,7 +256,7 @@ async function readUpdateCheckCache(): Promise<UpdateCheckCache | null> {
       typeof parsed.checkedAt !== 'string' ||
       typeof parsed.cli?.currentVersion !== 'string' ||
       typeof parsed.cli?.latestVersion !== 'string' ||
-      typeof parsed.skills?.latestRevision !== 'string'
+      typeof parsed.skills?.latestReleaseId !== 'string'
     ) {
       return null;
     }
@@ -310,6 +310,6 @@ function parseVersion(value: string): number[] {
     .map((part) => (Number.isFinite(part) ? part : 0));
 }
 
-function shortRevision(revision: string): string {
-  return revision.length > 12 ? revision.slice(0, 12) : revision;
+function shortReleaseId(releaseId: string): string {
+  return releaseId.length > 12 ? releaseId.slice(0, 12) : releaseId;
 }

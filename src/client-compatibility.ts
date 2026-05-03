@@ -9,7 +9,7 @@ export const POSTPLUS_CLIENT_COMPATIBILITY_HEADERS = {
   cliVersion: 'x-postplus-cli-version',
   contractVersion: 'x-postplus-client-contract-version',
   runtime: 'x-postplus-client-runtime',
-  skillCatalogRevision: 'x-postplus-skill-catalog-revision',
+  skillsReleaseId: 'x-postplus-skills-release-id',
   skillName: 'x-postplus-skill-name',
 } as const;
 
@@ -29,9 +29,11 @@ export type PostPlusClientUpgradePayload = {
   error?: string;
 };
 
-export async function buildPostPlusClientCompatibilityHeaders(input: {
-  skillName?: string | null;
-} = {}): Promise<Record<string, string>> {
+export async function buildPostPlusClientCompatibilityHeaders(
+  input: {
+    skillName?: string | null;
+  } = {},
+): Promise<Record<string, string>> {
   const [cliVersion, config] = await Promise.all([
     readCurrentCliVersion(),
     readLocalConfig(),
@@ -43,12 +45,12 @@ export async function buildPostPlusClientCompatibilityHeaders(input: {
     ),
     [POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.runtime]: POSTPLUS_CLIENT_RUNTIME,
   };
-  const skillCatalogRevision = config?.managedSkills?.revision?.trim();
+  const skillsReleaseId = config?.managedSkills?.releaseId?.trim();
   const skillName = input.skillName?.trim();
 
-  if (skillCatalogRevision) {
-    headers[POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.skillCatalogRevision] =
-      skillCatalogRevision;
+  if (skillsReleaseId) {
+    headers[POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.skillsReleaseId] =
+      skillsReleaseId;
   }
 
   if (skillName) {
@@ -79,9 +81,7 @@ export async function readCurrentCliVersion(): Promise<string> {
   return parsed.version.trim();
 }
 
-export function formatPostPlusClientUpgradeError(
-  payload: unknown,
-) {
+export function formatPostPlusClientUpgradeError(payload: unknown) {
   const record =
     payload && typeof payload === 'object' && !Array.isArray(payload)
       ? (payload as PostPlusClientUpgradePayload)

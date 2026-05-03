@@ -14,6 +14,7 @@ import {
   formatAuthStatusReport,
   generateAuthStatusReport,
 } from './auth.js';
+import { readCurrentCliVersion } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import { assertConfigFilePermissions } from './local-state.js';
 import {
@@ -25,9 +26,6 @@ import {
   runPostPlusSkillUpdate,
 } from './skill-management.js';
 import { formatStatusReport, generateStatusReport } from './status.js';
-import {
-  readCurrentCliVersion,
-} from './client-compatibility.js';
 import { refreshUpdateCheckCache } from './update-check.js';
 
 function printAuthHelp(): void {

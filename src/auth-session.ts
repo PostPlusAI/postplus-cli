@@ -4,10 +4,7 @@ import {
   writeCurrentCliVersionToLocalConfig,
 } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
-import {
-  resolveCliSessionTokenState,
-  setLocalSession,
-} from './local-state.js';
+import { resolveCliSessionTokenState, setLocalSession } from './local-state.js';
 
 export type FreshRemoteAuth = {
   apiBaseUrl: string;
@@ -91,7 +88,9 @@ export async function refreshRemoteAuthSession(input?: {
       : input.cliSessionToken;
 
   if (!cliSessionToken) {
-    throw new Error('Run `postplus auth login` before refreshing PostPlus auth.');
+    throw new Error(
+      'Run `postplus auth login` before refreshing PostPlus auth.',
+    );
   }
 
   const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
@@ -151,7 +150,8 @@ function isRemoteAuthRefreshSuccessPayload(
     payload !== null &&
     typeof (payload as { cliSessionToken?: unknown }).cliSessionToken ===
       'string' &&
-    (payload as { cliSessionToken: string }).cliSessionToken.trim().length > 0 &&
+    (payload as { cliSessionToken: string }).cliSessionToken.trim().length >
+      0 &&
     typeof (payload as { accountId?: unknown }).accountId === 'string' &&
     typeof (payload as { userId?: unknown }).userId === 'string'
   );

@@ -52,7 +52,7 @@ function createPublicCatalogResponse(): Response {
   return new Response(
     JSON.stringify({
       schemaVersion: 1,
-      revision: 'catalog-1',
+      releaseId: 'catalog-1',
       source: 'PostPlusAI/postplus-skills',
       primaryIndex: 'skills/INDEX.md',
       skills: [
@@ -178,7 +178,7 @@ describe('doctor and status', () => {
           error: null,
           installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
           installedCount: 2,
-          managedRevision: 'catalog-1',
+          managedSkillsReleaseId: 'catalog-1',
           missingSkills: [],
           requiredCount: 2,
           retiredManagedSkills: [],
@@ -198,8 +198,8 @@ describe('doctor and status', () => {
             updateCommand: 'npm install -g @postplus/cli',
           },
           skills: {
-            currentRevision: 'abc123',
-            latestRevision: 'abc123',
+            currentReleaseId: 'abc123',
+            latestReleaseId: 'abc123',
             updateAvailable: false,
             updateCommand: 'postplus update',
           },
@@ -295,7 +295,7 @@ describe('doctor and status', () => {
           error: null,
           installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
           installedCount: 2,
-          managedRevision: 'catalog-1',
+          managedSkillsReleaseId: 'catalog-1',
           missingSkills: [],
           requiredCount: 2,
           retiredManagedSkills: [],
@@ -315,8 +315,8 @@ describe('doctor and status', () => {
             updateCommand: 'npm install -g @postplus/cli',
           },
           skills: {
-            currentRevision: 'abc123',
-            latestRevision: 'def456',
+            currentReleaseId: 'abc123',
+            latestReleaseId: 'def456',
             updateAvailable: true,
             updateCommand: 'postplus update',
           },
@@ -389,7 +389,7 @@ describe('doctor and status', () => {
           error: null,
           installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
           installedCount: 1,
-          managedRevision: 'catalog-1',
+          managedSkillsReleaseId: 'catalog-1',
           missingSkills: [],
           requiredCount: 1,
           retiredManagedSkills: [],
@@ -409,8 +409,8 @@ describe('doctor and status', () => {
             updateCommand: 'npm install -g @postplus/cli',
           },
           skills: {
-            currentRevision: 'catalog-1',
-            latestRevision: 'catalog-1',
+            currentReleaseId: 'catalog-1',
+            latestReleaseId: 'catalog-1',
             updateAvailable: false,
             updateCommand: 'postplus update',
           },
@@ -481,7 +481,7 @@ describe('doctor and status', () => {
         error: null,
         installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
         installedCount: 1,
-        managedRevision: 'catalog-1',
+        managedSkillsReleaseId: 'catalog-1',
         missingSkills: [],
         requiredCount: 1,
         retiredManagedSkills: [],
@@ -501,8 +501,8 @@ describe('doctor and status', () => {
           updateCommand: 'npm install -g @postplus/cli',
         },
         skills: {
-          currentRevision: 'catalog-1',
-          latestRevision: 'catalog-1',
+          currentReleaseId: 'catalog-1',
+          latestReleaseId: 'catalog-1',
           updateAvailable: false,
           updateCommand: 'postplus update',
         },
@@ -1005,7 +1005,7 @@ describe('public skill catalog', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 1,
-          revision: 'catalog-1',
+          releaseId: 'catalog-1',
           source: 'PostPlusAI/postplus-skills',
           primaryIndex: 'skills/INDEX.md',
           skills: [
@@ -1034,7 +1034,7 @@ describe('public skill catalog', () => {
       const catalog = await loadPublicSkillCatalog();
 
       assert.equal(catalog.source, 'PostPlusAI/postplus-skills');
-      assert.equal(catalog.revision, 'catalog-1');
+      assert.equal(catalog.releaseId, 'catalog-1');
       assert.equal(catalog.installCommand, POSTPLUS_SKILLS_INSTALL_COMMAND);
       assert.deepEqual(catalog.skills, [
         {
@@ -1095,7 +1095,7 @@ describe('public skill catalog', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 1,
-          revision: 'catalog-1',
+          releaseId: 'catalog-1',
           source: 'PostPlusAI/postplus-skills',
           skills: [],
         }),
@@ -1125,7 +1125,7 @@ describe('local dependency diagnostics', () => {
         indexUrl: 'https://example.com/skills/INDEX.md',
         installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
         listCommand: 'npx -y skills add PostPlusAI/postplus-skills --list',
-        revision: 'catalog-1',
+        releaseId: 'catalog-1',
         source: 'PostPlusAI/postplus-skills',
         skills: [
           {
@@ -1173,9 +1173,9 @@ describe('local dependency diagnostics', () => {
 });
 
 describe('update checks', () => {
-  it('compares the public skill revision with the managed skill baseline', async () => {
+  it('compares the public skill releaseId with the managed skill baseline', async () => {
     await writeManagedSkillBaseline({
-      revision: 'catalog-1',
+      releaseId: 'catalog-1',
       skillNames: ['demo-skill'],
     });
 
@@ -1194,7 +1194,7 @@ describe('update checks', () => {
         return new Response(
           JSON.stringify({
             schemaVersion: 1,
-            revision: 'catalog-2',
+            releaseId: 'catalog-2',
             source: 'PostPlusAI/postplus-skills',
             skills: [
               {
@@ -1220,8 +1220,8 @@ describe('update checks', () => {
     try {
       const report = await generateUpdateStatusReport({ force: true });
 
-      assert.equal(report.skills.currentRevision, 'catalog-1');
-      assert.equal(report.skills.latestRevision, 'catalog-2');
+      assert.equal(report.skills.currentReleaseId, 'catalog-1');
+      assert.equal(report.skills.latestReleaseId, 'catalog-2');
       assert.equal(report.skills.updateAvailable, true);
     } finally {
       globalThis.fetch = originalFetch;
@@ -1259,7 +1259,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 1,
-          revision: 'catalog-1',
+          releaseId: 'catalog-1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -1319,7 +1319,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 1,
-          revision: 'catalog-1',
+          releaseId: 'catalog-1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -1376,7 +1376,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 1,
-          revision: 'catalog-2',
+          releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -1394,7 +1394,7 @@ describe('skill management commands', () => {
 
     try {
       await writeManagedSkillBaseline({
-        revision: 'catalog-1',
+        releaseId: 'catalog-1',
         skillNames: ['demo-skill', 'retired-skill'],
       });
       const report = await generateSkillInstallStatusReport({
@@ -1412,7 +1412,7 @@ describe('skill management commands', () => {
       });
 
       assert.equal(report.ok, true);
-      assert.equal(report.managedRevision, 'catalog-1');
+      assert.equal(report.managedSkillsReleaseId, 'catalog-1');
       assert.deepEqual(report.retiredManagedSkills, ['retired-skill']);
     } finally {
       globalThis.fetch = originalFetch;
@@ -1425,7 +1425,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 1,
-          revision: 'catalog-2',
+          releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -1449,7 +1449,7 @@ describe('skill management commands', () => {
 
     try {
       await writeManagedSkillBaseline({
-        revision: 'catalog-1',
+        releaseId: 'catalog-1',
         skillNames: ['demo-skill', 'retired-skill'],
       });
       const exitCode = await runPostPlusSkillUpdate({
@@ -1474,7 +1474,7 @@ describe('skill management commands', () => {
         'demo-skill',
         'new-skill',
       ]);
-      assert.equal(config?.managedSkills?.revision, 'catalog-2');
+      assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
       assert.equal(config?.cliVersion, '0.1.22');
     } finally {
       globalThis.fetch = originalFetch;
@@ -1487,7 +1487,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 1,
-          revision: 'catalog-2',
+          releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -1506,7 +1506,7 @@ describe('skill management commands', () => {
 
     try {
       await writeManagedSkillBaseline({
-        revision: 'catalog-1',
+        releaseId: 'catalog-1',
         skillNames: ['demo-skill', 'retired-skill'],
       });
       const exitCode = await runPostPlusSkillUninstall({

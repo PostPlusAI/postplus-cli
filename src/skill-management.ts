@@ -1,5 +1,5 @@
-import { runCommand, runInteractiveCommand } from './command-runner.js';
 import { writeCurrentCliVersionToLocalConfig } from './client-compatibility.js';
+import { runCommand, runInteractiveCommand } from './command-runner.js';
 import {
   clearManagedSkillBaseline,
   readManagedSkillBaseline,
@@ -30,7 +30,7 @@ export type SkillInstallStatusReport = {
   source: string;
   error: string | null;
   installCommand: string;
-  managedRevision: string | null;
+  managedSkillsReleaseId: string | null;
   updateCommand: string;
   uninstallCommand: string;
   retiredManagedSkills: string[];
@@ -81,7 +81,7 @@ export async function runPostPlusSkillUpdate(
   }
 
   await writeManagedSkillBaseline({
-    revision: catalog.revision,
+    releaseId: catalog.releaseId,
     skillNames,
   });
   await writeCurrentCliVersionToLocalConfig();
@@ -151,7 +151,7 @@ export async function generateSkillInstallStatusReport(
       error: null,
       installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
       installedCount: installedNames.size,
-      managedRevision: baseline.revision,
+      managedSkillsReleaseId: baseline.releaseId,
       missingSkills,
       requiredCount: requiredSkills.size,
       retiredManagedSkills,
@@ -169,7 +169,7 @@ export async function generateSkillInstallStatusReport(
           : 'Failed to inspect installed PostPlus skills.',
       installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
       installedCount: 0,
-      managedRevision: baseline.revision,
+      managedSkillsReleaseId: baseline.releaseId,
       missingSkills: [...requiredSkills],
       requiredCount: requiredSkills.size,
       retiredManagedSkills,
@@ -199,7 +199,7 @@ export function formatSkillInstallStatusReport(
   }
 
   lines.push(`  Source: ${report.source}`);
-  lines.push(`  Managed baseline: ${report.managedRevision ?? 'none'}`);
+  lines.push(`  Managed baseline: ${report.managedSkillsReleaseId ?? 'none'}`);
   lines.push(
     `  Scope: ${report.scopes.length > 0 ? report.scopes.join(', ') : 'none detected'}`,
   );

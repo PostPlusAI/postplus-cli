@@ -15,7 +15,7 @@ export type LocalDependencyCheck = {
 
 export type LocalDependencyReport = {
   ok: boolean;
-  revision: string;
+  releaseId: string;
   source: string;
   requiredCount: number;
   checks: LocalDependencyCheck[];
@@ -47,7 +47,7 @@ export async function generateLocalDependencyReport(
 
   return {
     ok: checks.every((check) => check.ok),
-    revision: catalog.revision,
+    releaseId: catalog.releaseId,
     source: catalog.source,
     requiredCount: checks.length,
     checks,
@@ -58,12 +58,12 @@ export function formatLocalDependencyReport(
   report: LocalDependencyReport,
 ): string {
   if (report.requiredCount === 0) {
-    return `No local runtime dependencies are required by released PostPlus skills (${report.revision}).`;
+    return `No local runtime dependencies are required by released PostPlus skills (${report.releaseId}).`;
   }
 
   const missing = report.checks.filter((check) => !check.ok);
   if (missing.length === 0) {
-    return `Ready (${report.requiredCount} local dependencies present; catalog ${report.revision})`;
+    return `Ready (${report.requiredCount} local dependencies present; catalog ${report.releaseId})`;
   }
 
   return `Missing ${missing.length}/${report.requiredCount}: ${missing

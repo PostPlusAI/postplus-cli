@@ -17,7 +17,7 @@ export type PostPlusLocalConfig = {
   accountId?: string;
   cliSessionToken?: string;
   managedSkills?: {
-    revision: string;
+    releaseId: string;
     skillNames: string[];
     updatedAt?: string;
   };
@@ -186,7 +186,7 @@ export async function clearLocalAuthState(): Promise<PostPlusLocalConfig> {
 }
 
 export async function readManagedSkillBaseline(): Promise<{
-  revision: string | null;
+  releaseId: string | null;
   skillNames: string[];
 }> {
   const config = await readLocalConfig();
@@ -194,29 +194,29 @@ export async function readManagedSkillBaseline(): Promise<{
 
   if (
     !managedSkills ||
-    typeof managedSkills.revision !== 'string' ||
+    typeof managedSkills.releaseId !== 'string' ||
     !Array.isArray(managedSkills.skillNames)
   ) {
     return {
-      revision: null,
+      releaseId: null,
       skillNames: [],
     };
   }
 
   return {
-    revision: managedSkills.revision,
+    releaseId: managedSkills.releaseId,
     skillNames: normalizeSkillNames(managedSkills.skillNames),
   };
 }
 
 export async function writeManagedSkillBaseline(input: {
-  revision: string;
+  releaseId: string;
   skillNames: string[];
 }): Promise<PostPlusLocalConfig> {
   return updateLocalConfig((current) => ({
     ...(current ?? {}),
     managedSkills: {
-      revision: input.revision,
+      releaseId: input.releaseId,
       skillNames: normalizeSkillNames(input.skillNames),
       updatedAt: new Date().toISOString(),
     },

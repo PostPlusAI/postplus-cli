@@ -26,7 +26,7 @@ export type PublicSkillCatalogEntry = {
 
 export type PublicSkillCatalogReport = {
   source: string;
-  revision: string;
+  releaseId: string;
   indexUrl: string;
   catalogUrl: string;
   installCommand: string;
@@ -84,15 +84,15 @@ function parseJsonResponse(raw: string, url: string): unknown {
 
 function parsePublicSkillCatalog(
   payload: unknown,
-): Pick<PublicSkillCatalogReport, 'revision' | 'skills' | 'source'> {
+): Pick<PublicSkillCatalogReport, 'releaseId' | 'skills' | 'source'> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('PostPlus public skill catalog is invalid.');
   }
 
   const record = payload as Record<string, unknown>;
-  const revision =
-    typeof record.revision === 'string' && record.revision.trim()
-      ? record.revision.trim()
+  const releaseId =
+    typeof record.releaseId === 'string' && record.releaseId.trim()
+      ? record.releaseId.trim()
       : null;
   const source =
     typeof record.source === 'string' && record.source.trim()
@@ -102,7 +102,7 @@ function parsePublicSkillCatalog(
   if (
     record.schemaVersion !== 1 ||
     source !== POSTPLUS_SKILLS_REPO ||
-    !revision
+    !releaseId
   ) {
     throw new Error('PostPlus public skill catalog metadata is invalid.');
   }
@@ -162,7 +162,7 @@ function parsePublicSkillCatalog(
   }
 
   return {
-    revision,
+    releaseId,
     skills,
     source,
   };

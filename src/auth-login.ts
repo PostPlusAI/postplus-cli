@@ -287,7 +287,10 @@ function isCliAuthLoginPendingPayload(
 function formatRemoteAuthLoginError(
   payload: CliAuthLoginStartPayload | CliAuthLoginPollPayload,
 ) {
-  if ('code' in payload && payload.code === 'postplus_client_upgrade_required') {
+  if (
+    'code' in payload &&
+    payload.code === 'postplus_client_upgrade_required'
+  ) {
     return formatPostPlusClientUpgradeError(payload);
   }
 
