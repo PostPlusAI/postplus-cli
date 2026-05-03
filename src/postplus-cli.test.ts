@@ -428,6 +428,91 @@ describe('doctor and status', () => {
     }
   });
 
+  it('surfaces cloud release progress without upgrade commands in status output', async () => {
+    await setLocalSession({
+      cliSessionToken: 'cli-session-token-value',
+      accountId: 'account-1',
+      apiBaseUrl: 'https://postplus.example.com',
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (isPublicCatalogUrl(url)) {
+        return createPublicCatalogResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return new Response(
+          JSON.stringify({
+            code: 'postplus_cli_cloud_release_in_progress',
+            error:
+              'PostPlus Cloud is updating. Please retry in about one minute.',
+          }),
+          {
+            status: 503,
+            headers: {
+              'content-type': 'application/json',
+              'retry-after': '60',
+            },
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const status = await generateStatusReportWithDependencies({
+        generateSkillStatus: async () => ({
+          ok: true,
+          error: null,
+          installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
+          installedCount: 1,
+          managedSkillsReleaseId: 'catalog-1',
+          missingSkills: [],
+          requiredCount: 1,
+          retiredManagedSkills: [],
+          scopes: ['global'],
+          source: 'PostPlusAI/postplus-skills',
+          updateCommand: 'postplus update',
+          uninstallCommand: 'postplus uninstall',
+        }),
+        generateUpdateStatus: async () => ({
+          checkedAt: '2026-04-29T00:00:00.000Z',
+          ok: true,
+          source: 'remote',
+          cli: {
+            currentVersion: '0.1.23',
+            latestVersion: '0.1.23',
+            updateAvailable: false,
+            updateCommand: 'npm install -g @postplus/cli',
+          },
+          skills: {
+            currentReleaseId: 'catalog-1',
+            latestReleaseId: 'catalog-1',
+            updateAvailable: false,
+            updateCommand: 'postplus update',
+          },
+          warning: null,
+        }),
+      });
+      const formatted = formatStatusReport(status);
+
+      assert.equal(status.ok, false);
+      assert.match(formatted, /PostPlus Cloud is updating/);
+      assert.doesNotMatch(formatted, /npm install -g @postplus\/cli/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('keeps status usable when only task-specific local dependencies are missing', async () => {
     const status = await generateStatusReportWithDependencies({
       generateDoctor: async () => ({

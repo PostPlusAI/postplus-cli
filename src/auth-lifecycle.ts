@@ -2,7 +2,7 @@ import { refreshRemoteAuthSession } from './auth-session.js';
 import { clearAuthState, generateAuthStatusReport } from './auth.js';
 import {
   buildPostPlusClientCompatibilityHeaders,
-  formatPostPlusClientUpgradeError,
+  formatPostPlusCompatibilityError,
 } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { resolveCliSessionTokenState } from './local-state.js';
@@ -72,11 +72,10 @@ export async function revokeRemoteAuth() {
       };
 
   if (!response.ok) {
-    if (
-      'code' in payload &&
-      payload.code === 'postplus_client_upgrade_required'
-    ) {
-      throw new Error(formatPostPlusClientUpgradeError(payload));
+    const compatibilityError = formatPostPlusCompatibilityError(payload);
+
+    if (compatibilityError) {
+      throw new Error(compatibilityError);
     }
 
     throw new Error(

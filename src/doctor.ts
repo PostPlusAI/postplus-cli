@@ -4,7 +4,7 @@ import {
 } from './auth-session.js';
 import {
   buildPostPlusClientCompatibilityHeaders,
-  formatPostPlusClientUpgradeError,
+  formatPostPlusCompatibilityError,
 } from './client-compatibility.js';
 import { resolveHostedBaseUrl } from './hosted-release.js';
 import {
@@ -372,8 +372,10 @@ function readErrorMessage(
   payload: { code?: unknown; compatibility?: unknown; error?: unknown },
   fallback: string,
 ): string {
-  if (payload.code === 'postplus_client_upgrade_required') {
-    return formatPostPlusClientUpgradeError(payload);
+  const compatibilityError = formatPostPlusCompatibilityError(payload);
+
+  if (compatibilityError) {
+    return compatibilityError;
   }
 
   return typeof payload.error === 'string' && payload.error.trim().length > 0

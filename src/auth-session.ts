@@ -1,6 +1,6 @@
 import {
   buildPostPlusClientCompatibilityHeaders,
-  formatPostPlusClientUpgradeError,
+  formatPostPlusCompatibilityError,
   writeCurrentCliVersionToLocalConfig,
 } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
@@ -108,11 +108,10 @@ export async function refreshRemoteAuthSession(input?: {
   const payload = (await response.json()) as RemoteAuthRefreshPayload;
 
   if (!response.ok) {
-    if (
-      'code' in payload &&
-      payload.code === 'postplus_client_upgrade_required'
-    ) {
-      throw new Error(formatPostPlusClientUpgradeError(payload));
+    const compatibilityError = formatPostPlusCompatibilityError(payload);
+
+    if (compatibilityError) {
+      throw new Error(compatibilityError);
     }
 
     throw new Error(

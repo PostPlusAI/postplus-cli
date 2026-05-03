@@ -106,3 +106,46 @@ export function formatPostPlusClientUpgradeError(payload: unknown) {
     .filter(Boolean)
     .join(' ');
 }
+
+export function formatPostPlusCloudReleaseInProgressError(payload: unknown) {
+  const record =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as { error?: unknown })
+      : {};
+
+  return typeof record.error === 'string' && record.error.trim().length > 0
+    ? record.error.trim()
+    : 'PostPlus Cloud is updating. Please retry in about one minute.';
+}
+
+export function formatPostPlusCompatibilityError(payload: unknown) {
+  if (isPostPlusClientUpgradePayload(payload)) {
+    return formatPostPlusClientUpgradeError(payload);
+  }
+
+  if (isPostPlusCloudReleaseInProgressPayload(payload)) {
+    return formatPostPlusCloudReleaseInProgressError(payload);
+  }
+
+  return null;
+}
+
+export function isPostPlusClientUpgradePayload(payload: unknown) {
+  return (
+    payload &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    'code' in payload &&
+    payload.code === 'postplus_client_upgrade_required'
+  );
+}
+
+export function isPostPlusCloudReleaseInProgressPayload(payload: unknown) {
+  return (
+    payload &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    'code' in payload &&
+    payload.code === 'postplus_cli_cloud_release_in_progress'
+  );
+}

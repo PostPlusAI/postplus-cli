@@ -1,6 +1,6 @@
 import {
   buildPostPlusClientCompatibilityHeaders,
-  formatPostPlusClientUpgradeError,
+  formatPostPlusCompatibilityError,
   writeCurrentCliVersionToLocalConfig,
 } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
@@ -241,8 +241,10 @@ export function formatCliSessionAuthError(
     ].join(' ');
   }
 
-  if (payload.code === 'postplus_client_upgrade_required') {
-    return formatPostPlusClientUpgradeError(payload);
+  const compatibilityError = formatPostPlusCompatibilityError(payload);
+
+  if (compatibilityError) {
+    return compatibilityError;
   }
 
   if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
@@ -287,11 +289,10 @@ function isCliAuthLoginPendingPayload(
 function formatRemoteAuthLoginError(
   payload: CliAuthLoginStartPayload | CliAuthLoginPollPayload,
 ) {
-  if (
-    'code' in payload &&
-    payload.code === 'postplus_client_upgrade_required'
-  ) {
-    return formatPostPlusClientUpgradeError(payload);
+  const compatibilityError = formatPostPlusCompatibilityError(payload);
+
+  if (compatibilityError) {
+    return compatibilityError;
   }
 
   return 'error' in payload &&

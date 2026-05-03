@@ -1,7 +1,7 @@
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import {
   buildPostPlusClientCompatibilityHeaders,
-  formatPostPlusClientUpgradeError,
+  formatPostPlusCompatibilityError,
 } from './client-compatibility.js';
 
 export type AuthValidateReport = {
@@ -37,11 +37,10 @@ export async function validateRemoteAuth(): Promise<AuthValidateReport> {
       };
 
   if (!response.ok) {
-    if (
-      'code' in payload &&
-      payload.code === 'postplus_client_upgrade_required'
-    ) {
-      throw new Error(formatPostPlusClientUpgradeError(payload));
+    const compatibilityError = formatPostPlusCompatibilityError(payload);
+
+    if (compatibilityError) {
+      throw new Error(compatibilityError);
     }
 
     throw new Error(
