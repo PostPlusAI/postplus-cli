@@ -1,13 +1,14 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
         description: 'Existing tag to release, for example v0.1.0'
+        required: true
+        type: string
+      parent_release_id:
+        description: 'PostPlus parent release manifest id authorizing this npm publish.'
         required: true
         type: string
 
@@ -16,6 +17,7 @@ permissions:
 
 jobs:
   release:
+    if: inputs.parent_release_id != ''
     runs-on: ubuntu-latest
     steps:
       - name: Checkout CLI

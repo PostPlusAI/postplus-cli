@@ -1,17 +1,19 @@
 name: Auto Tag Main
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'package.json'
+  workflow_dispatch:
+    inputs:
+      parent_release_id:
+        description: 'PostPlus parent release manifest id authorizing this tag.'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   tag:
+    if: inputs.parent_release_id != ''
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
