@@ -114,7 +114,7 @@ describe('doctor and status', () => {
           (init?.headers as Record<string, string>)[
             POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.cliVersion
           ],
-          '0.1.22',
+          '0.1.23',
         );
         assert.equal(
           (init?.headers as Record<string, string>)[
@@ -207,7 +207,7 @@ describe('doctor and status', () => {
         }),
       });
       assert.equal(status.schemaVersion, 1);
-      assert.equal((await readLocalConfig())?.cliVersion, '0.1.22');
+      assert.equal((await readLocalConfig())?.cliVersion, '0.1.23');
       assert.equal(status.ok, true);
       assert.equal(status.doctor.schemaVersion, 1);
       assert.equal(status.auth.ok, true);
@@ -403,8 +403,8 @@ describe('doctor and status', () => {
           ok: true,
           source: 'remote',
           cli: {
-            currentVersion: '0.1.22',
-            latestVersion: '0.1.22',
+            currentVersion: '0.1.23',
+            latestVersion: '0.1.23',
             updateAvailable: false,
             updateCommand: 'npm install -g @postplus/cli',
           },
@@ -1475,7 +1475,7 @@ describe('skill management commands', () => {
         'new-skill',
       ]);
       assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
-      assert.equal(config?.cliVersion, '0.1.22');
+      assert.equal(config?.cliVersion, '0.1.23');
     } finally {
       globalThis.fetch = originalFetch;
     }
