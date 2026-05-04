@@ -7,8 +7,8 @@ import {
 } from './local-state.js';
 import {
   POSTPLUS_SKILLS_AGENT_TARGETS,
-  POSTPLUS_SKILLS_INSTALL_COMMAND,
-  POSTPLUS_SKILLS_REPO,
+  formatPostPlusSkillsInstallCommand,
+  resolvePostPlusSkillsSource,
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
 
@@ -149,14 +149,14 @@ export async function generateSkillInstallStatusReport(
     return {
       ok: missingSkills.length === 0,
       error: null,
-      installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
+      installCommand: formatPostPlusSkillsInstallCommand(catalog.source),
       installedCount: installedNames.size,
       managedSkillsReleaseId: baseline.releaseId,
       missingSkills,
       requiredCount: requiredSkills.size,
       retiredManagedSkills,
       scopes,
-      source: POSTPLUS_SKILLS_REPO,
+      source: catalog.source,
       updateCommand: formatPostPlusSkillUpdateCommand(),
       uninstallCommand: formatPostPlusSkillUninstallCommand(),
     };
@@ -167,14 +167,14 @@ export async function generateSkillInstallStatusReport(
         error instanceof Error
           ? error.message
           : 'Failed to inspect installed PostPlus skills.',
-      installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
+      installCommand: formatPostPlusSkillsInstallCommand(catalog.source),
       installedCount: 0,
       managedSkillsReleaseId: baseline.releaseId,
       missingSkills: [...requiredSkills],
       requiredCount: requiredSkills.size,
       retiredManagedSkills,
       scopes: [],
-      source: POSTPLUS_SKILLS_REPO,
+      source: catalog.source,
       updateCommand: formatPostPlusSkillUpdateCommand(),
       uninstallCommand: formatPostPlusSkillUninstallCommand(),
     };
@@ -224,7 +224,24 @@ export function formatSkillInstallStatusReport(
 }
 
 export function buildPostPlusSkillUpdateArgs(skillNames: string[]): string[] {
-  return [...NPX_SKILLS, 'update', ...skillNames, '--global', '--yes'];
+  if (skillNames.length === 0) {
+    throw new Error('PostPlus public skill catalog has no released skills.');
+  }
+
+  const skillsSource = resolvePostPlusSkillsSource();
+
+  return [
+    ...NPX_SKILLS,
+    'add',
+    skillsSource,
+    '--global',
+    '--full-depth',
+    '--skill',
+    '*',
+    '--agent',
+    ...POSTPLUS_SKILLS_AGENT_TARGETS,
+    '--yes',
+  ];
 }
 
 export function buildPostPlusSkillUninstallArgs(

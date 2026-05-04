@@ -25,7 +25,9 @@ import {
 } from './local-state.js';
 import {
   POSTPLUS_SKILLS_AGENT_TARGETS,
+  POSTPLUS_SKILLS_CATALOG_URL_ENV,
   POSTPLUS_SKILLS_INSTALL_COMMAND,
+  POSTPLUS_SKILLS_SOURCE_ENV,
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
 import {
@@ -1228,6 +1230,53 @@ describe('public skill catalog', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('can load a staged public skill catalog without reading production main', async () => {
+    const originalFetch = globalThis.fetch;
+    const stagedCatalogUrl =
+      'https://raw.githubusercontent.com/PostPlusAI/postplus-skills/fde913331ef113e3a3eb1065b45faff614136608/skills/catalog.json';
+    process.env[POSTPLUS_SKILLS_CATALOG_URL_ENV] = stagedCatalogUrl;
+    process.env[POSTPLUS_SKILLS_SOURCE_ENV] =
+      'PostPlusAI/postplus-skills#fde913331ef113e3a3eb1065b45faff614136608';
+    globalThis.fetch = async (url) => {
+      assert.equal(url, stagedCatalogUrl);
+
+      return new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'skills-1-a9d5f9215864e899',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    };
+
+    try {
+      const catalog = await loadPublicSkillCatalog();
+
+      assert.equal(catalog.catalogUrl, stagedCatalogUrl);
+      assert.equal(
+        catalog.source,
+        'PostPlusAI/postplus-skills#fde913331ef113e3a3eb1065b45faff614136608',
+      );
+      assert.match(
+        catalog.installCommand,
+        /PostPlusAI\/postplus-skills#fde913331ef113e3a3eb1065b45faff614136608/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe('local dependency diagnostics', () => {
@@ -1348,10 +1397,14 @@ describe('skill management commands', () => {
     assert.deepEqual(buildPostPlusSkillUpdateArgs(['a', 'b']), [
       '-y',
       'skills',
-      'update',
-      'a',
-      'b',
+      'add',
+      'PostPlusAI/postplus-skills',
       '--global',
+      '--full-depth',
+      '--skill',
+      '*',
+      '--agent',
+      ...POSTPLUS_SKILLS_AGENT_TARGETS,
       '--yes',
     ]);
     assert.deepEqual(buildPostPlusSkillUninstallArgs(['a', 'b']), [
@@ -1361,6 +1414,25 @@ describe('skill management commands', () => {
       'a',
       'b',
       '--global',
+      '--agent',
+      ...POSTPLUS_SKILLS_AGENT_TARGETS,
+      '--yes',
+    ]);
+  });
+
+  it('uses the staged public skills source for update installs when configured', () => {
+    process.env[POSTPLUS_SKILLS_SOURCE_ENV] =
+      'PostPlusAI/postplus-skills#release/2026-05-03.1';
+
+    assert.deepEqual(buildPostPlusSkillUpdateArgs(['a', 'b']), [
+      '-y',
+      'skills',
+      'add',
+      'PostPlusAI/postplus-skills#release/2026-05-03.1',
+      '--global',
+      '--full-depth',
+      '--skill',
+      '*',
       '--agent',
       ...POSTPLUS_SKILLS_AGENT_TARGETS,
       '--yes',

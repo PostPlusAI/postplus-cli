@@ -1,4 +1,6 @@
 export const POSTPLUS_SKILLS_REPO = 'PostPlusAI/postplus-skills';
+export const POSTPLUS_SKILLS_SOURCE_ENV = 'POSTPLUS_SKILLS_SOURCE';
+export const POSTPLUS_SKILLS_CATALOG_URL_ENV = 'POSTPLUS_SKILLS_CATALOG_URL';
 export const POSTPLUS_SKILLS_AGENT_TARGETS = [
   'claude-code',
   'codex',
@@ -9,9 +11,8 @@ export const POSTPLUS_SKILLS_AGENT_TARGETS = [
   'trae-cn',
 ] as const;
 const POSTPLUS_SKILLS_AGENT_ARGS = POSTPLUS_SKILLS_AGENT_TARGETS.join(' ');
-export const POSTPLUS_SKILLS_INSTALL_COMMAND = `npx -y skills add PostPlusAI/postplus-skills --global --full-depth --skill '*' --agent ${POSTPLUS_SKILLS_AGENT_ARGS} --yes`;
-export const POSTPLUS_SKILLS_LIST_COMMAND =
-  'npx -y skills add PostPlusAI/postplus-skills --list --full-depth';
+export const POSTPLUS_SKILLS_INSTALL_COMMAND = formatPostPlusSkillsInstallCommand();
+export const POSTPLUS_SKILLS_LIST_COMMAND = formatPostPlusSkillsListCommand();
 
 const POSTPLUS_SKILLS_INDEX_URL =
   'https://raw.githubusercontent.com/PostPlusAI/postplus-skills/main/skills/INDEX.md';
@@ -36,8 +37,11 @@ export type PublicSkillCatalogReport = {
 
 export async function loadPublicSkillCatalog(
   fetchFn: typeof fetch = fetch,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<PublicSkillCatalogReport> {
-  const response = await fetchFn(POSTPLUS_SKILLS_CATALOG_URL, {
+  const catalogUrl = resolvePostPlusSkillsCatalogUrl(env);
+  const skillsSource = resolvePostPlusSkillsSource(env);
+  const response = await fetchFn(catalogUrl, {
     headers: {
       accept: 'application/json',
     },
@@ -51,16 +55,41 @@ export async function loadPublicSkillCatalog(
   }
 
   const raw = await response.text();
-  const payload = parseJsonResponse(raw, POSTPLUS_SKILLS_CATALOG_URL);
+  const payload = parseJsonResponse(raw, catalogUrl);
   const catalog = parsePublicSkillCatalog(payload);
 
   return {
     ...catalog,
-    catalogUrl: POSTPLUS_SKILLS_CATALOG_URL,
+    catalogUrl,
     indexUrl: POSTPLUS_SKILLS_INDEX_URL,
-    installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
-    listCommand: POSTPLUS_SKILLS_LIST_COMMAND,
+    installCommand: formatPostPlusSkillsInstallCommand(skillsSource),
+    listCommand: formatPostPlusSkillsListCommand(skillsSource),
+    source: skillsSource,
   };
+}
+
+export function resolvePostPlusSkillsSource(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return env[POSTPLUS_SKILLS_SOURCE_ENV]?.trim() || POSTPLUS_SKILLS_REPO;
+}
+
+export function resolvePostPlusSkillsCatalogUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return env[POSTPLUS_SKILLS_CATALOG_URL_ENV]?.trim() || POSTPLUS_SKILLS_CATALOG_URL;
+}
+
+export function formatPostPlusSkillsInstallCommand(
+  source = POSTPLUS_SKILLS_REPO,
+): string {
+  return `npx -y skills add ${source} --global --full-depth --skill '*' --agent ${POSTPLUS_SKILLS_AGENT_ARGS} --yes`;
+}
+
+export function formatPostPlusSkillsListCommand(
+  source = POSTPLUS_SKILLS_REPO,
+): string {
+  return `npx -y skills add ${source} --list --full-depth`;
 }
 
 function parseJsonResponse(raw: string, url: string): unknown {
