@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+
 import {
   buildPostPlusClientCompatibilityHeaders,
   formatPostPlusCompatibilityError,
@@ -76,6 +78,13 @@ export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
       '',
     ].join('\n'),
   );
+  const didOpen = openCloudAuthVerificationUrlIfConfigured(
+    started.verificationUrl,
+  );
+
+  if (didOpen) {
+    process.stdout.write('Browser opened for sign-in.\n\n');
+  }
 
   const handoffPayload = await waitForCloudAuthLogin({
     apiBaseUrl: baseUrl,
@@ -133,6 +142,22 @@ export async function startCloudAuthLogin(apiBaseUrl: string) {
   }
 
   return payload;
+}
+
+export function openCloudAuthVerificationUrlIfConfigured(
+  verificationUrl: string,
+): boolean {
+  const command = process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND?.trim();
+
+  if (!command) {
+    return false;
+  }
+
+  execFileSync(command, [verificationUrl], {
+    stdio: 'ignore',
+  });
+
+  return true;
 }
 
 async function waitForCloudAuthLogin(input: {

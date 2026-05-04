@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 
 import {
   CLI_AUTH_LOGIN_TIMEOUT_MS,
+  openCloudAuthVerificationUrlIfConfigured,
   pollCloudAuthLogin,
   startCloudAuthLogin,
 } from './auth-login.js';
@@ -1018,6 +1019,34 @@ describe('cloud auth handoff', () => {
       assert.equal(started.userCode, '123456');
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('opens the cloud sign-in URL only when an opener command is configured', () => {
+    const originalCommand = process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND;
+
+    try {
+      delete process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND;
+      assert.equal(
+        openCloudAuthVerificationUrlIfConfigured(
+          'https://postplus.example.com/auth/cli-login',
+        ),
+        false,
+      );
+
+      process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND = 'true';
+      assert.equal(
+        openCloudAuthVerificationUrlIfConfigured(
+          'https://postplus.example.com/auth/cli-login',
+        ),
+        true,
+      );
+    } finally {
+      if (originalCommand === undefined) {
+        delete process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND;
+      } else {
+        process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND = originalCommand;
+      }
     }
   });
 
