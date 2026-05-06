@@ -126,9 +126,14 @@ function buildLocalDependencyCommand(dependency: string): {
 } {
   const parts = dependency.split(':');
   if (parts.length === 1) {
+    const args =
+      dependency === 'ffmpeg' || dependency === 'ffprobe'
+        ? ['-version']
+        : ['--version'];
+
     return {
       command: dependency,
-      args: ['--version'],
+      args,
     };
   }
 

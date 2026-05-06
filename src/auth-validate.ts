@@ -3,13 +3,14 @@ import {
   buildPostPlusClientCompatibilityHeaders,
   formatPostPlusCompatibilityError,
 } from './client-compatibility.js';
+import { readSubscriptionStatusField } from './subscription-status.js';
 
 export type AuthValidateReport = {
   accountId: string;
   apiBaseUrl: string;
   ok: boolean;
   source: 'config';
-  subscriptionStatus: string | null;
+  subscriptionStatus?: unknown;
   userEmail: string | null;
   userId: string;
 };
@@ -25,16 +26,7 @@ export async function validateRemoteAuth(): Promise<AuthValidateReport> {
     response = await fetchWhoami(auth);
   }
 
-  const payload = (await response.json()) as
-    | {
-        accountId: string;
-        subscriptionStatus: string | null;
-        userEmail: string | null;
-        userId: string;
-      }
-    | {
-        error?: string;
-      };
+  const payload = (await response.json()) as Record<string, unknown>;
 
   if (!response.ok) {
     const compatibilityError = formatPostPlusCompatibilityError(payload);
@@ -50,21 +42,21 @@ export async function validateRemoteAuth(): Promise<AuthValidateReport> {
     );
   }
 
-  const successPayload = payload as {
-    accountId: string;
-    subscriptionStatus: string | null;
-    userEmail: string | null;
-    userId: string;
-  };
+  const hasSubscriptionStatus = Object.prototype.hasOwnProperty.call(
+    payload,
+    'subscriptionStatus',
+  );
 
   return {
-    accountId: successPayload.accountId,
+    accountId: payload.accountId as string,
     apiBaseUrl: auth.apiBaseUrl,
     ok: true,
     source: auth.source,
-    subscriptionStatus: successPayload.subscriptionStatus,
-    userEmail: successPayload.userEmail,
-    userId: successPayload.userId,
+    ...(hasSubscriptionStatus
+      ? { subscriptionStatus: payload.subscriptionStatus }
+      : {}),
+    userEmail: payload.userEmail as string | null,
+    userId: payload.userId as string,
   };
 }
 
@@ -76,7 +68,7 @@ export function formatAuthValidateReport(report: AuthValidateReport): string {
     `PostPlus Cloud: ${report.apiBaseUrl}`,
     `Account: ${report.accountId}`,
     `User: ${report.userEmail ?? report.userId}`,
-    `Subscription: ${report.subscriptionStatus ?? 'unknown'}`,
+    `Subscription: ${readSubscriptionStatusField(report).label}`,
   ].join('\n');
 }
 

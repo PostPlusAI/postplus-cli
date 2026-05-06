@@ -6,6 +6,7 @@ import {
 } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { resolveCliSessionTokenState } from './local-state.js';
+import { readSubscriptionStatusField } from './subscription-status.js';
 
 export type AuthRefreshReport = {
   accountId: string;
@@ -37,7 +38,7 @@ export function formatAuthRefreshReport(report: AuthRefreshReport): string {
     `PostPlus Cloud: ${report.apiBaseUrl}`,
     `Account: ${report.accountId}`,
     `User: ${report.userEmail ?? report.userId}`,
-    `Subscription: ${report.subscriptionStatus ?? 'unknown'}`,
+    `Subscription: ${readSubscriptionStatusField(report).label}`,
   ].join('\n');
 }
 

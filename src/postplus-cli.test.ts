@@ -12,7 +12,10 @@ import {
   pollCloudAuthLogin,
   startCloudAuthLogin,
 } from './auth-login.js';
-import { validateRemoteAuth } from './auth-validate.js';
+import {
+  formatAuthValidateReport,
+  validateRemoteAuth,
+} from './auth-validate.js';
 import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import { POSTPLUS_CLIENT_COMPATIBILITY_HEADERS } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
@@ -80,6 +83,104 @@ function createPublicCatalogResponse(): Response {
   );
 }
 
+const subscriptionStatusCases: {
+  name: string;
+  payload: Record<string, unknown>;
+  expectedLabel: string;
+}[] = [
+  {
+    name: 'null',
+    payload: {
+      subscriptionStatus: null,
+    },
+    expectedLabel: 'none',
+  },
+  {
+    name: 'missing',
+    payload: {},
+    expectedLabel: 'unknown',
+  },
+  {
+    name: 'invalid',
+    payload: {
+      subscriptionStatus: 42,
+    },
+    expectedLabel: 'invalid',
+  },
+  {
+    name: 'string',
+    payload: {
+      subscriptionStatus: 'trialing',
+    },
+    expectedLabel: 'trialing',
+  },
+];
+
+async function withMockedSubscriptionStatusCloud<T>(
+  testCase: (typeof subscriptionStatusCases)[number],
+  callback: () => Promise<T>,
+): Promise<T> {
+  await setLocalSession({
+    cliSessionToken: 'cli-session-token-value',
+    accountId: 'account-1',
+    apiBaseUrl: 'https://postplus.example.com',
+    sessionExpiresAt: 1_900_000_000,
+    userEmail: 'user@example.com',
+    userId: 'user-1',
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+
+    if (isPublicCatalogUrl(url)) {
+      return createPublicCatalogResponse();
+    }
+
+    if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+      return new Response(
+        JSON.stringify({
+          accountId: 'account-1',
+          sessionExpiresAt: 1_900_000_000,
+          ...testCase.payload,
+          userEmail: 'user@example.com',
+          userId: 'user-1',
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    }
+
+    if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          subscriptionActive: testCase.payload.subscriptionStatus !== null,
+          ...testCase.payload,
+          capabilities: [],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    }
+
+    return new Response(JSON.stringify({ error: 'unexpected url' }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  try {
+    return await callback();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 beforeEach(async () => {
   process.env = { ...originalEnv };
   const configDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-test-'));
@@ -121,7 +222,7 @@ describe('doctor and status', () => {
           (init?.headers as Record<string, string>)[
             POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.cliVersion
           ],
-          '0.1.24',
+          '0.1.25',
         );
         assert.equal(
           (init?.headers as Record<string, string>)[
@@ -214,7 +315,7 @@ describe('doctor and status', () => {
         }),
       });
       assert.equal(status.schemaVersion, 1);
-      assert.equal((await readLocalConfig())?.cliVersion, '0.1.24');
+      assert.equal((await readLocalConfig())?.cliVersion, '0.1.25');
       assert.equal(status.ok, true);
       assert.equal(status.doctor.schemaVersion, 1);
       assert.equal(status.auth.ok, true);
@@ -333,7 +434,8 @@ describe('doctor and status', () => {
       const formatted = formatStatusReport(status);
 
       assert.equal(status.ok, true);
-      assert.match(formatted, /subscription unknown/);
+      assert.match(formatted, /subscription none/);
+      assert.doesNotMatch(formatted, /subscription unknown/);
       assert.doesNotMatch(formatted, /Not ready: subscription/);
       assert.match(formatted, /npm install -g @postplus\/cli/);
       assert.match(formatted, /postplus update/);
@@ -341,6 +443,84 @@ describe('doctor and status', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  for (const testCase of subscriptionStatusCases) {
+    it(`renders ${testCase.name} subscription status in doctor output`, async () => {
+      await withMockedSubscriptionStatusCloud(testCase, async () => {
+        const formatted = formatDoctorReport(await generateDoctorReport());
+
+        assert.match(
+          formatted,
+          new RegExp(
+            `Remote auth: Account account-1; user user@example.com; subscription ${testCase.expectedLabel}`,
+          ),
+        );
+        assert.match(
+          formatted,
+          new RegExp(
+            `Hosted capabilities: Ready \\(0 capability checks passed; subscription ${testCase.expectedLabel}\\)`,
+          ),
+        );
+      });
+    });
+
+    it(`renders ${testCase.name} subscription status in auth validate output`, async () => {
+      await withMockedSubscriptionStatusCloud(testCase, async () => {
+        const formatted = formatAuthValidateReport(await validateRemoteAuth());
+
+        assert.match(
+          formatted,
+          new RegExp(`Subscription: ${testCase.expectedLabel}`),
+        );
+      });
+    });
+
+    it(`renders ${testCase.name} subscription status in status output`, async () => {
+      await withMockedSubscriptionStatusCloud(testCase, async () => {
+        const status = await generateStatusReportWithDependencies({
+          generateSkillStatus: async () => ({
+            ok: true,
+            error: null,
+            installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
+            installedCount: 1,
+            managedSkillsReleaseId: 'catalog-1',
+            missingSkills: [],
+            requiredCount: 1,
+            retiredManagedSkills: [],
+            scopes: ['global'],
+            source: 'PostPlusAI/postplus-skills',
+            updateCommand: 'postplus update',
+            uninstallCommand: 'postplus uninstall',
+          }),
+          generateUpdateStatus: async () => ({
+            checkedAt: '2026-04-29T00:00:00.000Z',
+            ok: true,
+            source: 'cache',
+            cli: {
+              currentVersion: '0.1.25',
+              latestVersion: '0.1.25',
+              updateAvailable: false,
+              updateCommand: 'npm install -g @postplus/cli@latest',
+            },
+            skills: {
+              currentReleaseId: 'catalog-1',
+              latestReleaseId: 'catalog-1',
+              updateAvailable: false,
+              updateCommand: 'postplus update',
+            },
+            warning: null,
+          }),
+        });
+        const formatted = formatStatusReport(status);
+
+        assert.equal(status.ok, true);
+        assert.match(
+          formatted,
+          new RegExp(`subscription ${testCase.expectedLabel}`),
+        );
+      });
+    });
+  }
 
   it('surfaces server upgrade guidance in status output', async () => {
     await setLocalSession({
@@ -410,8 +590,8 @@ describe('doctor and status', () => {
           ok: true,
           source: 'remote',
           cli: {
-            currentVersion: '0.1.24',
-            latestVersion: '0.1.24',
+            currentVersion: '0.1.25',
+            latestVersion: '0.1.25',
             updateAvailable: false,
             updateCommand: 'npm install -g @postplus/cli@latest',
           },
@@ -496,8 +676,8 @@ describe('doctor and status', () => {
           ok: true,
           source: 'remote',
           cli: {
-            currentVersion: '0.1.24',
-            latestVersion: '0.1.24',
+            currentVersion: '0.1.25',
+            latestVersion: '0.1.25',
             updateAvailable: false,
             updateCommand: 'npm install -g @postplus/cli@latest',
           },
@@ -1301,7 +1481,7 @@ describe('local dependency diagnostics', () => {
             skillId: 'demo-skill',
           },
           {
-            localDependencies: ['ffmpeg'],
+            localDependencies: ['ffmpeg', 'ffprobe'],
             path: 'skills/second-skill/SKILL.md',
             skillId: 'second-skill',
           },
@@ -1317,9 +1497,10 @@ describe('local dependency diagnostics', () => {
     });
 
     assert.equal(report.ok, false);
-    assert.equal(report.requiredCount, 2);
+    assert.equal(report.requiredCount, 3);
     assert.deepEqual(calls, [
-      ['ffmpeg', '--version'],
+      ['ffmpeg', '-version'],
+      ['ffprobe', '-version'],
       ['python3', '-c', 'import importlib; importlib.import_module("yt_dlp")'],
     ]);
     assert.deepEqual(report.checks, [
@@ -1328,6 +1509,12 @@ describe('local dependency diagnostics', () => {
         detail: 'available',
         ok: true,
         skillIds: ['demo-skill', 'second-skill'],
+      },
+      {
+        dependency: 'ffprobe',
+        detail: 'available',
+        ok: true,
+        skillIds: ['second-skill'],
       },
       {
         dependency: 'python3:yt_dlp',
@@ -1349,7 +1536,7 @@ describe('update checks', () => {
 
         assert.match(url, /registry\.npmjs\.org/);
 
-        return new Response(JSON.stringify({ version: '0.1.25' }), {
+        return new Response(JSON.stringify({ version: '0.1.26' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         });
@@ -1364,8 +1551,8 @@ describe('update checks', () => {
     });
 
     assert.equal(result.updateAvailable, true);
-    assert.equal(result.currentVersion, '0.1.24');
-    assert.equal(result.latestVersion, '0.1.25');
+    assert.equal(result.currentVersion, '0.1.25');
+    assert.equal(result.latestVersion, '0.1.26');
     assert.equal(result.exitCode, 0);
     assert.equal(result.command, POSTPLUS_CLI_UPDATE_COMMAND);
     assert.deepEqual(calls, [['npm', 'install', '-g', '@postplus/cli@latest']]);
@@ -1376,7 +1563,7 @@ describe('update checks', () => {
     const calls: string[][] = [];
     const result = await runCliSelfUpdateIfOutdated({
       fetchFn: async () =>
-        new Response(JSON.stringify({ version: '0.1.24' }), {
+        new Response(JSON.stringify({ version: '0.1.25' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),
@@ -1717,7 +1904,7 @@ describe('skill management commands', () => {
         'new-skill',
       ]);
       assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
-      assert.equal(config?.cliVersion, '0.1.24');
+      assert.equal(config?.cliVersion, '0.1.25');
     } finally {
       globalThis.fetch = originalFetch;
     }

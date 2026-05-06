@@ -11,6 +11,7 @@ import {
   formatLocalDependencyReport,
   generateLocalDependencyReport,
 } from './local-dependencies.js';
+import { readSubscriptionStatusField } from './subscription-status.js';
 
 export type DoctorCheck = {
   id:
@@ -227,10 +228,7 @@ async function checkRemoteAuth(input: FreshRemoteAuth): Promise<DoctorCheck> {
         : typeof payload.userId === 'string'
           ? payload.userId
           : 'unknown';
-    const subscription =
-      typeof payload.subscriptionStatus === 'string'
-        ? payload.subscriptionStatus
-        : 'unknown';
+    const subscription = readSubscriptionStatusField(payload).label;
 
     return createPass(
       'remote_auth',
@@ -303,10 +301,7 @@ async function checkHostedCapabilities(
       );
     }
 
-    const subscription =
-      typeof payload.subscriptionStatus === 'string'
-        ? payload.subscriptionStatus
-        : 'unknown';
+    const subscription = readSubscriptionStatusField(payload).label;
 
     return createPass(
       'hosted_capabilities',
