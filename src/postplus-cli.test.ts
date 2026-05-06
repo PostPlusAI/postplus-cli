@@ -522,6 +522,50 @@ describe('doctor and status', () => {
     });
   }
 
+  it('fails fast when auth validate receives an invalid success payload', async () => {
+    await setLocalSession({
+      cliSessionToken: 'cli-session-token-value',
+      accountId: 'account-1',
+      apiBaseUrl: 'https://postplus.example.com',
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return new Response(
+          JSON.stringify({
+            accountId: null,
+            userEmail: 'user@example.com',
+            userId: 'user-1',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () => validateRemoteAuth(),
+        /accountId must be a non-empty string/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('surfaces server upgrade guidance in status output', async () => {
     await setLocalSession({
       cliSessionToken: 'cli-session-token-value',

@@ -46,17 +46,20 @@ export async function validateRemoteAuth(): Promise<AuthValidateReport> {
     payload,
     'subscriptionStatus',
   );
+  const accountId = readRequiredString(payload, 'accountId');
+  const userId = readRequiredString(payload, 'userId');
+  const userEmail = readNullableString(payload, 'userEmail');
 
   return {
-    accountId: payload.accountId as string,
+    accountId,
     apiBaseUrl: auth.apiBaseUrl,
     ok: true,
     source: auth.source,
     ...(hasSubscriptionStatus
       ? { subscriptionStatus: payload.subscriptionStatus }
       : {}),
-    userEmail: payload.userEmail as string | null,
-    userId: payload.userId as string,
+    userEmail,
+    userId,
   };
 }
 
@@ -87,4 +90,38 @@ async function fetchWhoami(input: {
     },
     signal: AbortSignal.timeout(15000),
   });
+}
+
+function readRequiredString(
+  payload: Record<string, unknown>,
+  fieldName: string,
+): string {
+  const value = payload[fieldName];
+
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(
+      `Invalid PostPlus auth response: ${fieldName} must be a non-empty string.`,
+    );
+  }
+
+  return value.trim();
+}
+
+function readNullableString(
+  payload: Record<string, unknown>,
+  fieldName: string,
+): string | null {
+  const value = payload[fieldName];
+
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    throw new Error(
+      `Invalid PostPlus auth response: ${fieldName} must be a string or null.`,
+    );
+  }
+
+  return value;
 }
