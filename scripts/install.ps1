@@ -20,7 +20,7 @@ try {
     Fail "npm is required to install PostPlus CLI."
   }
 
-  & npm install -g @postplus/cli
+  & npm install -g @postplus/cli@latest
 
   if (-not (Get-Command postplus -ErrorAction SilentlyContinue)) {
     Fail "postplus command not found after install. Ensure npm global bin is on your PATH."

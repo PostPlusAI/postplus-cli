@@ -21,7 +21,7 @@ if ! command -v npm >/dev/null 2>&1; then
   fail "npm is required to install PostPlus CLI."
 fi
 
-npm install -g @postplus/cli
+npm install -g @postplus/cli@latest
 
 if ! command -v postplus >/dev/null 2>&1; then
   fail "postplus command not found after install. Ensure npm global bin is on your PATH."

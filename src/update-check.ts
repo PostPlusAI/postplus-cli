@@ -3,6 +3,9 @@ import { dirname, join } from 'node:path';
 
 import { readCurrentCliVersion } from './client-compatibility.js';
 import {
+  runInteractiveCommand as runDefaultInteractiveCommand,
+} from './command-runner.js';
+import {
   getPostPlusConfigDir,
   readManagedSkillBaseline,
 } from './local-state.js';
@@ -17,6 +20,9 @@ const NPM_PACKAGE_NAME = '@postplus/cli';
 const NPM_LATEST_URL = `https://registry.npmjs.org/${encodeURIComponent(
   NPM_PACKAGE_NAME,
 )}/latest`;
+export const POSTPLUS_CLI_UPDATE_COMMAND =
+  'npm install -g @postplus/cli@latest';
+const POSTPLUS_CLI_UPDATE_ARGS = ['install', '-g', '@postplus/cli@latest'];
 
 export type UpdateStatusReport = {
   checkedAt: string | null;
@@ -50,6 +56,14 @@ type UpdateCheckCache = {
 
 type UpdateCheckDependencies = {
   fetchFn: typeof fetch;
+};
+
+export type CliSelfUpdateResult = {
+  command: typeof POSTPLUS_CLI_UPDATE_COMMAND;
+  currentVersion: string;
+  exitCode: number | null;
+  latestVersion: string;
+  updateAvailable: boolean;
 };
 
 export async function generateUpdateStatusReport(
@@ -125,7 +139,7 @@ export async function generateUpdateStatusReport(
         currentVersion,
         latestVersion: null,
         updateAvailable: false,
-        updateCommand: 'npm install -g @postplus/cli',
+        updateCommand: POSTPLUS_CLI_UPDATE_COMMAND,
       },
       skills: {
         currentReleaseId: managedSkillBaseline.releaseId,
@@ -142,6 +156,68 @@ export async function refreshUpdateCheckCache(): Promise<void> {
   await generateUpdateStatusReport({
     force: true,
   });
+}
+
+export async function runCliSelfUpdateIfOutdated(
+  dependencies: {
+    fetchFn?: typeof fetch;
+    runInteractiveCommand?: typeof runDefaultInteractiveCommand;
+    writeOutput?: (message: string) => void;
+  } = {},
+): Promise<CliSelfUpdateResult> {
+  const fetchFn = dependencies.fetchFn ?? fetch;
+  const runInteractiveCommand =
+    dependencies.runInteractiveCommand ?? runDefaultInteractiveCommand;
+  const writeOutput =
+    dependencies.writeOutput ?? ((message) => process.stdout.write(message));
+  const currentVersion = await readCurrentCliVersion();
+  const latestVersion = await fetchLatestCliVersion(fetchFn);
+
+  if (compareVersions(latestVersion, currentVersion) <= 0) {
+    return {
+      command: POSTPLUS_CLI_UPDATE_COMMAND,
+      currentVersion,
+      exitCode: null,
+      latestVersion,
+      updateAvailable: false,
+    };
+  }
+
+  writeOutput(
+    [
+      `PostPlus CLI ${currentVersion} is older than latest ${latestVersion}.`,
+      `Updating CLI: ${POSTPLUS_CLI_UPDATE_COMMAND}`,
+      '',
+    ].join('\n'),
+  );
+
+  const exitCode = await runInteractiveCommand('npm', POSTPLUS_CLI_UPDATE_ARGS);
+
+  if (exitCode === 0) {
+    writeOutput(
+      [
+        `PostPlus CLI updated to ${latestVersion}.`,
+        'Re-run `postplus update` to update skills with the new CLI process.',
+        '',
+      ].join('\n'),
+    );
+  } else {
+    writeOutput(
+      [
+        `PostPlus CLI update failed with exit code ${exitCode}.`,
+        `Fix the npm install error, then run: ${POSTPLUS_CLI_UPDATE_COMMAND}`,
+        '',
+      ].join('\n'),
+    );
+  }
+
+  return {
+    command: POSTPLUS_CLI_UPDATE_COMMAND,
+    currentVersion,
+    exitCode,
+    latestVersion,
+    updateAvailable: true,
+  };
 }
 
 export function formatUpdateStatusReport(report: UpdateStatusReport): string {
@@ -196,7 +272,7 @@ function buildUpdateReport(input: {
       updateAvailable:
         compareVersions(input.cache.cli.latestVersion, input.currentVersion) >
         0,
-      updateCommand: 'npm install -g @postplus/cli',
+      updateCommand: POSTPLUS_CLI_UPDATE_COMMAND,
     },
     skills: {
       currentReleaseId: input.currentSkillsReleaseId,

@@ -41,7 +41,11 @@ import {
   formatStatusReport,
   generateStatusReportWithDependencies,
 } from './status.js';
-import { generateUpdateStatusReport } from './update-check.js';
+import {
+  POSTPLUS_CLI_UPDATE_COMMAND,
+  generateUpdateStatusReport,
+  runCliSelfUpdateIfOutdated,
+} from './update-check.js';
 
 const tempDirs: string[] = [];
 const originalEnv = { ...process.env };
@@ -117,7 +121,7 @@ describe('doctor and status', () => {
           (init?.headers as Record<string, string>)[
             POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.cliVersion
           ],
-          '0.1.23',
+          '0.1.24',
         );
         assert.equal(
           (init?.headers as Record<string, string>)[
@@ -198,7 +202,7 @@ describe('doctor and status', () => {
             currentVersion: '0.1.12',
             latestVersion: '0.1.12',
             updateAvailable: false,
-            updateCommand: 'npm install -g @postplus/cli',
+            updateCommand: 'npm install -g @postplus/cli@latest',
           },
           skills: {
             currentReleaseId: 'abc123',
@@ -210,7 +214,7 @@ describe('doctor and status', () => {
         }),
       });
       assert.equal(status.schemaVersion, 1);
-      assert.equal((await readLocalConfig())?.cliVersion, '0.1.23');
+      assert.equal((await readLocalConfig())?.cliVersion, '0.1.24');
       assert.equal(status.ok, true);
       assert.equal(status.doctor.schemaVersion, 1);
       assert.equal(status.auth.ok, true);
@@ -315,7 +319,7 @@ describe('doctor and status', () => {
             currentVersion: '0.1.12',
             latestVersion: '0.1.13',
             updateAvailable: true,
-            updateCommand: 'npm install -g @postplus/cli',
+            updateCommand: 'npm install -g @postplus/cli@latest',
           },
           skills: {
             currentReleaseId: 'abc123',
@@ -363,7 +367,7 @@ describe('doctor and status', () => {
             compatibility: {
               upgrade: {
                 cli: {
-                  command: 'npm install -g @postplus/cli',
+                  command: 'npm install -g @postplus/cli@latest',
                 },
                 restartAgentSession: true,
                 skills: {
@@ -406,10 +410,10 @@ describe('doctor and status', () => {
           ok: true,
           source: 'remote',
           cli: {
-            currentVersion: '0.1.23',
-            latestVersion: '0.1.23',
+            currentVersion: '0.1.24',
+            latestVersion: '0.1.24',
             updateAvailable: false,
-            updateCommand: 'npm install -g @postplus/cli',
+            updateCommand: 'npm install -g @postplus/cli@latest',
           },
           skills: {
             currentReleaseId: 'catalog-1',
@@ -492,10 +496,10 @@ describe('doctor and status', () => {
           ok: true,
           source: 'remote',
           cli: {
-            currentVersion: '0.1.23',
-            latestVersion: '0.1.23',
+            currentVersion: '0.1.24',
+            latestVersion: '0.1.24',
             updateAvailable: false,
-            updateCommand: 'npm install -g @postplus/cli',
+            updateCommand: 'npm install -g @postplus/cli@latest',
           },
           skills: {
             currentReleaseId: 'catalog-1',
@@ -586,7 +590,7 @@ describe('doctor and status', () => {
           currentVersion: '0.1.19',
           latestVersion: '0.1.19',
           updateAvailable: false,
-          updateCommand: 'npm install -g @postplus/cli',
+          updateCommand: 'npm install -g @postplus/cli@latest',
         },
         skills: {
           currentReleaseId: 'catalog-1',
@@ -1336,6 +1340,58 @@ describe('local dependency diagnostics', () => {
 });
 
 describe('update checks', () => {
+  it('self-updates the CLI before any skills catalog read when npm latest is newer', async () => {
+    const calls: string[][] = [];
+    const output: string[] = [];
+    const result = await runCliSelfUpdateIfOutdated({
+      fetchFn: async (input) => {
+        const url = String(input);
+
+        assert.match(url, /registry\.npmjs\.org/);
+
+        return new Response(JSON.stringify({ version: '0.1.25' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+      runInteractiveCommand: async (command, args) => {
+        calls.push([command, ...args]);
+        return 0;
+      },
+      writeOutput: (message) => {
+        output.push(message);
+      },
+    });
+
+    assert.equal(result.updateAvailable, true);
+    assert.equal(result.currentVersion, '0.1.24');
+    assert.equal(result.latestVersion, '0.1.25');
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.command, POSTPLUS_CLI_UPDATE_COMMAND);
+    assert.deepEqual(calls, [['npm', 'install', '-g', '@postplus/cli@latest']]);
+    assert.match(output.join(''), /Re-run `postplus update`/);
+  });
+
+  it('continues without npm install when the CLI is already latest', async () => {
+    const calls: string[][] = [];
+    const result = await runCliSelfUpdateIfOutdated({
+      fetchFn: async () =>
+        new Response(JSON.stringify({ version: '0.1.24' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      runInteractiveCommand: async (command, args) => {
+        calls.push([command, ...args]);
+        return 0;
+      },
+      writeOutput: () => {},
+    });
+
+    assert.equal(result.updateAvailable, false);
+    assert.equal(result.exitCode, null);
+    assert.deepEqual(calls, []);
+  });
+
   it('compares the public skill releaseId with the managed skill baseline', async () => {
     await writeManagedSkillBaseline({
       releaseId: 'catalog-1',
@@ -1661,7 +1717,7 @@ describe('skill management commands', () => {
         'new-skill',
       ]);
       assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
-      assert.equal(config?.cliVersion, '0.1.23');
+      assert.equal(config?.cliVersion, '0.1.24');
     } finally {
       globalThis.fetch = originalFetch;
     }

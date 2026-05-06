@@ -26,7 +26,10 @@ import {
   runPostPlusSkillUpdate,
 } from './skill-management.js';
 import { formatStatusReport, generateStatusReport } from './status.js';
-import { refreshUpdateCheckCache } from './update-check.js';
+import {
+  refreshUpdateCheckCache,
+  runCliSelfUpdateIfOutdated,
+} from './update-check.js';
 
 function printAuthHelp(): void {
   process.stdout.write(`PostPlus CLI — auth commands
@@ -137,6 +140,12 @@ async function runVersion(): Promise<number> {
 }
 
 async function runSkillUpdateCommand(): Promise<number> {
+  const cliSelfUpdate = await runCliSelfUpdateIfOutdated();
+
+  if (cliSelfUpdate.updateAvailable) {
+    return cliSelfUpdate.exitCode ?? 1;
+  }
+
   const exitCode = await runPostPlusSkillUpdate();
 
   if (exitCode === 0) {

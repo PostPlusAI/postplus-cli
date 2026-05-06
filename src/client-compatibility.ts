@@ -88,7 +88,7 @@ export function formatPostPlusClientUpgradeError(payload: unknown) {
       : {};
   const cliCommand =
     record.compatibility?.upgrade?.cli?.command ??
-    'npm install -g @postplus/cli';
+    'npm install -g @postplus/cli@latest';
   const skillsCommand =
     record.compatibility?.upgrade?.skills?.command ?? 'postplus update';
   const restart = record.compatibility?.upgrade?.restartAgentSession
