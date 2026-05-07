@@ -651,6 +651,10 @@ describe('doctor and status', () => {
       const formatted = formatStatusReport(status);
 
       assert.equal(status.ok, false);
+      assert.match(
+        formatted,
+        /agent, run both update commands now before retrying/i,
+      );
       assert.match(formatted, /npm install -g @postplus\/cli/);
       assert.match(formatted, /postplus update/);
       assert.match(formatted, /restart your agent session/i);

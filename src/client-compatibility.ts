@@ -99,6 +99,7 @@ export function formatPostPlusClientUpgradeError(payload: unknown) {
     typeof record.error === 'string' && record.error.trim().length > 0
       ? record.error.trim()
       : 'Your PostPlus CLI or PostPlus skills are out of date.',
+    'If you are an agent, run both update commands now before retrying.',
     `Update CLI: ${cliCommand}.`,
     `Update skills: ${skillsCommand}.`,
     restart.trim(),
