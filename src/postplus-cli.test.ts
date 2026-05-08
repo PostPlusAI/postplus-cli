@@ -31,6 +31,7 @@ import {
   POSTPLUS_SKILLS_CATALOG_URL_ENV,
   POSTPLUS_SKILLS_INSTALL_COMMAND,
   POSTPLUS_SKILLS_SOURCE_ENV,
+  type PublicSkillRequirements,
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
 import {
@@ -54,6 +55,18 @@ const tempDirs: string[] = [];
 const originalEnv = { ...process.env };
 const execFileAsync = promisify(execFile);
 
+function createEmptySkillRequirements(): PublicSkillRequirements {
+  return {
+    accountConnections: [],
+    collectionKeys: [],
+    endpointKeys: [],
+    hostedCapabilities: [],
+    localDependencies: [],
+    modelKeys: [],
+    sourceKeys: [],
+  };
+}
+
 function isPublicCatalogUrl(url: string): boolean {
   return url.includes('PostPlusAI/postplus-skills/main/skills/catalog.json');
 }
@@ -73,6 +86,125 @@ function createPublicCatalogResponse(): Response {
             localDependencies: [],
           },
           status: 'released',
+        },
+      ],
+    }),
+    {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    },
+  );
+}
+
+function createVideoAnalysisCatalogResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      schemaVersion: 1,
+      releaseId: 'catalog-1',
+      source: 'PostPlusAI/postplus-skills',
+      primaryIndex: 'skills/INDEX.md',
+      skills: [
+        {
+          name: 'video-analysis',
+          path: 'skills/video-analysis/SKILL.md',
+          requirements: {
+            hostedCapabilities: ['media-file', 'video-analysis'],
+            modelKeys: ['gemini-video-analysis'],
+            localDependencies: [],
+          },
+          status: 'released',
+        },
+        {
+          name: 'image-batch-runner',
+          path: 'skills/image-batch-runner/SKILL.md',
+          requirements: {
+            endpointKeys: ['image-bad'],
+            hostedCapabilities: ['media-generation'],
+            localDependencies: [],
+          },
+          status: 'released',
+        },
+      ],
+    }),
+    {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    },
+  );
+}
+
+function createWhoamiResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      accountId: 'account-1',
+      sessionExpiresAt: 1_900_000_000,
+      subscriptionStatus: 'active',
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    }),
+    {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    },
+  );
+}
+
+function createMediaReadinessResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      subscriptionActive: true,
+      subscriptionStatus: 'active',
+      capabilities: [
+        {
+          id: 'media-file:create-upload-url',
+          label: 'Media file: create-upload-url',
+          mediaFileOperation: 'create-upload-url',
+          ok: true,
+          required: true,
+        },
+        {
+          id: 'media-file:download-to-storage',
+          label: 'Media file: download-to-storage',
+          mediaFileOperation: 'download-to-storage',
+          ok: true,
+          required: true,
+        },
+        {
+          checks: [
+            {
+              id: 'provider_configuration',
+              label: 'Provider configuration',
+              ok: false,
+              required: true,
+            },
+          ],
+          id: 'media-file:upload',
+          label: 'Media file: upload',
+          mediaFileOperation: 'upload',
+          ok: false,
+          required: true,
+        },
+        {
+          id: 'video-analysis:gemini-video-analysis',
+          label: 'Video analysis: gemini-video-analysis',
+          modelKey: 'gemini-video-analysis',
+          ok: true,
+          required: true,
+        },
+        {
+          checks: [
+            {
+              id: 'provider_configuration',
+              label: 'Provider configuration',
+              ok: false,
+              required: true,
+            },
+          ],
+          id: 'media-generation:image-bad',
+          label: 'Media generation: image-bad',
+          ok: false,
+          required: true,
         },
       ],
     }),
@@ -929,6 +1061,155 @@ describe('doctor and status', () => {
     }
   });
 
+  it('filters skill-scoped hosted readiness to the selected skill requirements', async () => {
+    await setLocalSession({
+      cliSessionToken: 'cli-session-token-value',
+      accountId: 'account-1',
+      apiBaseUrl: 'https://postplus.example.com',
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (isPublicCatalogUrl(url)) {
+        return createVideoAnalysisCatalogResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return createWhoamiResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+        return createMediaReadinessResponse();
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const report = await generateDoctorReport({ skillId: 'video-analysis' });
+      const formatted = formatDoctorReport(report);
+
+      assert.equal(report.skillId, 'video-analysis');
+      assert.equal(report.ok, true);
+      assert.equal(report.requiredOk, true);
+      assert.match(formatted, /Hosted capabilities for video-analysis/);
+      assert.doesNotMatch(formatted, /Media generation: image-bad/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('keeps global status OK when unrelated hosted readiness is not ready', async () => {
+    await setLocalSession({
+      cliSessionToken: 'cli-session-token-value',
+      accountId: 'account-1',
+      apiBaseUrl: 'https://postplus.example.com',
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (isPublicCatalogUrl(url)) {
+        return createVideoAnalysisCatalogResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return createWhoamiResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+        return createMediaReadinessResponse();
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const status = await generateStatusReportWithDependencies({
+        generateSkillStatus: async () => ({
+          ok: true,
+          error: null,
+          installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
+          installedCount: 2,
+          managedSkillsReleaseId: 'catalog-1',
+          missingSkills: [],
+          requiredCount: 2,
+          retiredManagedSkills: [],
+          scopes: ['global'],
+          source: 'PostPlusAI/postplus-skills',
+          updateCommand: 'postplus update',
+          uninstallCommand: 'postplus uninstall',
+        }),
+        generateUpdateStatus: async () => ({
+          checkedAt: '2026-04-29T00:00:00.000Z',
+          ok: true,
+          source: 'cache',
+          cli: {
+            currentVersion: '0.1.27',
+            latestVersion: '0.1.27',
+            updateAvailable: false,
+            updateCommand: 'npm install -g @postplus/cli@latest',
+          },
+          skills: {
+            currentReleaseId: 'catalog-1',
+            latestReleaseId: 'catalog-1',
+            updateAvailable: false,
+            updateCommand: 'postplus update',
+          },
+          warning: null,
+        }),
+      });
+      const formatted = formatStatusReport(status);
+
+      assert.equal(status.ok, true);
+      assert.equal(status.doctor.ok, false);
+      assert.equal(status.doctor.requiredOk, true);
+      assert.match(formatted, /Overall: OK \(task-specific checks need attention\)/);
+      assert.match(formatted, /\[WARN\] Hosted capabilities/);
+      assert.match(formatted, /Media generation: image-bad/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fails with an actionable error for unknown skill ids', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (isPublicCatalogUrl(url)) {
+        return createVideoAnalysisCatalogResponse();
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () => generateDoctorReport({ skillId: 'missing-skill' }),
+        /Unknown PostPlus skill: missing-skill.*postplus list/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('doctor fails fast until the user signs in', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input) => {
@@ -1361,7 +1642,12 @@ describe('public skill catalog', () => {
               name: 'demo-skill',
               path: 'skills/demo-skill/SKILL.md',
               requirements: {
+                collectionKeys: ['instagram-posts'],
+                endpointKeys: ['image-demo'],
+                hostedCapabilities: ['hosted-collection'],
                 localDependencies: ['ffmpeg', 'python3:yt_dlp'],
+                modelKeys: ['gemini-video-analysis'],
+                sourceKeys: ['facebook-post-by-url'],
               },
               status: 'released',
             },
@@ -1387,11 +1673,21 @@ describe('public skill catalog', () => {
       assert.deepEqual(catalog.skills, [
         {
           localDependencies: ['ffmpeg', 'python3:yt_dlp'],
+          requirements: {
+            ...createEmptySkillRequirements(),
+            collectionKeys: ['instagram-posts'],
+            endpointKeys: ['image-demo'],
+            hostedCapabilities: ['hosted-collection'],
+            localDependencies: ['ffmpeg', 'python3:yt_dlp'],
+            modelKeys: ['gemini-video-analysis'],
+            sourceKeys: ['facebook-post-by-url'],
+          },
           skillId: 'demo-skill',
           path: 'skills/demo-skill/SKILL.md',
         },
         {
           localDependencies: [],
+          requirements: createEmptySkillRequirements(),
           skillId: 'second-skill',
           path: 'skills/second-skill/SKILL.md',
         },
@@ -1526,11 +1822,19 @@ describe('local dependency diagnostics', () => {
           {
             localDependencies: ['ffmpeg', 'python3:yt_dlp'],
             path: 'skills/demo-skill/SKILL.md',
+            requirements: {
+              ...createEmptySkillRequirements(),
+              localDependencies: ['ffmpeg', 'python3:yt_dlp'],
+            },
             skillId: 'demo-skill',
           },
           {
             localDependencies: ['ffmpeg', 'ffprobe'],
             path: 'skills/second-skill/SKILL.md',
+            requirements: {
+              ...createEmptySkillRequirements(),
+              localDependencies: ['ffmpeg', 'ffprobe'],
+            },
             skillId: 'second-skill',
           },
         ],
