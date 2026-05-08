@@ -11,6 +11,12 @@ import {
   formatLocalDependencyReport,
   generateLocalDependencyReport,
 } from './local-dependencies.js';
+import {
+  type PublicSkillCatalogEntry,
+  type PublicSkillCatalogReport,
+  type PublicSkillRequirements,
+  loadPublicSkillCatalog,
+} from './skill-catalog.js';
 import { readSubscriptionStatusField } from './subscription-status.js';
 
 export type DoctorCheck = {
@@ -18,7 +24,8 @@ export type DoctorCheck = {
     | 'hosted_base_url'
     | 'hosted_capabilities'
     | 'local_dependencies'
-    | 'remote_auth';
+    | 'remote_auth'
+    | 'skill_catalog';
   label: string;
   status: 'pass' | 'fail';
   severity: 'required' | 'task_specific';
@@ -41,6 +48,16 @@ export type DoctorReport = {
   ok: boolean;
   requiredOk: boolean;
   checks: DoctorCheck[];
+  skillId?: string;
+};
+
+export type DoctorReportOptions = {
+  skillId?: string;
+};
+
+type SkillScope = {
+  catalog: PublicSkillCatalogReport;
+  skill: PublicSkillCatalogEntry;
 };
 
 function createPass(
@@ -79,7 +96,9 @@ function createFail(
   };
 }
 
-export async function generateDoctorReport(): Promise<DoctorReport> {
+export async function generateDoctorReport(
+  options: DoctorReportOptions = {},
+): Promise<DoctorReport> {
   const hostedBaseUrl = await resolveHostedBaseUrl();
   const checks: DoctorCheck[] = [
     createPass(
@@ -88,7 +107,18 @@ export async function generateDoctorReport(): Promise<DoctorReport> {
       `Using ${hostedBaseUrl ?? 'https://postplus.io'}`,
     ),
   ];
-  checks.push(await checkLocalDependencies());
+  const skillScope = await resolveSkillScope(options.skillId);
+  if (skillScope) {
+    checks.push(
+      createPass(
+        'skill_catalog',
+        'Skill selection',
+        `Using ${skillScope.skill.skillId} from catalog ${skillScope.catalog.releaseId}`,
+      ),
+    );
+  }
+
+  checks.push(await checkLocalDependencies(skillScope));
 
   if (!hostedBaseUrl) {
     checks.push(
@@ -128,25 +158,58 @@ export async function generateDoctorReport(): Promise<DoctorReport> {
   checks.push(authCheck);
 
   if (authCheck.status === 'pass') {
-    checks.push(await checkHostedCapabilities(auth));
+    checks.push(await checkHostedCapabilities(auth, skillScope));
   }
 
-  return buildDoctorReport(checks);
+  return buildDoctorReport(checks, options.skillId);
 }
 
-async function checkLocalDependencies(): Promise<DoctorCheck> {
+async function resolveSkillScope(skillId?: string): Promise<SkillScope | null> {
+  if (!skillId) {
+    return null;
+  }
+
+  const catalog = await loadPublicSkillCatalog();
+  const skill = catalog.skills.find((entry) => entry.skillId === skillId);
+
+  if (!skill) {
+    throw new Error(
+      `Unknown PostPlus skill: ${skillId}. Run \`postplus list\` to see released skill ids.`,
+    );
+  }
+
+  return { catalog, skill };
+}
+
+async function checkLocalDependencies(
+  skillScope: SkillScope | null,
+): Promise<DoctorCheck> {
   try {
-    const report = await generateLocalDependencyReport();
+    const report = await generateLocalDependencyReport(
+      skillScope
+        ? {
+            loadCatalog: async () => ({
+              ...skillScope.catalog,
+              skills: [skillScope.skill],
+            }),
+          }
+        : {},
+    );
     const detail = formatLocalDependencyReport(report);
 
     if (!report.ok) {
+      const skillId = skillScope?.skill.skillId;
       return createFail(
         'local_dependencies',
-        'Task-specific local media dependencies',
+        skillId
+          ? `Local dependencies for ${skillId}`
+          : 'Task-specific local media dependencies',
         detail,
-        'Run the affected PostPlus skill in a local agent. The installed postplus-shared rules tell the agent how to bootstrap approved missing media dependencies.',
+        skillId
+          ? 'Run the selected PostPlus skill in a local agent. The installed postplus-shared rules tell the agent how to bootstrap approved missing dependencies.'
+          : 'Run the affected PostPlus skill in a local agent. The installed postplus-shared rules tell the agent how to bootstrap approved missing media dependencies.',
         {
-          severity: 'task_specific',
+          severity: skillId ? 'required' : 'task_specific',
           metadata: {
             bootstrapRule: 'postplus-shared',
             missingDependencies: report.checks
@@ -161,7 +224,13 @@ async function checkLocalDependencies(): Promise<DoctorCheck> {
       );
     }
 
-    return createPass('local_dependencies', 'Local dependencies', detail);
+    return createPass(
+      'local_dependencies',
+      skillScope
+        ? `Local dependencies for ${skillScope.skill.skillId}`
+        : 'Local dependencies',
+      detail,
+    );
   } catch (error) {
     return createFail(
       'local_dependencies',
@@ -173,7 +242,10 @@ async function checkLocalDependencies(): Promise<DoctorCheck> {
   }
 }
 
-function buildDoctorReport(checks: DoctorCheck[]): DoctorReport {
+function buildDoctorReport(
+  checks: DoctorCheck[],
+  skillId?: string,
+): DoctorReport {
   const requiredOk = checks.every(
     (check) => check.severity !== 'required' || check.status === 'pass',
   );
@@ -183,6 +255,7 @@ function buildDoctorReport(checks: DoctorCheck[]): DoctorReport {
     ok: checks.every((check) => check.status === 'pass'),
     requiredOk,
     checks,
+    ...(skillId ? { skillId } : {}),
   };
 }
 
@@ -249,6 +322,7 @@ async function checkRemoteAuth(input: FreshRemoteAuth): Promise<DoctorCheck> {
 
 async function checkHostedCapabilities(
   input: FreshRemoteAuth,
+  skillScope: SkillScope | null,
 ): Promise<DoctorCheck> {
   try {
     let response = await requestWithAuth(
@@ -285,19 +359,35 @@ async function checkHostedCapabilities(
       );
     }
 
-    const capabilities = Array.isArray(payload.capabilities)
-      ? payload.capabilities
-      : [];
-    const failedLabels = capabilities
-      .map(readCapabilityFailureLabel)
+    const capabilities = readHostedCapabilityEntries(payload.capabilities);
+    const relevantCapabilities = skillScope
+      ? filterCapabilitiesForSkill(capabilities, skillScope.skill.requirements)
+      : capabilities;
+    const failedLabels = relevantCapabilities
+      .map((value) => readCapabilityFailureLabel(value, skillScope))
       .filter((value): value is string => value !== null);
 
-    if (payload.ok !== true || failedLabels.length > 0) {
+    if (skillScope && hasHostedRequirements(skillScope.skill.requirements)) {
+      const missingRequirements = collectMissingHostedRequirementLabels(
+        relevantCapabilities,
+        skillScope.skill.requirements,
+      );
+      failedLabels.push(...missingRequirements);
+    }
+
+    if (
+      failedLabels.length > 0 ||
+      (!skillScope && payload.ok !== true && capabilities.length === 0)
+    ) {
+      const skillId = skillScope?.skill.skillId;
       return createFail(
         'hosted_capabilities',
-        'Hosted capabilities',
+        skillId ? `Hosted capabilities for ${skillId}` : 'Hosted capabilities',
         `Not ready: ${failedLabels.join(', ') || 'unknown capability failure'}`,
         'Check PostPlus Cloud provider configuration and subscription state.',
+        {
+          severity: skillId ? 'required' : 'task_specific',
+        },
       );
     }
 
@@ -305,8 +395,10 @@ async function checkHostedCapabilities(
 
     return createPass(
       'hosted_capabilities',
-      'Hosted capabilities',
-      `Ready (${capabilities.length} capability checks passed; subscription ${subscription})`,
+      skillScope
+        ? `Hosted capabilities for ${skillScope.skill.skillId}`
+        : 'Hosted capabilities',
+      `Ready (${relevantCapabilities.length} capability checks passed; subscription ${subscription})`,
     );
   } catch (error) {
     return createFail(
@@ -319,12 +411,26 @@ async function checkHostedCapabilities(
   }
 }
 
-function readCapabilityFailureLabel(value: unknown): string | null {
+function readHostedCapabilityEntries(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (entry): entry is Record<string, unknown> =>
+      !!entry && typeof entry === 'object' && !Array.isArray(entry),
+  );
+}
+
+function readCapabilityFailureLabel(
+  value: Record<string, unknown>,
+  skillScope: SkillScope | null,
+): string | null {
   if (!value || typeof value !== 'object') {
     return 'invalid capability response';
   }
 
-  const record = value as Record<string, unknown>;
+  const record = value;
   if (record.ok === true || record.required === false) {
     return null;
   }
@@ -341,9 +447,13 @@ function readCapabilityFailureLabel(value: unknown): string | null {
         .filter((check): check is string => check !== null)
     : [];
 
-  return failedChecks.length > 0
+  const labelWithFailures = failedChecks.length > 0
     ? `${label} (${failedChecks.join(', ')})`
     : label;
+
+  return skillScope
+    ? `${labelWithFailures} for ${skillScope.skill.skillId}`
+    : labelWithFailures;
 }
 
 function readReadinessCheckFailureLabel(value: unknown): string | null {
@@ -361,6 +471,198 @@ function readReadinessCheckFailureLabel(value: unknown): string | null {
     : typeof record.id === 'string'
       ? record.id
       : 'unknown check';
+}
+
+function filterCapabilitiesForSkill(
+  capabilities: Record<string, unknown>[],
+  requirements: PublicSkillRequirements,
+): Record<string, unknown>[] {
+  if (!hasHostedRequirements(requirements)) {
+    return [];
+  }
+
+  return capabilities.filter((capability) =>
+    capabilityMatchesRequirements(capability, requirements),
+  );
+}
+
+function capabilityMatchesRequirements(
+  capability: Record<string, unknown>,
+  requirements: PublicSkillRequirements,
+): boolean {
+  const identifiers = collectCapabilityIdentifiers(capability);
+  const hostedCapabilities = new Set(requirements.hostedCapabilities);
+  const requirementKeys = collectHostedRequirementKeys(requirements);
+
+  return identifiers.some((identifier) => {
+    if (
+      identifier === 'media-file:upload' &&
+      hostedCapabilities.has('media-file') &&
+      !requiresHostedMediaFileUpload(requirements)
+    ) {
+      return false;
+    }
+
+    const [prefix, suffix] = splitCapabilityIdentifier(identifier);
+
+    if (
+      prefix === 'media-file' &&
+      suffix &&
+      suffix !== 'upload' &&
+      hostedCapabilities.has('media-file')
+    ) {
+      return true;
+    }
+
+    if (hostedCapabilities.has(identifier)) {
+      return true;
+    }
+
+    if (
+      prefix &&
+      suffix &&
+      hostedCapabilities.has(prefix) &&
+      requirementKeys.has(suffix)
+    ) {
+      return true;
+    }
+
+    return requirementKeys.has(identifier) || requirementKeys.has(suffix);
+  });
+}
+
+function requiresHostedMediaFileUpload(
+  requirements: PublicSkillRequirements,
+): boolean {
+  return (
+    requirements.hostedCapabilities.includes('media-generation') ||
+    requirements.endpointKeys.length > 0
+  );
+}
+
+function collectCapabilityIdentifiers(
+  capability: Record<string, unknown>,
+): string[] {
+  const identifiers = new Set<string>();
+
+  for (const key of [
+    'id',
+    'key',
+    'capability',
+    'capabilityKey',
+    'collectionKey',
+    'endpointKey',
+    'modelKey',
+    'sourceKey',
+    'accountConnection',
+  ]) {
+    const value = capability[key];
+    if (typeof value === 'string' && value.trim()) {
+      identifiers.add(value.trim());
+    }
+  }
+
+  if (Array.isArray(capability.checks)) {
+    for (const check of capability.checks) {
+      if (!check || typeof check !== 'object' || Array.isArray(check)) {
+        continue;
+      }
+
+      for (const identifier of collectCapabilityIdentifiers(
+        check as Record<string, unknown>,
+      )) {
+        identifiers.add(identifier);
+      }
+    }
+  }
+
+  return [...identifiers];
+}
+
+function collectHostedRequirementKeys(
+  requirements: PublicSkillRequirements,
+): Set<string> {
+  return new Set([
+    ...requirements.accountConnections,
+    ...requirements.collectionKeys,
+    ...requirements.endpointKeys,
+    ...requirements.modelKeys,
+    ...requirements.sourceKeys,
+  ]);
+}
+
+function hasHostedRequirements(requirements: PublicSkillRequirements): boolean {
+  return (
+    requirements.accountConnections.length > 0 ||
+    requirements.collectionKeys.length > 0 ||
+    requirements.endpointKeys.length > 0 ||
+    requirements.hostedCapabilities.length > 0 ||
+    requirements.modelKeys.length > 0 ||
+    requirements.sourceKeys.length > 0
+  );
+}
+
+function collectMissingHostedRequirementLabels(
+  capabilities: Record<string, unknown>[],
+  requirements: PublicSkillRequirements,
+): string[] {
+  const availableIdentifiers = new Set(
+    capabilities.flatMap(collectCapabilityIdentifiers),
+  );
+  const missing: string[] = [];
+
+  for (const capability of requirements.hostedCapabilities) {
+    if (
+      ![...availableIdentifiers].some((identifier) =>
+        identifierMatchesCapability(identifier, capability),
+      )
+    ) {
+      missing.push(capability);
+    }
+  }
+
+  for (const key of collectHostedRequirementKeys(requirements)) {
+    if (
+      ![...availableIdentifiers].some((identifier) =>
+        identifierMatchesKey(identifier, key),
+      )
+    ) {
+      missing.push(key);
+    }
+  }
+
+  return missing.map((value) => `${value} readiness check missing`);
+}
+
+function identifierMatchesKey(identifier: string, key: string): boolean {
+  if (identifier === key) {
+    return true;
+  }
+
+  const [, suffix] = splitCapabilityIdentifier(identifier);
+  return suffix === key;
+}
+
+function identifierMatchesCapability(
+  identifier: string,
+  capability: string,
+): boolean {
+  if (identifier === capability) {
+    return true;
+  }
+
+  const [prefix] = splitCapabilityIdentifier(identifier);
+  return prefix === capability;
+}
+
+function splitCapabilityIdentifier(identifier: string): [string | null, string] {
+  const index = identifier.indexOf(':');
+
+  if (index === -1) {
+    return [null, identifier];
+  }
+
+  return [identifier.slice(0, index), identifier.slice(index + 1)];
 }
 
 function readErrorMessage(

@@ -59,11 +59,11 @@ Usage:
   postplus auth status [--json]
   postplus auth validate [--json]
   postplus auth logout [--json]
-  postplus doctor [--json]
+  postplus doctor [--skill <skill-id>] [--json]
   postplus update
   postplus uninstall
   postplus list [--json]
-  postplus status [--json]
+  postplus status [--skill <skill-id>] [--json]
   postplus version
   postplus help
 
@@ -72,16 +72,21 @@ Skills:
 `);
 }
 
-async function runDoctor(json: boolean): Promise<number> {
-  const report = await generateDoctorReport();
+type DiagnosticCommandOptions = {
+  json: boolean;
+  skillId?: string;
+};
 
-  if (json) {
+async function runDoctor(options: DiagnosticCommandOptions): Promise<number> {
+  const report = await generateDoctorReport({ skillId: options.skillId });
+
+  if (options.json) {
     writeJson(report);
   } else {
     process.stdout.write(`${formatDoctorReport(report)}\n`);
   }
 
-  return report.ok ? 0 : 1;
+  return report.requiredOk ? 0 : 1;
 }
 
 async function runAuthStatus(json: boolean): Promise<number> {
@@ -96,10 +101,10 @@ async function runAuthStatus(json: boolean): Promise<number> {
   return report.ok ? 0 : 1;
 }
 
-async function runStatus(json: boolean): Promise<number> {
-  const report = await generateStatusReport();
+async function runStatus(options: DiagnosticCommandOptions): Promise<number> {
+  const report = await generateStatusReport({ skillId: options.skillId });
 
-  if (json) {
+  if (options.json) {
     writeJson(report);
   } else {
     process.stdout.write(`${formatStatusReport(report)}\n`);
@@ -161,6 +166,37 @@ async function runSkillUninstallCommand(): Promise<number> {
 
 function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function parseDiagnosticOptions(args: string[]): DiagnosticCommandOptions {
+  const options: DiagnosticCommandOptions = {
+    json: false,
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === '--json') {
+      options.json = true;
+      continue;
+    }
+
+    if (arg === '--skill') {
+      const skillId = args[index + 1];
+
+      if (!skillId || skillId.startsWith('--')) {
+        throw new Error('Missing value for --skill.');
+      }
+
+      options.skillId = skillId;
+      index += 1;
+      continue;
+    }
+
+    throw new Error(`Unknown option for diagnostics command: ${arg}`);
+  }
+
+  return options;
 }
 
 async function runAuthLogout(json: boolean): Promise<number> {
@@ -246,7 +282,7 @@ async function main(): Promise<void> {
       return;
     }
     case 'doctor':
-      process.exitCode = await runDoctor(json);
+      process.exitCode = await runDoctor(parseDiagnosticOptions(rest));
       return;
     case 'install':
       process.stderr.write(
@@ -264,7 +300,7 @@ async function main(): Promise<void> {
       process.exitCode = await runList(json);
       return;
     case 'status':
-      process.exitCode = await runStatus(json);
+      process.exitCode = await runStatus(parseDiagnosticOptions(rest));
       return;
     case 'auth': {
       const [subcommand, ...authRest] = rest;

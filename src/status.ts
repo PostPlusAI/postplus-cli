@@ -27,10 +27,17 @@ export type StatusReport = {
   auth: AuthStatusReport;
   skills: SkillInstallStatusReport;
   updates: UpdateStatusReport;
+  skillId?: string;
 };
 
-export async function generateStatusReport(): Promise<StatusReport> {
-  return generateStatusReportWithDependencies();
+export type StatusReportOptions = {
+  skillId?: string;
+};
+
+export async function generateStatusReport(
+  options: StatusReportOptions = {},
+): Promise<StatusReport> {
+  return generateStatusReportWithDependencies({}, options);
 }
 
 export async function generateStatusReportWithDependencies(
@@ -40,6 +47,7 @@ export async function generateStatusReportWithDependencies(
     generateSkillStatus?: typeof generateSkillInstallStatusReport;
     generateUpdateStatus?: typeof generateUpdateStatusReport;
   } = {},
+  options: StatusReportOptions = {},
 ): Promise<StatusReport> {
   await writeCurrentCliVersionToLocalConfig();
 
@@ -52,7 +60,7 @@ export async function generateStatusReportWithDependencies(
     dependencies.generateUpdateStatus ?? generateUpdateStatusReport;
 
   const [doctor, auth, skills, updates] = await Promise.all([
-    generateDoctor(),
+    generateDoctor({ skillId: options.skillId }),
     generateAuthStatus(),
     generateSkillStatus(),
     generateUpdateStatus(),
@@ -65,6 +73,7 @@ export async function generateStatusReportWithDependencies(
     auth,
     skills,
     updates,
+    ...(options.skillId ? { skillId: options.skillId } : {}),
   };
 }
 

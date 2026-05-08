@@ -20,10 +20,26 @@ const POSTPLUS_SKILLS_CATALOG_URL =
   'https://raw.githubusercontent.com/PostPlusAI/postplus-skills/main/skills/catalog.json';
 
 export type PublicSkillCatalogEntry = {
+  requirements: PublicSkillRequirements;
   localDependencies: string[];
   skillId: string;
   path: string | null;
 };
+
+export const PUBLIC_SKILL_REQUIREMENT_KEYS = [
+  'accountConnections',
+  'collectionKeys',
+  'endpointKeys',
+  'hostedCapabilities',
+  'localDependencies',
+  'modelKeys',
+  'sourceKeys',
+] as const;
+
+export type PublicSkillRequirementKey =
+  (typeof PUBLIC_SKILL_REQUIREMENT_KEYS)[number];
+
+export type PublicSkillRequirements = Record<PublicSkillRequirementKey, string[]>;
 
 export type PublicSkillCatalogReport = {
   source: string;
@@ -154,18 +170,7 @@ function parsePublicSkillCatalog(
       typeof skill.path === 'string' && skill.path.trim()
         ? skill.path.trim()
         : null;
-    const requirements =
-      skill.requirements &&
-      typeof skill.requirements === 'object' &&
-      !Array.isArray(skill.requirements)
-        ? (skill.requirements as Record<string, unknown>)
-        : {};
-    const localDependencies = Array.isArray(requirements.localDependencies)
-      ? requirements.localDependencies
-          .filter((value): value is string => typeof value === 'string')
-          .map((value) => value.trim())
-          .filter(Boolean)
-      : [];
+    const requirements = parsePublicSkillRequirements(skill.requirements);
 
     const status = typeof skill.status === 'string' ? skill.status.trim() : '';
 
@@ -178,9 +183,10 @@ function parsePublicSkillCatalog(
     }
 
     return {
-      localDependencies,
+      localDependencies: requirements.localDependencies,
       skillId,
       path,
+      requirements,
     };
   });
 
@@ -194,5 +200,58 @@ function parsePublicSkillCatalog(
     releaseId,
     skills,
     source,
+  };
+}
+
+function parsePublicSkillRequirements(value: unknown): PublicSkillRequirements {
+  if (value === undefined) {
+    return createEmptyRequirements();
+  }
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(
+      'PostPlus public skill catalog has invalid skill requirements.',
+    );
+  }
+
+  const record = value as Record<string, unknown>;
+  const requirements = createEmptyRequirements();
+
+  for (const key of PUBLIC_SKILL_REQUIREMENT_KEYS) {
+    const raw = record[key];
+
+    if (raw === undefined) {
+      continue;
+    }
+
+    if (!Array.isArray(raw)) {
+      throw new Error(
+        `PostPlus public skill catalog has invalid ${key} requirements.`,
+      );
+    }
+
+    requirements[key] = raw.map((item) => {
+      if (typeof item !== 'string' || !item.trim()) {
+        throw new Error(
+          `PostPlus public skill catalog has invalid ${key} requirements.`,
+        );
+      }
+
+      return item.trim();
+    });
+  }
+
+  return requirements;
+}
+
+function createEmptyRequirements(): PublicSkillRequirements {
+  return {
+    accountConnections: [],
+    collectionKeys: [],
+    endpointKeys: [],
+    hostedCapabilities: [],
+    localDependencies: [],
+    modelKeys: [],
+    sourceKeys: [],
   };
 }
