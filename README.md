@@ -34,6 +34,7 @@ Requires Node.js and npm.
 npm install -g @postplus/cli@latest
 postplus auth login
 npx -y skills add PostPlusAI/postplus-skills --global --full-depth --skill '*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn --yes
+postplus skills verify
 ```
 
 Useful checks:

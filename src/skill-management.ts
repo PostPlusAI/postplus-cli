@@ -36,6 +36,12 @@ export type SkillInstallStatusReport = {
   retiredManagedSkills: string[];
 };
 
+export type SkillBaselineVerifyReport = SkillInstallStatusReport & {
+  baselineUpdated: boolean;
+  previousManagedSkillsReleaseId: string | null;
+  verifiedSkillsReleaseId: string | null;
+};
+
 type SkillManagementDependencies = {
   runCommand: typeof runCommand;
 };
@@ -120,8 +126,52 @@ export async function generateSkillInstallStatusReport(
     runCommand,
   },
 ): Promise<SkillInstallStatusReport> {
+  return (await inspectPostPlusSkillInstall(dependencies)).report;
+}
+
+export async function runPostPlusSkillVerify(
+  dependencies: SkillManagementDependencies = {
+    runCommand,
+  },
+): Promise<SkillBaselineVerifyReport> {
+  const inspection = await inspectPostPlusSkillInstall(dependencies);
+  const previousManagedSkillsReleaseId =
+    inspection.report.managedSkillsReleaseId;
+
+  if (!inspection.report.ok) {
+    return {
+      ...inspection.report,
+      baselineUpdated: false,
+      previousManagedSkillsReleaseId,
+      verifiedSkillsReleaseId: null,
+    };
+  }
+
+  await writeManagedSkillBaseline({
+    releaseId: inspection.catalog.releaseId,
+    skillNames: inspection.requiredSkillNames,
+  });
+  await writeCurrentCliVersionToLocalConfig();
+
+  return {
+    ...inspection.report,
+    baselineUpdated: true,
+    managedSkillsReleaseId: inspection.catalog.releaseId,
+    previousManagedSkillsReleaseId,
+    verifiedSkillsReleaseId: inspection.catalog.releaseId,
+  };
+}
+
+async function inspectPostPlusSkillInstall(
+  dependencies: SkillManagementDependencies,
+): Promise<{
+  catalog: Awaited<ReturnType<typeof loadPublicSkillCatalog>>;
+  report: SkillInstallStatusReport;
+  requiredSkillNames: string[];
+}> {
   const catalog = await loadPublicSkillCatalog();
-  const requiredSkills = new Set(catalog.skills.map((skill) => skill.skillId));
+  const requiredSkillNames = catalog.skills.map((skill) => skill.skillId);
+  const requiredSkills = new Set(requiredSkillNames);
   const baseline = await readManagedSkillBaseline();
   const retiredManagedSkills = baseline.skillNames.filter(
     (skillName) => !requiredSkills.has(skillName),
@@ -147,36 +197,44 @@ export async function generateSkillInstallStatusReport(
     ].sort();
 
     return {
-      ok: missingSkills.length === 0,
-      error: null,
-      installCommand: formatPostPlusSkillsInstallCommand(catalog.source),
-      installedCount: installedNames.size,
-      managedSkillsReleaseId: baseline.releaseId,
-      missingSkills,
-      requiredCount: requiredSkills.size,
-      retiredManagedSkills,
-      scopes,
-      source: catalog.source,
-      updateCommand: formatPostPlusSkillUpdateCommand(),
-      uninstallCommand: formatPostPlusSkillUninstallCommand(),
+      catalog,
+      report: {
+        ok: missingSkills.length === 0,
+        error: null,
+        installCommand: formatPostPlusSkillsInstallCommand(catalog.source),
+        installedCount: installedNames.size,
+        managedSkillsReleaseId: baseline.releaseId,
+        missingSkills,
+        requiredCount: requiredSkills.size,
+        retiredManagedSkills,
+        scopes,
+        source: catalog.source,
+        updateCommand: formatPostPlusSkillUpdateCommand(),
+        uninstallCommand: formatPostPlusSkillUninstallCommand(),
+      },
+      requiredSkillNames,
     };
   } catch (error) {
     return {
-      ok: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : 'Failed to inspect installed PostPlus skills.',
-      installCommand: formatPostPlusSkillsInstallCommand(catalog.source),
-      installedCount: 0,
-      managedSkillsReleaseId: baseline.releaseId,
-      missingSkills: [...requiredSkills],
-      requiredCount: requiredSkills.size,
-      retiredManagedSkills,
-      scopes: [],
-      source: catalog.source,
-      updateCommand: formatPostPlusSkillUpdateCommand(),
-      uninstallCommand: formatPostPlusSkillUninstallCommand(),
+      catalog,
+      report: {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Failed to inspect installed PostPlus skills.',
+        installCommand: formatPostPlusSkillsInstallCommand(catalog.source),
+        installedCount: 0,
+        managedSkillsReleaseId: baseline.releaseId,
+        missingSkills: [...requiredSkills],
+        requiredCount: requiredSkills.size,
+        retiredManagedSkills,
+        scopes: [],
+        source: catalog.source,
+        updateCommand: formatPostPlusSkillUpdateCommand(),
+        uninstallCommand: formatPostPlusSkillUninstallCommand(),
+      },
+      requiredSkillNames,
     };
   }
 }
@@ -218,6 +276,47 @@ export function formatSkillInstallStatusReport(
     );
   } else {
     lines.push(`  Update: ${report.updateCommand}`);
+  }
+
+  return lines.join('\n');
+}
+
+export function formatSkillBaselineVerifyReport(
+  report: SkillBaselineVerifyReport,
+): string {
+  const lines = ['PostPlus skills verify', ''];
+
+  if (report.error) {
+    lines.push(`[FAIL] Skill installer: ${report.error}`);
+  } else if (report.ok) {
+    lines.push(
+      `[PASS] Installed released skills: ${report.installedCount}/${report.requiredCount}`,
+    );
+  } else {
+    lines.push(
+      `[FAIL] Installed released skills: ${report.installedCount}/${report.requiredCount}`,
+    );
+  }
+
+  lines.push(`  Source: ${report.source}`);
+  lines.push(
+    `  Previous managed baseline: ${
+      report.previousManagedSkillsReleaseId ?? 'none'
+    }`,
+  );
+
+  if (report.baselineUpdated && report.verifiedSkillsReleaseId) {
+    lines.push(`  Verified baseline: ${report.verifiedSkillsReleaseId}`);
+    lines.push('  Next: postplus status');
+  } else {
+    lines.push('  Verified baseline: unchanged');
+  }
+
+  if (report.missingSkills.length > 0) {
+    lines.push(
+      `  Missing: ${formatSkillList(report.missingSkills, 8)}`,
+      `  Fix: ${report.installCommand}`,
+    );
   }
 
   return lines.join('\n');

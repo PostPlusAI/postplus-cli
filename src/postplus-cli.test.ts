@@ -37,9 +37,11 @@ import {
 import {
   buildPostPlusSkillUninstallArgs,
   buildPostPlusSkillUpdateArgs,
+  formatSkillBaselineVerifyReport,
   generateSkillInstallStatusReport,
   runPostPlusSkillUninstall,
   runPostPlusSkillUpdate,
+  runPostPlusSkillVerify,
 } from './skill-management.js';
 import {
   formatStatusReport,
@@ -2262,6 +2264,137 @@ describe('skill management commands', () => {
     }
   });
 
+  it('verifies installed public skills before recording the managed baseline', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+            {
+              name: 'new-skill',
+              path: 'skills/new-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    const calls: string[][] = [];
+
+    try {
+      const report = await runPostPlusSkillVerify({
+        runCommand: async (_command, args) => {
+          calls.push(args);
+          return {
+            stderr: '',
+            stdout: args.includes('--global')
+              ? JSON.stringify([
+                  {
+                    agents: ['Codex'],
+                    name: 'demo-skill',
+                    path: '/tmp/demo-skill',
+                    scope: 'global',
+                  },
+                  {
+                    agents: ['Codex'],
+                    name: 'new-skill',
+                    path: '/tmp/new-skill',
+                    scope: 'global',
+                  },
+                ])
+              : '[]',
+          };
+        },
+      });
+      const config = await readLocalConfig();
+
+      assert.equal(report.ok, true);
+      assert.equal(report.baselineUpdated, true);
+      assert.equal(report.previousManagedSkillsReleaseId, null);
+      assert.equal(report.verifiedSkillsReleaseId, 'catalog-2');
+      assert.deepEqual(calls, [
+        ['-y', 'skills', 'list', '--json'],
+        ['-y', 'skills', 'list', '--json', '--global'],
+      ]);
+      assert.deepEqual(config?.managedSkills?.skillNames, [
+        'demo-skill',
+        'new-skill',
+      ]);
+      assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
+      assert.match(formatSkillBaselineVerifyReport(report), /postplus status/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not record the managed baseline when verification finds missing skills', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+            {
+              name: 'missing-skill',
+              path: 'skills/missing-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await writeManagedSkillBaseline({
+        releaseId: 'catalog-1',
+        skillNames: ['demo-skill'],
+      });
+      const report = await runPostPlusSkillVerify({
+        runCommand: async () => ({
+          stderr: '',
+          stdout: JSON.stringify([
+            {
+              agents: ['Codex'],
+              name: 'demo-skill',
+              path: '/tmp/demo-skill',
+              scope: 'global',
+            },
+          ]),
+        }),
+      });
+      const config = await readLocalConfig();
+
+      assert.equal(report.ok, false);
+      assert.equal(report.baselineUpdated, false);
+      assert.equal(report.previousManagedSkillsReleaseId, 'catalog-1');
+      assert.deepEqual(report.missingSkills, ['missing-skill']);
+      assert.equal(config?.managedSkills?.releaseId, 'catalog-1');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('uninstalls current and retired managed skills before clearing the baseline', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
@@ -2324,6 +2457,30 @@ describe('skill management commands', () => {
         assert.match(
           execError.stderr ?? '',
           /npx -y skills add PostPlusAI\/postplus-skills --global --full-depth --skill '\*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn --yes/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it('fails fast on unknown skills verify options', async () => {
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        '--import',
+        'tsx',
+        'src/index.ts',
+        'skills',
+        'verify',
+        '--bogus',
+      ]),
+      (error) => {
+        const execError = error as Error & {
+          stderr?: string;
+        };
+
+        assert.match(
+          execError.stderr ?? '',
+          /Unknown option for skills verify: --bogus/,
         );
         return true;
       },

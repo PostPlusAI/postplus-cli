@@ -22,8 +22,10 @@ import {
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
 import {
+  formatSkillBaselineVerifyReport,
   runPostPlusSkillUninstall,
   runPostPlusSkillUpdate,
+  runPostPlusSkillVerify,
 } from './skill-management.js';
 import { formatStatusReport, generateStatusReport } from './status.js';
 import {
@@ -60,6 +62,7 @@ Usage:
   postplus auth validate [--json]
   postplus auth logout [--json]
   postplus doctor [--skill <skill-id>] [--json]
+  postplus skills verify [--json]
   postplus update
   postplus uninstall
   postplus list [--json]
@@ -69,6 +72,9 @@ Usage:
 
 Skills:
   ${POSTPLUS_SKILLS_INSTALL_COMMAND}
+
+After first install, run:
+  postplus skills verify
 `);
 }
 
@@ -162,6 +168,50 @@ async function runSkillUpdateCommand(): Promise<number> {
 
 async function runSkillUninstallCommand(): Promise<number> {
   return runPostPlusSkillUninstall();
+}
+
+async function runSkillsCommand(rest: string[]): Promise<number> {
+  const [subcommand] = rest;
+
+  switch (subcommand) {
+    case 'verify': {
+      const options = rest.slice(1);
+      const unknownOption = options.find((option) => option !== '--json');
+
+      if (unknownOption) {
+        process.stderr.write(
+          `Unknown option for skills verify: ${unknownOption}\n`,
+        );
+        return 1;
+      }
+
+      const report = await runPostPlusSkillVerify();
+
+      if (options.includes('--json')) {
+        writeJson(report);
+      } else {
+        process.stdout.write(`${formatSkillBaselineVerifyReport(report)}\n`);
+      }
+
+      return report.ok ? 0 : 1;
+    }
+    case 'help':
+    case '--help':
+    case '-h':
+    case undefined:
+      process.stdout.write(`PostPlus CLI — skills commands
+
+Usage:
+  postplus skills verify [--json]  Verify installed public skills and record the managed baseline
+
+Options:
+  --json    Output results as JSON
+`);
+      return 0;
+    default:
+      process.stderr.write(`Unknown skills command: ${subcommand}\n`);
+      return 1;
+  }
 }
 
 function writeJson(value: unknown): void {
@@ -275,6 +325,8 @@ async function main(): Promise<void> {
       const [helpTopic] = rest;
       if (helpTopic === 'auth') {
         printAuthHelp();
+      } else if (helpTopic === 'skills') {
+        await runSkillsCommand(['help']);
       } else {
         printHelp();
       }
@@ -283,6 +335,9 @@ async function main(): Promise<void> {
     }
     case 'doctor':
       process.exitCode = await runDoctor(parseDiagnosticOptions(rest));
+      return;
+    case 'skills':
+      process.exitCode = await runSkillsCommand(rest);
       return;
     case 'install':
       process.stderr.write(
