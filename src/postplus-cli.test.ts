@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { after, beforeEach, describe, it } from 'node:test';
@@ -26,6 +26,11 @@ import {
   writeLocalConfig,
   writeManagedSkillBaseline,
 } from './local-state.js';
+import {
+  buildLargeCreditConfirmationPrompt,
+  readLargeCreditQuoteConfirmationChallenge,
+  resolveLargeCreditQuoteConfirmation,
+} from './quote-confirmation.js';
 import {
   POSTPLUS_SKILLS_AGENT_TARGETS,
   POSTPLUS_SKILLS_CATALOG_URL_ENV,
@@ -149,6 +154,31 @@ function createWhoamiResponse(): Response {
       headers: { 'content-type': 'application/json' },
     },
   );
+}
+
+function buildLargeCreditChallenge(input: {
+  requiredTierMillicredits: number;
+}) {
+  return {
+    accountId: 'account-1',
+    action: 'generate',
+    billingUnit: 'credit',
+    drivers: [
+      { key: 'duration', label: 'Duration', value: 10 },
+      { key: 'resolution', label: 'Resolution', value: '1080p' },
+    ],
+    estimatedCredits: 288,
+    estimatedMillicredits: 288_000,
+    estimatedOnly: true,
+    featureLabel: 'Video generation',
+    operationId: 'operation-1',
+    requiredTierCredits: input.requiredTierMillicredits / 1_000,
+    requiredTierMillicredits: input.requiredTierMillicredits,
+    reservedCredits: 432,
+    reservedMillicredits: 432_000,
+    serviceLabel: 'Media generation service',
+    token: `token-${input.requiredTierMillicredits}`,
+  };
 }
 
 function createMediaReadinessResponse(): Response {
@@ -1990,6 +2020,120 @@ describe('update checks', () => {
 });
 
 describe('skill management commands', () => {
+  it('confirms large credit quotes through CLI-owned local state', async () => {
+    let promptCount = 0;
+
+    const first = await resolveLargeCreditQuoteConfirmation(
+      buildLargeCreditChallenge({ requiredTierMillicredits: 100_000 }),
+      {
+        confirm: async () => {
+          promptCount += 1;
+        },
+      },
+    );
+
+    assert.deepEqual(first, { schemaVersion: 1, token: 'token-100000' });
+    assert.equal(promptCount, 1);
+
+    const repeated = await resolveLargeCreditQuoteConfirmation(
+      buildLargeCreditChallenge({ requiredTierMillicredits: 100_000 }),
+      {
+        confirm: async () => {
+          promptCount += 1;
+        },
+      },
+    );
+
+    assert.deepEqual(repeated, { schemaVersion: 1, token: 'token-100000' });
+    assert.equal(promptCount, 1);
+
+    const higher = await resolveLargeCreditQuoteConfirmation(
+      buildLargeCreditChallenge({ requiredTierMillicredits: 300_000 }),
+      {
+        confirm: async () => {
+          promptCount += 1;
+        },
+      },
+    );
+
+    assert.deepEqual(higher, { schemaVersion: 1, token: 'token-300000' });
+    assert.equal(promptCount, 2);
+
+    const config = await readLocalConfig();
+    assert.equal(
+      config?.largeCreditConfirmation
+        ?.acknowledgedTierMillicreditsByAccountId?.['account-1'],
+      300_000,
+    );
+  });
+
+  it('formats large credit quote confirmation prompts with public labels', () => {
+    const prompt = buildLargeCreditConfirmationPrompt(
+      buildLargeCreditChallenge({ requiredTierMillicredits: 300_000 }),
+    );
+
+    assert.match(prompt, /PostPlus large credit warning/);
+    assert.match(prompt, /300-credit warning tier/);
+    assert.match(prompt, /Estimated charge: 288 credits/);
+    assert.match(prompt, /Reserved before execution: 432 credits/);
+    assert.match(prompt, /Capability: Video generation \/ generate/);
+    assert.match(prompt, /Service: Media generation service/);
+    assert.match(prompt, /Duration: 10/);
+    assert.match(prompt, /Resolution: 1080p/);
+  });
+
+  it('reads large credit quote confirmation challenges from product errors', () => {
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 100_000,
+    });
+
+    assert.deepEqual(
+      readLargeCreditQuoteConfirmationChallenge({
+        productErrorCode: 'postplus_cli_quote_confirmation_required',
+        quoteConfirmation: challenge,
+      }),
+      challenge,
+    );
+  });
+
+  it('exposes quote confirm as the skill delegation command', async () => {
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 100_000,
+    });
+
+    await writeLocalConfig({
+      largeCreditConfirmation: {
+        acknowledgedTierMillicreditsByAccountId: {
+          'account-1': 100_000,
+        },
+      },
+    });
+    const challengeFile = resolve(
+      process.env.POSTPLUS_CONFIG_DIR ?? tmpdir(),
+      'challenge.json',
+    );
+    await writeFile(challengeFile, JSON.stringify(challenge), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'quote',
+      'confirm',
+      '--json',
+      '--challenge-file',
+      challengeFile,
+    ]);
+
+    assert.deepEqual(JSON.parse(stdout), {
+      schemaVersion: 1,
+      token: 'token-100000',
+    });
+  });
+
   it('builds update and uninstall commands for released PostPlus skills only', () => {
     assert.deepEqual(buildPostPlusSkillUpdateArgs(['a', 'b']), [
       '-y',

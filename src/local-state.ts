@@ -16,6 +16,9 @@ export type PostPlusLocalConfig = {
   cliVersion?: string;
   accountId?: string;
   cliSessionToken?: string;
+  largeCreditConfirmation?: {
+    acknowledgedTierMillicreditsByAccountId?: Record<string, number>;
+  };
   managedSkills?: {
     releaseId: string;
     skillNames: string[];

@@ -24,7 +24,7 @@ PostPlus has three public surfaces that work together:
 
 - `https://postplus.io/`: the hosted product surface for account access, subscription state, and cloud-backed capabilities.
 - `https://github.com/PostPlusAI/postplus-skills`: the public skill repository that installs local marketing workflows into agent tools.
-- `https://github.com/PostPlusAI/postplus-cli`: the local command-line tool that signs you in, checks local readiness, and connects released skills to PostPlus account state.
+- `https://github.com/PostPlusAI/postplus-cli`: the local command-line tool that signs you in, checks local readiness, confirms high-credit hosted requests, and connects released skills to PostPlus account state.
 
 ## Install
 

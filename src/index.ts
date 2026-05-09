@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readFile } from 'node:fs/promises';
+
 import {
   formatAuthRefreshReport,
   refreshRemoteAuth,
@@ -17,6 +19,10 @@ import {
 import { readCurrentCliVersion } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import { assertConfigFilePermissions } from './local-state.js';
+import {
+  readLargeCreditQuoteConfirmationChallenge,
+  resolveLargeCreditQuoteConfirmation,
+} from './quote-confirmation.js';
 import {
   POSTPLUS_SKILLS_INSTALL_COMMAND,
   loadPublicSkillCatalog,
@@ -62,6 +68,7 @@ Usage:
   postplus auth validate [--json]
   postplus auth logout [--json]
   postplus doctor [--skill <skill-id>] [--json]
+  postplus quote confirm --json --challenge-file <path>
   postplus skills verify [--json]
   postplus update
   postplus uninstall
@@ -214,6 +221,74 @@ Options:
   }
 }
 
+async function runQuoteCommand(rest: string[]): Promise<number> {
+  const [subcommand, ...options] = rest;
+
+  if (subcommand !== 'confirm') {
+    process.stderr.write(`Unknown quote command: ${subcommand ?? ''}\n`);
+    return 1;
+  }
+
+  const parsed = parseQuoteConfirmOptions(options);
+
+  if (!parsed.json) {
+    process.stderr.write('quote confirm requires --json.\n');
+    return 1;
+  }
+
+  if (!parsed.challengeFile) {
+    process.stderr.write('quote confirm requires --challenge-file.\n');
+    return 1;
+  }
+
+  const challenge = readLargeCreditQuoteConfirmationChallenge(
+    JSON.parse(await readFile(parsed.challengeFile, 'utf8')),
+  );
+
+  if (!challenge) {
+    process.stderr.write('Invalid large credit quote confirmation challenge.\n');
+    return 1;
+  }
+
+  writeJson(await resolveLargeCreditQuoteConfirmation(challenge));
+  return 0;
+}
+
+function parseQuoteConfirmOptions(args: string[]): {
+  challengeFile: string | null;
+  json: boolean;
+} {
+  const options = {
+    challengeFile: null as string | null,
+    json: false,
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === '--json') {
+      options.json = true;
+      continue;
+    }
+
+    if (arg === '--challenge-file') {
+      const challengeFile = args[index + 1];
+
+      if (!challengeFile || challengeFile.startsWith('--')) {
+        throw new Error('Missing value for --challenge-file.');
+      }
+
+      options.challengeFile = challengeFile;
+      index += 1;
+      continue;
+    }
+
+    throw new Error(`Unknown option for quote confirm: ${arg}`);
+  }
+
+  return options;
+}
+
 function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -335,6 +410,9 @@ async function main(): Promise<void> {
     }
     case 'doctor':
       process.exitCode = await runDoctor(parseDiagnosticOptions(rest));
+      return;
+    case 'quote':
+      process.exitCode = await runQuoteCommand(rest);
       return;
     case 'skills':
       process.exitCode = await runSkillsCommand(rest);
