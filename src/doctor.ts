@@ -368,6 +368,16 @@ async function checkHostedCapabilities(
       .filter((value): value is string => value !== null);
 
     if (skillScope && hasHostedRequirements(skillScope.skill.requirements)) {
+      const subscription = readSubscriptionStatusField(payload).label;
+      if (
+        requiresSocialPublishingPlan(skillScope.skill.requirements) &&
+        subscription === 'none'
+      ) {
+        failedLabels.push(
+          `PostPlus Plus or Pro plan required; current subscription ${subscription}`,
+        );
+      }
+
       const missingRequirements = collectMissingHostedRequirementLabels(
         relevantCapabilities,
         skillScope.skill.requirements,
@@ -522,7 +532,7 @@ function capabilityMatchesRequirements(
       prefix &&
       suffix &&
       hostedCapabilities.has(prefix) &&
-      requirementKeys.has(suffix)
+      (isWholeFamilyHostedCapability(prefix) || requirementKeys.has(suffix))
     ) {
       return true;
     }
@@ -591,6 +601,16 @@ function collectHostedRequirementKeys(
   ]);
 }
 
+function isWholeFamilyHostedCapability(prefix: string): boolean {
+  return prefix === 'social-publishing';
+}
+
+function requiresSocialPublishingPlan(
+  requirements: PublicSkillRequirements,
+): boolean {
+  return requirements.hostedCapabilities.includes('social-publishing');
+}
+
 function hasHostedRequirements(requirements: PublicSkillRequirements): boolean {
   return (
     requirements.accountConnections.length > 0 ||
@@ -636,6 +656,13 @@ function collectMissingHostedRequirementLabels(
 
 function identifierMatchesKey(identifier: string, key: string): boolean {
   if (identifier === key) {
+    return true;
+  }
+
+  if (
+    key === 'social-publishing-workspace' &&
+    identifierMatchesCapability(identifier, 'social-publishing')
+  ) {
     return true;
   }
 

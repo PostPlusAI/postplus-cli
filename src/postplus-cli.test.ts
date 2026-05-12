@@ -140,6 +140,33 @@ function createVideoAnalysisCatalogResponse(): Response {
   );
 }
 
+function createSocialPublishingCatalogResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      schemaVersion: 1,
+      releaseId: 'catalog-1',
+      source: 'PostPlusAI/postplus-skills',
+      primaryIndex: 'skills/INDEX.md',
+      skills: [
+        {
+          name: 'social-media-publisher',
+          path: 'skills/50-publishing/social-media-publisher/SKILL.md',
+          requirements: {
+            accountConnections: ['social-publishing-workspace'],
+            hostedCapabilities: ['social-publishing'],
+            localDependencies: [],
+          },
+          status: 'released',
+        },
+      ],
+    }),
+    {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    },
+  );
+}
+
 function createWhoamiResponse(): Response {
   return new Response(
     JSON.stringify({
@@ -236,6 +263,37 @@ function createMediaReadinessResponse(): Response {
           id: 'media-generation:image-bad',
           label: 'Media generation: image-bad',
           ok: false,
+          required: true,
+        },
+      ],
+    }),
+    {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    },
+  );
+}
+
+function createSocialPublishingReadinessResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      subscriptionActive: false,
+      subscriptionStatus: null,
+      capabilities: [
+        {
+          checks: [
+            {
+              id: 'subscription',
+              label: 'PostPlus subscription',
+              ok: false,
+              required: false,
+            },
+          ],
+          id: 'social-publishing:list-channels',
+          label: 'Social publishing: list-channels',
+          ok: true,
+          operation: 'list-channels',
           required: true,
         },
       ],
@@ -1133,6 +1191,56 @@ describe('doctor and status', () => {
       assert.equal(report.requiredOk, true);
       assert.match(formatted, /Hosted capabilities for video-analysis/);
       assert.doesNotMatch(formatted, /Media generation: image-bad/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('matches social publishing operation readiness to the social publishing skill', async () => {
+    await setLocalSession({
+      cliSessionToken: 'cli-session-token-value',
+      accountId: 'account-1',
+      apiBaseUrl: 'https://postplus.example.com',
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (isPublicCatalogUrl(url)) {
+        return createSocialPublishingCatalogResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return createWhoamiResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+        return createSocialPublishingReadinessResponse();
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const report = await generateDoctorReport({
+        skillId: 'social-media-publisher',
+      });
+      const formatted = formatDoctorReport(report);
+
+      assert.equal(report.skillId, 'social-media-publisher');
+      assert.equal(report.ok, false);
+      assert.equal(report.requiredOk, false);
+      assert.match(
+        formatted,
+        /PostPlus Plus or Pro plan required; current subscription none/,
+      );
+      assert.doesNotMatch(formatted, /readiness check missing/);
     } finally {
       globalThis.fetch = originalFetch;
     }
