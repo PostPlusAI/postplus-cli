@@ -1,16 +1,6 @@
 export const POSTPLUS_SKILLS_REPO = 'PostPlusAI/postplus-skills';
 export const POSTPLUS_SKILLS_SOURCE_ENV = 'POSTPLUS_SKILLS_SOURCE';
 export const POSTPLUS_SKILLS_CATALOG_URL_ENV = 'POSTPLUS_SKILLS_CATALOG_URL';
-export const POSTPLUS_SKILLS_AGENT_TARGETS = [
-  'claude-code',
-  'codex',
-  'cursor',
-  'github-copilot',
-  'windsurf',
-  'trae',
-  'trae-cn',
-] as const;
-const POSTPLUS_SKILLS_AGENT_ARGS = POSTPLUS_SKILLS_AGENT_TARGETS.join(' ');
 export const POSTPLUS_SKILLS_INSTALL_COMMAND = formatPostPlusSkillsInstallCommand();
 export const POSTPLUS_SKILLS_LIST_COMMAND = formatPostPlusSkillsListCommand();
 
@@ -99,7 +89,7 @@ export function resolvePostPlusSkillsCatalogUrl(
 export function formatPostPlusSkillsInstallCommand(
   source = POSTPLUS_SKILLS_REPO,
 ): string {
-  return `npx -y skills add ${source} --global --full-depth --skill '*' --agent ${POSTPLUS_SKILLS_AGENT_ARGS} --yes`;
+  return `npx -y skills add ${source} --full-depth --all --yes`;
 }
 
 export function formatPostPlusSkillsListCommand(

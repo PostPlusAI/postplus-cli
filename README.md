@@ -33,7 +33,7 @@ Requires Node.js and npm.
 ```bash
 npm install -g @postplus/cli@latest
 postplus auth login
-npx -y skills add PostPlusAI/postplus-skills --global --full-depth --skill '*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn --yes
+npx -y skills add PostPlusAI/postplus-skills --full-depth --all --yes
 postplus skills verify
 ```
 

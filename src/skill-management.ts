@@ -6,7 +6,6 @@ import {
   writeManagedSkillBaseline,
 } from './local-state.js';
 import {
-  POSTPLUS_SKILLS_AGENT_TARGETS,
   formatPostPlusSkillsInstallCommand,
   resolvePostPlusSkillsSource,
   loadPublicSkillCatalog,
@@ -333,12 +332,8 @@ export function buildPostPlusSkillUpdateArgs(skillNames: string[]): string[] {
     ...NPX_SKILLS,
     'add',
     skillsSource,
-    '--global',
     '--full-depth',
-    '--skill',
-    '*',
-    '--agent',
-    ...POSTPLUS_SKILLS_AGENT_TARGETS,
+    '--all',
     '--yes',
   ];
 }
@@ -350,9 +345,6 @@ export function buildPostPlusSkillUninstallArgs(
     ...NPX_SKILLS,
     'remove',
     ...skillNames,
-    '--global',
-    '--agent',
-    ...POSTPLUS_SKILLS_AGENT_TARGETS,
     '--yes',
   ];
 }
@@ -373,10 +365,9 @@ async function listInstalledSkills(
   dependencies: SkillManagementDependencies,
 ): Promise<InstalledSkillEntry[]> {
   const project = await listInstalledSkillsForScope(dependencies, []);
-  const global = await listInstalledSkillsForScope(dependencies, ['--global']);
   const byKey = new Map<string, InstalledSkillEntry>();
 
-  for (const skill of [...project, ...global]) {
+  for (const skill of project) {
     byKey.set(`${skill.scope}:${skill.name}:${skill.path}`, skill);
   }
 

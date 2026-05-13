@@ -32,7 +32,6 @@ import {
   resolveLargeCreditQuoteConfirmation,
 } from './quote-confirmation.js';
 import {
-  POSTPLUS_SKILLS_AGENT_TARGETS,
   POSTPLUS_SKILLS_CATALOG_URL_ENV,
   POSTPLUS_SKILLS_INSTALL_COMMAND,
   POSTPLUS_SKILLS_SOURCE_ENV,
@@ -2248,12 +2247,8 @@ describe('skill management commands', () => {
       'skills',
       'add',
       'PostPlusAI/postplus-skills',
-      '--global',
       '--full-depth',
-      '--skill',
-      '*',
-      '--agent',
-      ...POSTPLUS_SKILLS_AGENT_TARGETS,
+      '--all',
       '--yes',
     ]);
     assert.deepEqual(buildPostPlusSkillUninstallArgs(['a', 'b']), [
@@ -2262,9 +2257,6 @@ describe('skill management commands', () => {
       'remove',
       'a',
       'b',
-      '--global',
-      '--agent',
-      ...POSTPLUS_SKILLS_AGENT_TARGETS,
       '--yes',
     ]);
   });
@@ -2278,12 +2270,8 @@ describe('skill management commands', () => {
       'skills',
       'add',
       'PostPlusAI/postplus-skills#release/2026-05-03.1',
-      '--global',
       '--full-depth',
-      '--skill',
-      '*',
-      '--agent',
-      ...POSTPLUS_SKILLS_AGENT_TARGETS,
+      '--all',
       '--yes',
     ]);
   });
@@ -2318,13 +2306,7 @@ describe('skill management commands', () => {
     try {
       const report = await generateSkillInstallStatusReport({
         runCommand: async (_command, args) => {
-          if (args.includes('--global')) {
-            return {
-              stderr: '',
-              stdout: '[]',
-            };
-          }
-
+          assert.deepEqual(args, ['-y', 'skills', 'list', '--json']);
           return {
             stderr: '',
             stdout: JSON.stringify([
@@ -2346,7 +2328,7 @@ describe('skill management commands', () => {
     }
   });
 
-  it('lists project and global skills sequentially to avoid npx cache races', async () => {
+  it('lists project skills once for the current agent workspace', async () => {
     const originalFetch = globalThis.fetch;
     let activeListCalls = 0;
     const calls: string[][] = [];
@@ -2381,25 +2363,20 @@ describe('skill management commands', () => {
 
           return {
             stderr: '',
-            stdout: args.includes('--global')
-              ? JSON.stringify([
-                  {
-                    agents: ['Codex'],
-                    name: 'demo-skill',
-                    path: '/tmp/demo-skill',
-                    scope: 'global',
-                  },
-                ])
-              : '[]',
+            stdout: JSON.stringify([
+              {
+                agents: ['Codex'],
+                name: 'demo-skill',
+                path: '/tmp/demo-skill',
+                scope: 'project',
+              },
+            ]),
           };
         },
       });
 
       assert.equal(report.ok, true);
-      assert.deepEqual(calls, [
-        ['-y', 'skills', 'list', '--json'],
-        ['-y', 'skills', 'list', '--json', '--global'],
-      ]);
+      assert.deepEqual(calls, [['-y', 'skills', 'list', '--json']]);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -2548,24 +2525,23 @@ describe('skill management commands', () => {
       const report = await runPostPlusSkillVerify({
         runCommand: async (_command, args) => {
           calls.push(args);
+          assert.deepEqual(args, ['-y', 'skills', 'list', '--json']);
           return {
             stderr: '',
-            stdout: args.includes('--global')
-              ? JSON.stringify([
-                  {
-                    agents: ['Codex'],
-                    name: 'demo-skill',
-                    path: '/tmp/demo-skill',
-                    scope: 'global',
-                  },
-                  {
-                    agents: ['Codex'],
-                    name: 'new-skill',
-                    path: '/tmp/new-skill',
-                    scope: 'global',
-                  },
-                ])
-              : '[]',
+            stdout: JSON.stringify([
+              {
+                agents: ['Codex'],
+                name: 'demo-skill',
+                path: '/tmp/demo-skill',
+                scope: 'project',
+              },
+              {
+                agents: ['Codex'],
+                name: 'new-skill',
+                path: '/tmp/new-skill',
+                scope: 'project',
+              },
+            ]),
           };
         },
       });
@@ -2575,10 +2551,7 @@ describe('skill management commands', () => {
       assert.equal(report.baselineUpdated, true);
       assert.equal(report.previousManagedSkillsReleaseId, null);
       assert.equal(report.verifiedSkillsReleaseId, 'catalog-2');
-      assert.deepEqual(calls, [
-        ['-y', 'skills', 'list', '--json'],
-        ['-y', 'skills', 'list', '--json', '--global'],
-      ]);
+      assert.deepEqual(calls, [['-y', 'skills', 'list', '--json']]);
       assert.deepEqual(config?.managedSkills?.skillNames, [
         'demo-skill',
         'new-skill',
@@ -2708,7 +2681,7 @@ describe('skill management commands', () => {
 
         assert.match(
           execError.stderr ?? '',
-          /npx -y skills add PostPlusAI\/postplus-skills --global --full-depth --skill '\*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn --yes/,
+          /npx -y skills add PostPlusAI\/postplus-skills --full-depth --all --yes/,
         );
         return true;
       },
