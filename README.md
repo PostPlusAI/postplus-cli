@@ -33,7 +33,15 @@ Requires Node.js and npm.
 ```bash
 npm install -g @postplus/cli@latest
 postplus auth login
-npx -y skills add PostPlusAI/postplus-skills --global --full-depth --skill '*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn --yes
+npx -y skills add PostPlusAI/postplus-skills --global --full-depth --skill '*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent --yes
+postplus skills verify
+```
+
+For current-directory skills instead of global skills, run the skills install
+without `--global` from the directory where the agent should load PostPlus:
+
+```bash
+npx -y skills add PostPlusAI/postplus-skills --full-depth --skill '*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent --yes
 postplus skills verify
 ```
 
@@ -41,6 +49,7 @@ Useful checks:
 
 ```bash
 postplus status
+postplus update --current-directory
 npx -y skills add PostPlusAI/postplus-skills --list --full-depth
 ```
 

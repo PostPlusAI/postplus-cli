@@ -7,6 +7,7 @@ import {
 } from './local-state.js';
 import {
   POSTPLUS_SKILLS_AGENT_TARGETS,
+  type PostPlusSkillsInstallScope,
   formatPostPlusSkillsInstallCommand,
   resolvePostPlusSkillsSource,
   loadPublicSkillCatalog,
@@ -50,10 +51,19 @@ type SkillMutationDependencies = {
   runInteractiveCommand: typeof runInteractiveCommand;
 };
 
+type SkillMutationOptions = {
+  scope: PostPlusSkillsInstallScope;
+};
+
+const DEFAULT_SKILL_MUTATION_OPTIONS: SkillMutationOptions = {
+  scope: 'global',
+};
+
 export async function runPostPlusSkillUpdate(
   dependencies: SkillMutationDependencies = {
     runInteractiveCommand,
   },
+  options: SkillMutationOptions = DEFAULT_SKILL_MUTATION_OPTIONS,
 ): Promise<number> {
   const catalog = await loadPublicSkillCatalog();
   const skillNames = catalog.skills.map((skill) => skill.skillId);
@@ -68,7 +78,7 @@ export async function runPostPlusSkillUpdate(
 
   const updateExitCode = await dependencies.runInteractiveCommand(
     'npx',
-    buildPostPlusSkillUpdateArgs(skillNames),
+    buildPostPlusSkillUpdateArgs(skillNames, options.scope),
   );
 
   if (updateExitCode !== 0) {
@@ -78,7 +88,7 @@ export async function runPostPlusSkillUpdate(
   if (retiredSkillNames.length > 0) {
     const removeExitCode = await dependencies.runInteractiveCommand(
       'npx',
-      buildPostPlusSkillUninstallArgs(retiredSkillNames),
+      buildPostPlusSkillUninstallArgs(retiredSkillNames, options.scope),
     );
 
     if (removeExitCode !== 0) {
@@ -99,6 +109,7 @@ export async function runPostPlusSkillUninstall(
   dependencies: SkillMutationDependencies = {
     runInteractiveCommand,
   },
+  options: SkillMutationOptions = DEFAULT_SKILL_MUTATION_OPTIONS,
 ): Promise<number> {
   const catalog = await loadPublicSkillCatalog();
   const skillNames = catalog.skills.map((skill) => skill.skillId);
@@ -111,7 +122,7 @@ export async function runPostPlusSkillUninstall(
 
   const exitCode = await dependencies.runInteractiveCommand(
     'npx',
-    buildPostPlusSkillUninstallArgs(allKnownSkillNames),
+    buildPostPlusSkillUninstallArgs(allKnownSkillNames, options.scope),
   );
 
   if (exitCode === 0) {
@@ -265,17 +276,22 @@ export function formatSkillInstallStatusReport(
   if (report.retiredManagedSkills.length > 0) {
     lines.push(
       `  Retired managed skills: ${formatSkillList(report.retiredManagedSkills, 8)}`,
-      `  Cleanup: ${report.updateCommand}`,
+      `  Cleanup (global): ${report.updateCommand}`,
+      `  Cleanup (current directory): ${formatPostPlusSkillUpdateCommand('current-directory')}`,
     );
   }
 
   if (report.missingSkills.length > 0) {
     lines.push(
       `  Missing: ${formatSkillList(report.missingSkills, 8)}`,
-      `  Fix: ${report.installCommand}`,
+      `  Fix (global): ${report.installCommand}`,
+      `  Fix (current directory): ${formatPostPlusSkillsInstallCommand(report.source, 'current-directory')}`,
     );
   } else {
-    lines.push(`  Update: ${report.updateCommand}`);
+    lines.push(
+      `  Update (global): ${report.updateCommand}`,
+      `  Update (current directory): ${formatPostPlusSkillUpdateCommand('current-directory')}`,
+    );
   }
 
   return lines.join('\n');
@@ -315,14 +331,18 @@ export function formatSkillBaselineVerifyReport(
   if (report.missingSkills.length > 0) {
     lines.push(
       `  Missing: ${formatSkillList(report.missingSkills, 8)}`,
-      `  Fix: ${report.installCommand}`,
+      `  Fix (global): ${report.installCommand}`,
+      `  Fix (current directory): ${formatPostPlusSkillsInstallCommand(report.source, 'current-directory')}`,
     );
   }
 
   return lines.join('\n');
 }
 
-export function buildPostPlusSkillUpdateArgs(skillNames: string[]): string[] {
+export function buildPostPlusSkillUpdateArgs(
+  skillNames: string[],
+  scope: PostPlusSkillsInstallScope = 'global',
+): string[] {
   if (skillNames.length === 0) {
     throw new Error('PostPlus public skill catalog has no released skills.');
   }
@@ -333,7 +353,7 @@ export function buildPostPlusSkillUpdateArgs(skillNames: string[]): string[] {
     ...NPX_SKILLS,
     'add',
     skillsSource,
-    '--global',
+    ...buildSkillScopeArgs(scope),
     '--full-depth',
     '--skill',
     '*',
@@ -345,24 +365,37 @@ export function buildPostPlusSkillUpdateArgs(skillNames: string[]): string[] {
 
 export function buildPostPlusSkillUninstallArgs(
   skillNames: string[],
+  scope: PostPlusSkillsInstallScope = 'global',
 ): string[] {
   return [
     ...NPX_SKILLS,
     'remove',
     ...skillNames,
-    '--global',
+    ...buildSkillScopeArgs(scope),
     '--agent',
     ...POSTPLUS_SKILLS_AGENT_TARGETS,
     '--yes',
   ];
 }
 
-export function formatPostPlusSkillUpdateCommand(): string {
-  return 'postplus update';
+export function formatPostPlusSkillUpdateCommand(
+  scope: PostPlusSkillsInstallScope = 'global',
+): string {
+  return scope === 'global'
+    ? 'postplus update'
+    : 'postplus update --current-directory';
 }
 
-export function formatPostPlusSkillUninstallCommand(): string {
-  return 'postplus uninstall';
+export function formatPostPlusSkillUninstallCommand(
+  scope: PostPlusSkillsInstallScope = 'global',
+): string {
+  return scope === 'global'
+    ? 'postplus uninstall'
+    : 'postplus uninstall --current-directory';
+}
+
+function buildSkillScopeArgs(scope: PostPlusSkillsInstallScope): string[] {
+  return scope === 'global' ? ['--global'] : [];
 }
 
 function mergeSkillNames(left: string[], right: string[]): string[] {

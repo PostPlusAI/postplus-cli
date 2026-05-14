@@ -24,8 +24,11 @@ import {
   resolveLargeCreditQuoteConfirmation,
 } from './quote-confirmation.js';
 import {
+  POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND,
   POSTPLUS_SKILLS_INSTALL_COMMAND,
   loadPublicSkillCatalog,
+  type PostPlusSkillsInstallScope,
+  formatPostPlusSkillsInstallCommand,
 } from './skill-catalog.js';
 import {
   formatSkillBaselineVerifyReport,
@@ -70,15 +73,18 @@ Usage:
   postplus doctor [--skill <skill-id>] [--json]
   postplus quote confirm --json --challenge-file <path>
   postplus skills verify [--json]
-  postplus update
-  postplus uninstall
+  postplus update [--current-directory]
+  postplus uninstall [--current-directory]
   postplus list [--json]
   postplus status [--skill <skill-id>] [--json]
   postplus version
   postplus help
 
 Skills:
-  ${POSTPLUS_SKILLS_INSTALL_COMMAND}
+  Global:
+    ${POSTPLUS_SKILLS_INSTALL_COMMAND}
+  Current directory:
+    ${POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND}
 
 After first install, run:
   postplus skills verify
@@ -138,7 +144,8 @@ async function runList(json: boolean): Promise<number> {
     'PostPlus skills',
     '',
     `Source: ${catalog.source}`,
-    `Install: ${catalog.installCommand}`,
+    `Install (global): ${catalog.installCommand}`,
+    `Install (current directory): ${formatPostPlusSkillsInstallCommand(catalog.source, 'current-directory')}`,
     '',
   ];
 
@@ -157,14 +164,17 @@ async function runVersion(): Promise<number> {
   return 0;
 }
 
-async function runSkillUpdateCommand(): Promise<number> {
+async function runSkillUpdateCommand(rest: string[]): Promise<number> {
+  const options = parseSkillMutationOptions(rest, 'update');
   const cliSelfUpdate = await runCliSelfUpdateIfOutdated();
 
   if (cliSelfUpdate.updateAvailable) {
     return cliSelfUpdate.exitCode ?? 1;
   }
 
-  const exitCode = await runPostPlusSkillUpdate();
+  const exitCode = await runPostPlusSkillUpdate(undefined, {
+    scope: options.scope,
+  });
 
   if (exitCode === 0) {
     await refreshUpdateCheckCache().catch(() => {});
@@ -173,8 +183,12 @@ async function runSkillUpdateCommand(): Promise<number> {
   return exitCode;
 }
 
-async function runSkillUninstallCommand(): Promise<number> {
-  return runPostPlusSkillUninstall();
+async function runSkillUninstallCommand(rest: string[]): Promise<number> {
+  const options = parseSkillMutationOptions(rest, 'uninstall');
+
+  return runPostPlusSkillUninstall(undefined, {
+    scope: options.scope,
+  });
 }
 
 async function runSkillsCommand(rest: string[]): Promise<number> {
@@ -213,6 +227,12 @@ Usage:
 
 Options:
   --json    Output results as JSON
+
+Install scope:
+  postplus update                       Update global PostPlus skills
+  postplus update --current-directory   Update PostPlus skills in the current directory
+  postplus uninstall                    Remove global PostPlus skills
+  postplus uninstall --current-directory  Remove PostPlus skills from the current directory
 `);
       return 0;
     default:
@@ -324,6 +344,24 @@ function parseDiagnosticOptions(args: string[]): DiagnosticCommandOptions {
   return options;
 }
 
+function parseSkillMutationOptions(
+  args: string[],
+  commandName: 'update' | 'uninstall',
+): { scope: PostPlusSkillsInstallScope } {
+  let scope: PostPlusSkillsInstallScope = 'global';
+
+  for (const arg of args) {
+    if (arg === '--current-directory') {
+      scope = 'current-directory';
+      continue;
+    }
+
+    throw new Error(`Unknown option for ${commandName}: ${arg}`);
+  }
+
+  return { scope };
+}
+
 async function runAuthLogout(json: boolean): Promise<number> {
   const report = await clearAuthState();
   if (json) {
@@ -424,10 +462,10 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     case 'update':
-      process.exitCode = await runSkillUpdateCommand();
+      process.exitCode = await runSkillUpdateCommand(rest);
       return;
     case 'uninstall':
-      process.exitCode = await runSkillUninstallCommand();
+      process.exitCode = await runSkillUninstallCommand(rest);
       return;
     case 'list':
       process.exitCode = await runList(json);

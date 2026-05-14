@@ -34,6 +34,7 @@ import {
 import {
   POSTPLUS_SKILLS_AGENT_TARGETS,
   POSTPLUS_SKILLS_CATALOG_URL_ENV,
+  POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND,
   POSTPLUS_SKILLS_INSTALL_COMMAND,
   POSTPLUS_SKILLS_SOURCE_ENV,
   type PublicSkillRequirements,
@@ -2243,6 +2244,17 @@ describe('skill management commands', () => {
   });
 
   it('builds update and uninstall commands for released PostPlus skills only', () => {
+    assert.deepEqual(POSTPLUS_SKILLS_AGENT_TARGETS, [
+      'claude-code',
+      'codex',
+      'cursor',
+      'github-copilot',
+      'windsurf',
+      'trae',
+      'trae-cn',
+      'openclaw',
+      'hermes-agent',
+    ]);
     assert.deepEqual(buildPostPlusSkillUpdateArgs(['a', 'b']), [
       '-y',
       'skills',
@@ -2267,6 +2279,41 @@ describe('skill management commands', () => {
       ...POSTPLUS_SKILLS_AGENT_TARGETS,
       '--yes',
     ]);
+  });
+
+  it('builds current-directory update and uninstall commands', () => {
+    assert.equal(
+      POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND,
+      "npx -y skills add PostPlusAI/postplus-skills --full-depth --skill '*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent --yes",
+    );
+    assert.deepEqual(
+      buildPostPlusSkillUpdateArgs(['a', 'b'], 'current-directory'),
+      [
+        '-y',
+        'skills',
+        'add',
+        'PostPlusAI/postplus-skills',
+        '--full-depth',
+        '--skill',
+        '*',
+        '--agent',
+        ...POSTPLUS_SKILLS_AGENT_TARGETS,
+        '--yes',
+      ],
+    );
+    assert.deepEqual(
+      buildPostPlusSkillUninstallArgs(['a', 'b'], 'current-directory'),
+      [
+        '-y',
+        'skills',
+        'remove',
+        'a',
+        'b',
+        '--agent',
+        ...POSTPLUS_SKILLS_AGENT_TARGETS,
+        '--yes',
+      ],
+    );
   });
 
   it('uses the staged public skills source for update installs when configured', () => {
@@ -2516,6 +2563,49 @@ describe('skill management commands', () => {
     }
   });
 
+  it('updates current-directory public skills when requested', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    const calls: string[][] = [];
+
+    try {
+      const exitCode = await runPostPlusSkillUpdate(
+        {
+          runInteractiveCommand: async (_command, args) => {
+            calls.push(args);
+            return 0;
+          },
+        },
+        { scope: 'current-directory' },
+      );
+
+      assert.equal(exitCode, 0);
+      assert.deepEqual(calls, [
+        buildPostPlusSkillUpdateArgs(['demo-skill'], 'current-directory'),
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('verifies installed public skills before recording the managed baseline', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
@@ -2708,7 +2798,30 @@ describe('skill management commands', () => {
 
         assert.match(
           execError.stderr ?? '',
-          /npx -y skills add PostPlusAI\/postplus-skills --global --full-depth --skill '\*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn --yes/,
+          /npx -y skills add PostPlusAI\/postplus-skills --global --full-depth --skill '\*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent --yes/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it('fails fast on unknown update options', async () => {
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        '--import',
+        'tsx',
+        'src/index.ts',
+        'update',
+        '--mystery-scope',
+      ]),
+      (error) => {
+        const execError = error as Error & {
+          stderr?: string;
+        };
+
+        assert.match(
+          execError.stderr ?? '',
+          /Unknown option for update: --mystery-scope/,
         );
         return true;
       },

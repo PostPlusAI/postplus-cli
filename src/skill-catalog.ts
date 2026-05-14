@@ -9,10 +9,18 @@ export const POSTPLUS_SKILLS_AGENT_TARGETS = [
   'windsurf',
   'trae',
   'trae-cn',
+  'openclaw',
+  'hermes-agent',
 ] as const;
 const POSTPLUS_SKILLS_AGENT_ARGS = POSTPLUS_SKILLS_AGENT_TARGETS.join(' ');
 export const POSTPLUS_SKILLS_INSTALL_COMMAND = formatPostPlusSkillsInstallCommand();
+export const POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND =
+  formatPostPlusSkillsInstallCommand(
+    POSTPLUS_SKILLS_REPO,
+    'current-directory',
+  );
 export const POSTPLUS_SKILLS_LIST_COMMAND = formatPostPlusSkillsListCommand();
+export type PostPlusSkillsInstallScope = 'global' | 'current-directory';
 
 const POSTPLUS_SKILLS_INDEX_URL =
   'https://raw.githubusercontent.com/PostPlusAI/postplus-skills/main/skills/INDEX.md';
@@ -98,8 +106,10 @@ export function resolvePostPlusSkillsCatalogUrl(
 
 export function formatPostPlusSkillsInstallCommand(
   source = POSTPLUS_SKILLS_REPO,
+  scope: PostPlusSkillsInstallScope = 'global',
 ): string {
-  return `npx -y skills add ${source} --global --full-depth --skill '*' --agent ${POSTPLUS_SKILLS_AGENT_ARGS} --yes`;
+  const scopeArgs = scope === 'global' ? ' --global' : '';
+  return `npx -y skills add ${source}${scopeArgs} --full-depth --skill '*' --agent ${POSTPLUS_SKILLS_AGENT_ARGS} --yes`;
 }
 
 export function formatPostPlusSkillsListCommand(
