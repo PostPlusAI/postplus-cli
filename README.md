@@ -49,9 +49,13 @@ Useful checks:
 
 ```bash
 postplus status
+postplus update
 postplus update --current-directory
 npx -y skills add PostPlusAI/postplus-skills --list --full-depth
 ```
+
+`postplus update` updates the global managed PostPlus skills; add
+`--current-directory` to update the project-local skill install instead.
 
 ## The Vision
 
