@@ -445,7 +445,7 @@ describe('doctor and status', () => {
           (init?.headers as Record<string, string>)[
             POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.cliVersion
           ],
-          '0.1.30',
+          '0.1.31',
         );
         assert.equal(
           (init?.headers as Record<string, string>)[
@@ -538,7 +538,7 @@ describe('doctor and status', () => {
         }),
       });
       assert.equal(status.schemaVersion, 1);
-      assert.equal((await readLocalConfig())?.cliVersion, '0.1.30');
+      assert.equal((await readLocalConfig())?.cliVersion, '0.1.31');
       assert.equal(status.ok, true);
       assert.equal(status.doctor.schemaVersion, 1);
       assert.equal(status.auth.ok, true);
@@ -2029,7 +2029,7 @@ describe('update checks', () => {
 
         assert.match(url, /registry\.npmjs\.org/);
 
-        return new Response(JSON.stringify({ version: '0.1.31' }), {
+        return new Response(JSON.stringify({ version: '0.1.32' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         });
@@ -2044,8 +2044,8 @@ describe('update checks', () => {
     });
 
     assert.equal(result.updateAvailable, true);
-    assert.equal(result.currentVersion, '0.1.30');
-    assert.equal(result.latestVersion, '0.1.31');
+    assert.equal(result.currentVersion, '0.1.31');
+    assert.equal(result.latestVersion, '0.1.32');
     assert.equal(result.exitCode, 0);
     assert.equal(result.command, POSTPLUS_CLI_UPDATE_COMMAND);
     assert.deepEqual(calls, [['npm', 'install', '-g', '@postplus/cli@latest']]);
@@ -2056,7 +2056,7 @@ describe('update checks', () => {
     const calls: string[][] = [];
     const result = await runCliSelfUpdateIfOutdated({
       fetchFn: async () =>
-        new Response(JSON.stringify({ version: '0.1.30' }), {
+        new Response(JSON.stringify({ version: '0.1.31' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),
@@ -2557,7 +2557,7 @@ describe('skill management commands', () => {
         'new-skill',
       ]);
       assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
-      assert.equal(config?.cliVersion, '0.1.30');
+      assert.equal(config?.cliVersion, '0.1.31');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -2783,6 +2783,58 @@ describe('skill management commands', () => {
     }
   });
 
+  it('uninstalls current-directory public skills when requested', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    const calls: string[][] = [];
+
+    try {
+      await writeManagedSkillBaseline({
+        releaseId: 'catalog-1',
+        skillNames: ['retired-skill'],
+      });
+      const exitCode = await runPostPlusSkillUninstall(
+        {
+          runInteractiveCommand: async (_command, args) => {
+            calls.push(args);
+            return 0;
+          },
+        },
+        { scope: 'current-directory' },
+      );
+      const config = await readLocalConfig();
+
+      assert.equal(exitCode, 0);
+      assert.deepEqual(calls, [
+        buildPostPlusSkillUninstallArgs(
+          ['demo-skill', 'retired-skill'],
+          'current-directory',
+        ),
+      ]);
+      assert.equal(config?.managedSkills, undefined);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('does not provide postplus install as a functional installer', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
@@ -2822,6 +2874,29 @@ describe('skill management commands', () => {
         assert.match(
           execError.stderr ?? '',
           /Unknown option for update: --mystery-scope/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it('fails fast on unknown uninstall options', async () => {
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        '--import',
+        'tsx',
+        'src/index.ts',
+        'uninstall',
+        '--mystery-scope',
+      ]),
+      (error) => {
+        const execError = error as Error & {
+          stderr?: string;
+        };
+
+        assert.match(
+          execError.stderr ?? '',
+          /Unknown option for uninstall: --mystery-scope/,
         );
         return true;
       },
