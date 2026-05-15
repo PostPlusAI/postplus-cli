@@ -4,6 +4,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { after, beforeEach, describe, it } from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 import {
@@ -2982,6 +2983,81 @@ describe('release packaging', () => {
 });
 
 describe('studio commands', () => {
+  it('documents the private Local Studio runtime boundary in CLI help', async () => {
+    const { stdout: mainHelp } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'help',
+    ]);
+    assert.match(
+      mainHelp,
+      /postplus studio init\|open\|status\s+Candidate Local Studio; open requires private runtime/,
+    );
+
+    const { stdout: studioHelp } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'help',
+      'studio',
+    ]);
+    assert.match(studioHelp, /private\/candidate authoring surface/);
+    assert.match(
+      studioHelp,
+      /POSTPLUS_STUDIO_RUNTIME_ROOT=<vibe_marketing repo>/,
+    );
+
+    const { stdout: openHelp } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'studio',
+      'open',
+      '--help',
+    ]);
+    assert.equal(openHelp, studioHelp);
+  });
+
+  it('keeps studio open fast-fail explicit when the private runtime is missing', async () => {
+    const studioWorkdir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-studio-open-'),
+    );
+    tempDirs.push(studioWorkdir);
+    const entrypointUrl = pathToFileURL(
+      resolve(process.cwd(), 'src/index.ts'),
+    ).href;
+    const script = [
+      "process.chdir('/');",
+      `process.argv = ["node", "postplus", "studio", "open", "--workdir", ${JSON.stringify(
+        studioWorkdir,
+      )}, "--no-browser"];`,
+      `await import(${JSON.stringify(entrypointUrl)});`,
+      'if (process.exitCode) process.exit(process.exitCode);',
+    ].join('\n');
+
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        '--import',
+        'tsx',
+        '--input-type=module',
+        '-e',
+        script,
+      ]),
+      (error) => {
+        const execError = error as Error & {
+          stderr?: string;
+        };
+
+        assert.match(
+          execError.stderr ?? '',
+          /PostPlus Studio runtime was not found\. Set POSTPLUS_STUDIO_RUNTIME_ROOT/,
+        );
+        return true;
+      },
+    );
+  });
+
   it('resolves the visible PostPlus Studio folder under a working directory', () => {
     assert.equal(
       resolveStudioRoot('/tmp/demo'),

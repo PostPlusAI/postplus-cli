@@ -43,6 +43,11 @@ export async function runStudioCommand(args: string[]): Promise<number> {
     return 0;
   }
 
+  if (rest.some((arg) => ['help', '--help', '-h'].includes(arg))) {
+    printStudioHelp();
+    return 0;
+  }
+
   const options = parseStudioOptions(rest);
 
   switch (subcommand) {
@@ -73,8 +78,11 @@ function printStudioHelp(): void {
 
 Usage:
   postplus studio init [--workdir <dir>] [--json]
-  postplus studio open [--workdir <dir>] [--port 3978] [--no-browser] [--json]
+  POSTPLUS_STUDIO_RUNTIME_ROOT=<vibe_marketing repo> postplus studio open [--workdir <dir>] [--port 3978] [--no-browser] [--json]
   postplus studio status [--workdir <dir>] [--json]
+
+Local Studio is a private/candidate authoring surface. Public CLI installs do not include the Studio runtime.
+studio open requires POSTPLUS_STUDIO_RUNTIME_ROOT pointing to the vibe_marketing authoring repo unless the runtime is discoverable from a private authoring workspace.
 
 Studio creates a visible "PostPlus Studio" folder inside the selected working directory.
 `);

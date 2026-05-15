@@ -74,7 +74,7 @@ Usage:
   postplus doctor [--skill <skill-id>] [--json]
   postplus quote confirm --json --challenge-file <path>
   postplus skills verify [--json]
-  postplus studio init|open|status
+  postplus studio init|open|status   Candidate Local Studio; open requires private runtime
   postplus update [--current-directory]
   postplus uninstall [--current-directory]
   postplus list [--json]
