@@ -63,8 +63,9 @@ postplus studio status
 ```
 
 Studio creates a visible `PostPlus Studio/` folder in the current working
-directory. Assets, workflow files, activity, and provenance live inside that
-folder; hidden runtime cache and logs stay under `PostPlus Studio/.postplus/`.
+directory and opens the bundled local dashboard from the public CLI package.
+Assets, workflow files, activity, and provenance live inside that folder; hidden
+runtime cache and logs stay under `PostPlus Studio/.postplus/`.
 
 ## The Vision
 

@@ -23,6 +23,7 @@
     "build/skill-management.js",
     "build/status.js",
     "build/studio.js",
+    "build/studio-server.js",
     "build/subscription-status.js",
     "build/update-check.js",
     "LICENSE",
