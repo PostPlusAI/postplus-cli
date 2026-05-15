@@ -447,7 +447,7 @@ describe('doctor and status', () => {
           (init?.headers as Record<string, string>)[
             POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.cliVersion
           ],
-          '0.1.31',
+          '0.1.32',
         );
         assert.equal(
           (init?.headers as Record<string, string>)[
@@ -540,7 +540,7 @@ describe('doctor and status', () => {
         }),
       });
       assert.equal(status.schemaVersion, 1);
-      assert.equal((await readLocalConfig())?.cliVersion, '0.1.31');
+      assert.equal((await readLocalConfig())?.cliVersion, '0.1.32');
       assert.equal(status.ok, true);
       assert.equal(status.doctor.schemaVersion, 1);
       assert.equal(status.auth.ok, true);
@@ -2031,7 +2031,7 @@ describe('update checks', () => {
 
         assert.match(url, /registry\.npmjs\.org/);
 
-        return new Response(JSON.stringify({ version: '0.1.32' }), {
+        return new Response(JSON.stringify({ version: '0.1.33' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         });
@@ -2046,8 +2046,8 @@ describe('update checks', () => {
     });
 
     assert.equal(result.updateAvailable, true);
-    assert.equal(result.currentVersion, '0.1.31');
-    assert.equal(result.latestVersion, '0.1.32');
+    assert.equal(result.currentVersion, '0.1.32');
+    assert.equal(result.latestVersion, '0.1.33');
     assert.equal(result.exitCode, 0);
     assert.equal(result.command, POSTPLUS_CLI_UPDATE_COMMAND);
     assert.deepEqual(calls, [['npm', 'install', '-g', '@postplus/cli@latest']]);
@@ -2058,7 +2058,7 @@ describe('update checks', () => {
     const calls: string[][] = [];
     const result = await runCliSelfUpdateIfOutdated({
       fetchFn: async () =>
-        new Response(JSON.stringify({ version: '0.1.31' }), {
+        new Response(JSON.stringify({ version: '0.1.32' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),
@@ -2559,7 +2559,7 @@ describe('skill management commands', () => {
         'new-skill',
       ]);
       assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
-      assert.equal(config?.cliVersion, '0.1.31');
+      assert.equal(config?.cliVersion, '0.1.32');
     } finally {
       globalThis.fetch = originalFetch;
     }
