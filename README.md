@@ -51,30 +51,21 @@ postplus status
 npx -y skills add PostPlusAI/postplus-skills --global --list
 ```
 
-## Local Studio (private candidate)
+## Local Studio
 
-Local Studio is a candidate authoring surface, not part of the default public
-install path. The public npm package can create and check the visible Studio
-folder, but `postplus studio open` requires the private Studio runtime from the
-`vibe_marketing` authoring repository.
-
-Use it only from an environment that has that repository available:
+For heavier skills that benefit from a visual workspace, use the CLI-managed
+local Studio:
 
 ```bash
 postplus studio init
-POSTPLUS_STUDIO_RUNTIME_ROOT=/path/to/vibe_marketing postplus studio open
+postplus studio open
 postplus studio status
 ```
 
-If `POSTPLUS_STUDIO_RUNTIME_ROOT` is not set and the runtime is not
-discoverable from a private authoring workspace, `postplus studio open` fails
-fast instead of silently falling back. Public users who installed only
-`@postplus/cli` and `PostPlusAI/postplus-skills` should use released skills
-through their agent until a public Studio runtime is released.
-
-Studio creates a visible `PostPlus Studio/` folder in the selected working
-directory. Assets, workflow files, activity, and provenance live inside that
-folder; hidden runtime cache and logs stay under `PostPlus Studio/.postplus/`.
+Studio creates a visible `PostPlus Studio/` folder in the current working
+directory and opens the bundled local dashboard from the public CLI package.
+Assets, workflow files, activity, and provenance live inside that folder; hidden
+runtime cache and logs stay under `PostPlus Studio/.postplus/`.
 
 ## The Vision
 

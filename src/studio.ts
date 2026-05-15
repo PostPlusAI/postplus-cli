@@ -1,10 +1,12 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
   access,
   mkdir,
+  readFile,
   writeFile,
 } from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
+import { closeSync, constants as fsConstants, openSync } from 'node:fs';
+import net from 'node:net';
 import { platform } from 'node:os';
 import {
   basename,
@@ -33,6 +35,15 @@ type StudioStatusReport = {
     manifest: boolean;
     pipeline: boolean;
   };
+};
+
+type StudioServerState = {
+  baseUrl: string;
+  dashboardUrl: string;
+  logPath: string;
+  pid: number | undefined;
+  startedAt: string;
+  studioRoot: string;
 };
 
 export async function runStudioCommand(args: string[]): Promise<number> {
@@ -78,13 +89,11 @@ function printStudioHelp(): void {
 
 Usage:
   postplus studio init [--workdir <dir>] [--json]
-  POSTPLUS_STUDIO_RUNTIME_ROOT=<vibe_marketing repo> postplus studio open [--workdir <dir>] [--port 3978] [--no-browser] [--json]
+  postplus studio open [--workdir <dir>] [--port 3978] [--no-browser] [--json]
   postplus studio status [--workdir <dir>] [--json]
 
-Local Studio is a private/candidate authoring surface. Public CLI installs do not include the Studio runtime.
-studio open requires POSTPLUS_STUDIO_RUNTIME_ROOT pointing to the vibe_marketing authoring repo unless the runtime is discoverable from a private authoring workspace.
-
-Studio creates a visible "PostPlus Studio" folder inside the selected working directory.
+Local Studio is a public local workspace included in the PostPlus CLI package.
+Studio creates a visible "PostPlus Studio" folder inside the selected working directory and opens the bundled local dashboard.
 `);
 }
 
@@ -249,39 +258,7 @@ async function getStudioStatus(workdir: string): Promise<StudioStatusReport> {
 
 async function openStudio(options: StudioCommandOptions) {
   const { studioRoot } = await initializeStudio(options.workdir);
-  const runtimeRoot = await resolveStudioRuntimeRoot();
-  const launcher = join(
-    runtimeRoot,
-    'skills/00-core/postplus-workspace-dashboard/scripts/launch_workspace_dashboard.mjs',
-  );
-  const result = spawnSync(
-    process.execPath,
-    [
-      launcher,
-      '--studio-root',
-      studioRoot,
-      '--host',
-      '127.0.0.1',
-      '--port',
-      String(options.port),
-      '--skip-build',
-    ],
-    {
-      cwd: runtimeRoot,
-      encoding: 'utf8',
-    },
-  );
-
-  if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || 'Failed to open Studio.');
-  }
-
-  const parsed = JSON.parse(result.stdout) as {
-    logPath?: string;
-    pid?: number;
-    reused?: boolean;
-    url: string;
-  };
+  const parsed = await launchBundledStudioServer(studioRoot, options.port);
 
   if (options.browser) {
     openSystemBrowser(parsed.url);
@@ -289,68 +266,171 @@ async function openStudio(options: StudioCommandOptions) {
 
   return {
     ok: true,
-    runtimeRoot,
     studioRoot,
     ...parsed,
   };
 }
 
-async function resolveStudioRuntimeRoot(): Promise<string> {
-  const envRoot = process.env.POSTPLUS_STUDIO_RUNTIME_ROOT?.trim();
-  if (envRoot) {
-    return assertStudioRuntimeRoot(resolve(envRoot));
+async function launchBundledStudioServer(studioRoot: string, startPort: number) {
+  const existing = await readLiveStudioServerState(studioRoot);
+  if (existing) {
+    return {
+      logPath: existing.logPath,
+      pid: existing.pid,
+      reused: true,
+      url: existing.dashboardUrl,
+    };
   }
 
-  const candidates = [
-    process.cwd(),
-    dirname(fileURLToPath(import.meta.url)),
-    ...ancestorDirs(process.cwd()),
-  ];
+  const host = '127.0.0.1';
+  const port = await findAvailablePort(startPort, host);
+  const baseUrl = `http://${host}:${port}`;
+  const dashboardUrl = `${baseUrl}/dashboard/`;
+  const logDir = join(studioRoot, '.postplus', 'logs');
+  await mkdir(logDir, { recursive: true });
+  const logPath = join(logDir, 'studio-server.log');
+  const logFd = openSync(logPath, 'a');
+  const serverEntrypoint = resolveBundledStudioServerEntrypoint();
+  const packageRoot = resolveCliPackageRoot();
+  const child = spawn(
+    process.execPath,
+    [
+      ...buildNodeLoaderArgs(serverEntrypoint),
+      serverEntrypoint,
+      '--studio-root',
+      studioRoot,
+      '--host',
+      host,
+      '--port',
+      String(port),
+    ],
+    {
+      cwd: packageRoot,
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+    },
+  );
+  child.unref();
+  closeSync(logFd);
 
-  for (const base of candidates) {
-    for (const candidate of [
-      base,
-      join(base, 'packages/vibe_marketing'),
-      join(base, '../packages/vibe_marketing'),
-      join(base, '../../packages/vibe_marketing'),
-    ]) {
-      if (await isStudioRuntimeRoot(resolve(candidate))) {
-        return resolve(candidate);
+  try {
+    await waitForStudioServer(baseUrl, logPath);
+  } catch (error) {
+    if (child.pid) {
+      try {
+        process.kill(child.pid);
+      } catch {
+        // The process already exited; the readiness error below carries the failure.
       }
     }
+    throw error;
   }
 
-  throw new Error(
-    'PostPlus Studio runtime was not found. Set POSTPLUS_STUDIO_RUNTIME_ROOT to the vibe_marketing authoring repo.',
+  const state: StudioServerState = {
+    baseUrl,
+    dashboardUrl,
+    logPath,
+    pid: child.pid,
+    startedAt: new Date().toISOString(),
+    studioRoot,
+  };
+  await writeJson(getStudioServerStatePath(studioRoot), state);
+
+  return {
+    logPath,
+    pid: child.pid,
+    reused: false,
+    url: dashboardUrl,
+  };
+}
+
+function resolveBundledStudioServerEntrypoint(): string {
+  const currentModulePath = fileURLToPath(import.meta.url);
+  const extension = currentModulePath.endsWith('.ts') ? '.ts' : '.js';
+  return join(dirname(currentModulePath), `studio-server${extension}`);
+}
+
+function resolveCliPackageRoot(): string {
+  return dirname(dirname(fileURLToPath(import.meta.url)));
+}
+
+function buildNodeLoaderArgs(entrypoint: string): string[] {
+  return entrypoint.endsWith('.ts') ? ['--import', 'tsx'] : [];
+}
+
+async function readLiveStudioServerState(
+  studioRoot: string,
+): Promise<StudioServerState | null> {
+  const state = await readJsonIfExists<StudioServerState>(
+    getStudioServerStatePath(studioRoot),
   );
-}
-
-function ancestorDirs(start: string): string[] {
-  const dirs: string[] = [];
-  let current = resolve(start);
-
-  while (dirname(current) !== current) {
-    current = dirname(current);
-    dirs.push(current);
+  if (!state?.baseUrl || !state.dashboardUrl) {
+    return null;
   }
 
-  return dirs;
-}
-
-async function assertStudioRuntimeRoot(root: string): Promise<string> {
-  if (!(await isStudioRuntimeRoot(root))) {
-    throw new Error(`Invalid PostPlus Studio runtime root: ${root}`);
+  if (await canFetchStudioServer(state.baseUrl)) {
+    return state;
   }
-  return root;
+
+  return null;
 }
 
-async function isStudioRuntimeRoot(root: string): Promise<boolean> {
-  return pathExists(
-    join(
-      root,
-      'skills/00-core/postplus-workspace-dashboard/scripts/launch_workspace_dashboard.mjs',
-    ),
-  );
+function getStudioServerStatePath(studioRoot: string): string {
+  return join(studioRoot, '.postplus', 'studio-server.json');
+}
+
+async function readJsonIfExists<T>(path: string): Promise<T | null> {
+  if (!(await pathExists(path))) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(await readFile(path, 'utf8')) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForStudioServer(baseUrl: string, logPath: string): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 5000) {
+    if (await canFetchStudioServer(baseUrl)) {
+      return;
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 150));
+  }
+  throw new Error(`Studio server did not become ready at ${baseUrl}. See log: ${logPath}`);
+}
+
+async function canFetchStudioServer(baseUrl: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/$/u, '')}/api/health`, {
+      signal: AbortSignal.timeout(1200),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function findAvailablePort(startPort: number, host: string): Promise<number> {
+  for (let port = startPort; port < startPort + 50; port += 1) {
+    if (await isPortAvailable(port, host)) {
+      return port;
+    }
+  }
+  throw new Error(`No available Studio port found from ${startPort} to ${startPort + 49}.`);
+}
+
+function isPortAvailable(port: number, host: string): Promise<boolean> {
+  return new Promise((resolveAvailable) => {
+    const server = net.createServer();
+    server.once('error', () => resolveAvailable(false));
+    server.once('listening', () => {
+      server.close(() => resolveAvailable(true));
+    });
+    server.listen(port, host);
+  });
 }
 
 async function pathExists(path: string): Promise<boolean> {

@@ -2983,7 +2983,7 @@ describe('release packaging', () => {
 });
 
 describe('studio commands', () => {
-  it('documents the private Local Studio runtime boundary in CLI help', async () => {
+  it('documents bundled public Local Studio in CLI help', async () => {
     const { stdout: mainHelp } = await execFileAsync(process.execPath, [
       '--import',
       'tsx',
@@ -2992,7 +2992,7 @@ describe('studio commands', () => {
     ]);
     assert.match(
       mainHelp,
-      /postplus studio init\|open\|status\s+Candidate Local Studio; open requires private runtime/,
+      /postplus studio init\|open\|status\s+Open bundled Local Studio/,
     );
 
     const { stdout: studioHelp } = await execFileAsync(process.execPath, [
@@ -3002,11 +3002,9 @@ describe('studio commands', () => {
       'help',
       'studio',
     ]);
-    assert.match(studioHelp, /private\/candidate authoring surface/);
-    assert.match(
-      studioHelp,
-      /POSTPLUS_STUDIO_RUNTIME_ROOT=<vibe_marketing repo>/,
-    );
+    assert.match(studioHelp, /public local workspace/);
+    assert.match(studioHelp, /bundled local dashboard/);
+    assert.doesNotMatch(studioHelp, /POSTPLUS_STUDIO_RUNTIME_ROOT/);
 
     const { stdout: openHelp } = await execFileAsync(process.execPath, [
       '--import',
@@ -3019,7 +3017,7 @@ describe('studio commands', () => {
     assert.equal(openHelp, studioHelp);
   });
 
-  it('keeps studio open fast-fail explicit when the private runtime is missing', async () => {
+  it('opens Studio with the bundled public runtime', async () => {
     const studioWorkdir = await mkdtemp(
       resolve(tmpdir(), 'postplus-studio-open-'),
     );
@@ -3031,31 +3029,60 @@ describe('studio commands', () => {
       "process.chdir('/');",
       `process.argv = ["node", "postplus", "studio", "open", "--workdir", ${JSON.stringify(
         studioWorkdir,
-      )}, "--no-browser"];`,
+      )}, "--no-browser", "--json"];`,
       `await import(${JSON.stringify(entrypointUrl)});`,
       'if (process.exitCode) process.exit(process.exitCode);',
     ].join('\n');
 
-    await assert.rejects(
-      execFileAsync(process.execPath, [
+    const { stdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      '--input-type=module',
+      '-e',
+      script,
+    ]);
+    const parsed = JSON.parse(stdout) as {
+      pid?: number;
+      reused: boolean;
+      studioRoot: string;
+      url: string;
+    };
+
+    try {
+      assert.equal(parsed.reused, false);
+      assert.equal(parsed.studioRoot, resolveStudioRoot(studioWorkdir));
+      assert.match(parsed.url, /^http:\/\/127\.0\.0\.1:\d+\/dashboard\/$/);
+
+      const response = await fetch(
+        `${parsed.url.replace(/\/dashboard\/$/u, '')}/api/project`,
+      );
+      assert.equal(response.ok, true);
+      const snapshot = (await response.json()) as {
+        project?: { name?: string };
+        studioRoot?: string;
+      };
+      assert.equal(snapshot.studioRoot, parsed.studioRoot);
+      assert.equal(snapshot.project?.name, 'PostPlus Studio');
+    } finally {
+      if (parsed.pid) {
+        try {
+          process.kill(parsed.pid);
+        } catch {
+          // The server can already be gone when the test process exits.
+        }
+      }
+    }
+  });
+
+  it('prints Studio server help from the bundled runtime entrypoint', async () => {
+    const { stdout } = await execFileAsync(process.execPath, [
         '--import',
         'tsx',
-        '--input-type=module',
-        '-e',
-        script,
-      ]),
-      (error) => {
-        const execError = error as Error & {
-          stderr?: string;
-        };
+        'src/studio-server.ts',
+        '--help',
+      ]);
 
-        assert.match(
-          execError.stderr ?? '',
-          /PostPlus Studio runtime was not found\. Set POSTPLUS_STUDIO_RUNTIME_ROOT/,
-        );
-        return true;
-      },
-    );
+    assert.match(stdout, /node build\/studio-server\.js --studio-root/);
   });
 
   it('resolves the visible PostPlus Studio folder under a working directory', () => {
