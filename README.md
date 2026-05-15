@@ -37,25 +37,19 @@ npx -y skills add PostPlusAI/postplus-skills --global --full-depth --skill '*' -
 postplus skills verify
 ```
 
-For current-directory skills instead of global skills, run the skills install
-without `--global` from the directory where the agent should load PostPlus:
+If you explicitly do not want global skills, run the install from the target
+project directory and omit `--global`:
 
 ```bash
 npx -y skills add PostPlusAI/postplus-skills --full-depth --skill '*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent --yes
-postplus skills verify
 ```
 
 Useful checks:
 
 ```bash
 postplus status
-postplus update
-postplus update --current-directory
-npx -y skills add PostPlusAI/postplus-skills --list --full-depth
+npx -y skills add PostPlusAI/postplus-skills --global --list
 ```
-
-`postplus update` updates the global managed PostPlus skills; add
-`--current-directory` to update the project-local skill install instead.
 
 ## The Vision
 
