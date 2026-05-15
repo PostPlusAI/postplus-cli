@@ -58,6 +58,7 @@ import {
   generateUpdateStatusReport,
   runCliSelfUpdateIfOutdated,
 } from './update-check.js';
+import { resolveStudioRoot } from './studio.js';
 
 const tempDirs: string[] = [];
 const originalEnv = { ...process.env };
@@ -2977,5 +2978,18 @@ describe('release packaging', () => {
     );
 
     assert.deepEqual(missingFiles, []);
+  });
+});
+
+describe('studio commands', () => {
+  it('resolves the visible PostPlus Studio folder under a working directory', () => {
+    assert.equal(
+      resolveStudioRoot('/tmp/demo'),
+      resolve('/tmp/demo/PostPlus Studio'),
+    );
+    assert.equal(
+      resolveStudioRoot('/tmp/demo/PostPlus Studio'),
+      resolve('/tmp/demo/PostPlus Studio'),
+    );
   });
 });

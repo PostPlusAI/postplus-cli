@@ -41,6 +41,7 @@ import {
   refreshUpdateCheckCache,
   runCliSelfUpdateIfOutdated,
 } from './update-check.js';
+import { runStudioCommand } from './studio.js';
 
 function printAuthHelp(): void {
   process.stdout.write(`PostPlus CLI — auth commands
@@ -73,6 +74,7 @@ Usage:
   postplus doctor [--skill <skill-id>] [--json]
   postplus quote confirm --json --challenge-file <path>
   postplus skills verify [--json]
+  postplus studio init|open|status
   postplus update [--current-directory]
   postplus uninstall [--current-directory]
   postplus list [--json]
@@ -440,6 +442,8 @@ async function main(): Promise<void> {
         printAuthHelp();
       } else if (helpTopic === 'skills') {
         await runSkillsCommand(['help']);
+      } else if (helpTopic === 'studio') {
+        await runStudioCommand(['help']);
       } else {
         printHelp();
       }
@@ -454,6 +458,9 @@ async function main(): Promise<void> {
       return;
     case 'skills':
       process.exitCode = await runSkillsCommand(rest);
+      return;
+    case 'studio':
+      process.exitCode = await runStudioCommand(rest);
       return;
     case 'install':
       process.stderr.write(

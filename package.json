@@ -22,6 +22,7 @@
     "build/skill-catalog.js",
     "build/skill-management.js",
     "build/status.js",
+    "build/studio.js",
     "build/subscription-status.js",
     "build/update-check.js",
     "LICENSE",
