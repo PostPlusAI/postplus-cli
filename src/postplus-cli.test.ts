@@ -2128,6 +2128,115 @@ describe('update checks', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('refreshes status update state from remote after skills verify advances the baseline', async () => {
+    const originalFetch = globalThis.fetch;
+    let catalogReleaseId = 'catalog-1';
+    const listInstalled = async () => ({
+      stderr: '',
+      stdout: JSON.stringify([
+        {
+          agents: ['Codex'],
+          name: 'demo-skill',
+          path: '/tmp/demo-skill',
+          scope: 'global',
+        },
+      ]),
+    });
+
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (url.includes('registry.npmjs.org')) {
+        return new Response(JSON.stringify({ version: '0.1.32' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      if (isPublicCatalogUrl(url)) {
+        return new Response(
+          JSON.stringify({
+            schemaVersion: 1,
+            releaseId: catalogReleaseId,
+            source: 'PostPlusAI/postplus-skills',
+            skills: [
+              {
+                name: 'demo-skill',
+                path: 'skills/demo-skill/SKILL.md',
+                status: 'released',
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await writeManagedSkillBaseline({
+        releaseId: 'catalog-1',
+        skillNames: ['demo-skill'],
+      });
+      await generateUpdateStatusReport({ force: true });
+      catalogReleaseId = 'catalog-2';
+
+      const verify = await runPostPlusSkillVerify({
+        runCommand: listInstalled,
+      });
+      const status = await generateStatusReportWithDependencies({
+        generateAuthStatus: async () => ({
+          ok: true,
+          apiBaseUrl: {
+            source: 'default',
+            present: true,
+            value: 'https://postplus.example.com',
+          },
+          cliSessionToken: {
+            source: 'config',
+            present: true,
+            maskedValue: 'token',
+          },
+          config: {
+            path: 'config.json',
+            exists: true,
+            accountId: 'account-1',
+            sessionExpiresAt: 1_900_000_000,
+            userEmail: 'user@example.com',
+            userId: 'user-1',
+          },
+        }),
+        generateDoctor: async () => ({
+          schemaVersion: 1,
+          ok: true,
+          requiredOk: true,
+          checks: [],
+        }),
+        generateSkillStatus: () =>
+          generateSkillInstallStatusReport({
+            runCommand: listInstalled,
+          }),
+      });
+
+      assert.equal(verify.baselineUpdated, true);
+      assert.equal(verify.verifiedSkillsReleaseId, 'catalog-2');
+      assert.equal(status.skills.managedSkillsReleaseId, 'catalog-2');
+      assert.equal(status.updates.source, 'remote');
+      assert.equal(status.updates.skills.currentReleaseId, 'catalog-2');
+      assert.equal(status.updates.skills.latestReleaseId, 'catalog-2');
+      assert.equal(status.updates.skills.updateAvailable, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe('skill management commands', () => {

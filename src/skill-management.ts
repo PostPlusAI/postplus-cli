@@ -12,6 +12,7 @@ import {
   resolvePostPlusSkillsSource,
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
+import { clearUpdateCheckCache } from './update-check.js';
 
 const NPX_SKILLS = ['-y', 'skills'];
 
@@ -101,6 +102,7 @@ export async function runPostPlusSkillUpdate(
     skillNames,
   });
   await writeCurrentCliVersionToLocalConfig();
+  await clearUpdateCheckCache();
 
   return 0;
 }
@@ -127,6 +129,7 @@ export async function runPostPlusSkillUninstall(
 
   if (exitCode === 0) {
     await clearManagedSkillBaseline();
+    await clearUpdateCheckCache();
   }
 
   return exitCode;
@@ -163,6 +166,7 @@ export async function runPostPlusSkillVerify(
     skillNames: inspection.requiredSkillNames,
   });
   await writeCurrentCliVersionToLocalConfig();
+  await clearUpdateCheckCache();
 
   return {
     ...inspection.report,

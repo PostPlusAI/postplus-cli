@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { readCurrentCliVersion } from './client-compatibility.js';
@@ -154,6 +154,12 @@ export async function generateUpdateStatusReport(
 
 export async function refreshUpdateCheckCache(): Promise<void> {
   await generateUpdateStatusReport({
+    force: true,
+  });
+}
+
+export async function clearUpdateCheckCache(): Promise<void> {
+  await rm(getUpdateCheckCachePath(), {
     force: true,
   });
 }
