@@ -15,6 +15,9 @@ export type PostPlusLocalConfig = {
   apiBaseUrl?: string;
   cliVersion?: string;
   accountId?: string;
+  accountName?: string | null;
+  accountSlug?: string | null;
+  accountType?: 'personal' | 'team' | null;
   cliSessionToken?: string;
   largeCreditConfirmation?: {
     acknowledgedTierMillicreditsByAccountId?: Record<string, number>;
@@ -177,6 +180,9 @@ export async function clearLocalAuthState(): Promise<PostPlusLocalConfig> {
     };
     delete next.accessToken;
     delete next.accountId;
+    delete next.accountName;
+    delete next.accountSlug;
+    delete next.accountType;
     delete next.apiKey;
     delete next.cliSessionToken;
     delete next.machineId;
@@ -255,6 +261,9 @@ export async function setLocalApiBaseUrl(
 
 export async function setLocalSession(input: {
   accountId: string;
+  accountName?: string | null;
+  accountSlug?: string | null;
+  accountType?: 'personal' | 'team' | null;
   apiBaseUrl: string;
   cliSessionToken: string;
   sessionExpiresAt: number | null;
@@ -275,6 +284,9 @@ export async function setLocalSession(input: {
   return updateLocalConfig((current) => ({
     ...omitLegacyAuthFields(current),
     accountId: input.accountId,
+    accountName: input.accountName ?? null,
+    accountSlug: input.accountSlug ?? null,
+    accountType: input.accountType ?? null,
     apiBaseUrl,
     cliSessionToken,
     sessionExpiresAt: input.sessionExpiresAt,

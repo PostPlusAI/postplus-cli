@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 
+import { formatAccountBindingLines } from './account-binding-display.js';
 import {
   formatAuthRefreshReport,
   refreshRemoteAuth,
@@ -26,9 +27,9 @@ import {
 import {
   POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND,
   POSTPLUS_SKILLS_INSTALL_COMMAND,
-  loadPublicSkillCatalog,
   type PostPlusSkillsInstallScope,
   formatPostPlusSkillsInstallCommand,
+  loadPublicSkillCatalog,
 } from './skill-catalog.js';
 import {
   formatSkillBaselineVerifyReport,
@@ -37,11 +38,11 @@ import {
   runPostPlusSkillVerify,
 } from './skill-management.js';
 import { formatStatusReport, generateStatusReport } from './status.js';
+import { runStudioCommand } from './studio.js';
 import {
   refreshUpdateCheckCache,
   runCliSelfUpdateIfOutdated,
 } from './update-check.js';
-import { runStudioCommand } from './studio.js';
 
 function printAuthHelp(): void {
   process.stdout.write(`PostPlus CLI — auth commands
@@ -268,7 +269,9 @@ async function runQuoteCommand(rest: string[]): Promise<number> {
   );
 
   if (!challenge) {
-    process.stderr.write('Invalid large credit quote confirmation challenge.\n');
+    process.stderr.write(
+      'Invalid large credit quote confirmation challenge.\n',
+    );
     return 1;
   }
 
@@ -400,7 +403,7 @@ async function runAuthLogin(): Promise<number> {
     [
       '',
       'PostPlus CLI login complete.',
-      `Account: ${report.accountId}`,
+      ...formatAccountBindingLines(report),
       `PostPlus Cloud: ${report.apiBaseUrl}`,
       `User: ${report.userEmail ?? 'unknown'}`,
       '',

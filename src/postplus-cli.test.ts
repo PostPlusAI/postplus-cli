@@ -54,12 +54,12 @@ import {
   formatStatusReport,
   generateStatusReportWithDependencies,
 } from './status.js';
+import { resolveStudioRoot } from './studio.js';
 import {
   POSTPLUS_CLI_UPDATE_COMMAND,
   generateUpdateStatusReport,
   runCliSelfUpdateIfOutdated,
 } from './update-check.js';
-import { resolveStudioRoot } from './studio.js';
 
 const tempDirs: string[] = [];
 const originalEnv = { ...process.env };
@@ -174,6 +174,9 @@ function createWhoamiResponse(): Response {
   return new Response(
     JSON.stringify({
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       sessionExpiresAt: 1_900_000_000,
       subscriptionStatus: 'active',
       userEmail: 'user@example.com',
@@ -348,6 +351,9 @@ async function withMockedSubscriptionStatusCloud<T>(
   await setLocalSession({
     cliSessionToken: 'cli-session-token-value',
     accountId: 'account-1',
+    accountName: 'Team Workspace',
+    accountSlug: 'team-workspace',
+    accountType: 'team',
     apiBaseUrl: 'https://postplus.example.com',
     sessionExpiresAt: 1_900_000_000,
     userEmail: 'user@example.com',
@@ -366,6 +372,9 @@ async function withMockedSubscriptionStatusCloud<T>(
       return new Response(
         JSON.stringify({
           accountId: 'account-1',
+          accountName: 'Team Workspace',
+          accountSlug: 'team-workspace',
+          accountType: 'team',
           sessionExpiresAt: 1_900_000_000,
           ...testCase.payload,
           userEmail: 'user@example.com',
@@ -425,6 +434,9 @@ describe('doctor and status', () => {
     await setLocalSession({
       cliSessionToken: 'cli-session-token-value',
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       apiBaseUrl: 'https://postplus.example.com',
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
@@ -453,7 +465,7 @@ describe('doctor and status', () => {
           (init?.headers as Record<string, string>)[
             POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.contractVersion
           ],
-          '1',
+          '2',
         );
         assert.equal(
           (init?.headers as Record<string, string>)[
@@ -465,6 +477,9 @@ describe('doctor and status', () => {
         return new Response(
           JSON.stringify({
             accountId: 'account-1',
+            accountName: 'Team Workspace',
+            accountSlug: 'team-workspace',
+            accountType: 'team',
             sessionExpiresAt: 1_900_000_000,
             subscriptionStatus: 'active',
             userEmail: 'user@example.com',
@@ -558,6 +573,9 @@ describe('doctor and status', () => {
     await setLocalSession({
       cliSessionToken: 'cli-session-token-value',
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       apiBaseUrl: 'https://postplus.example.com',
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
@@ -575,6 +593,9 @@ describe('doctor and status', () => {
         return new Response(
           JSON.stringify({
             accountId: 'account-1',
+            accountName: 'Team Workspace',
+            accountSlug: 'team-workspace',
+            accountType: 'team',
             sessionExpiresAt: 1_900_000_000,
             subscriptionStatus: null,
             userEmail: 'user@example.com',
@@ -677,7 +698,7 @@ describe('doctor and status', () => {
         assert.match(
           formatted,
           new RegExp(
-            `Remote auth: Account account-1; user user@example.com; subscription ${testCase.expectedLabel}`,
+            `Remote auth: Team Workspace \\(team\\); account account-1; user user@example.com; subscription ${testCase.expectedLabel}`,
           ),
         );
         assert.match(
@@ -751,6 +772,9 @@ describe('doctor and status', () => {
     await setLocalSession({
       cliSessionToken: 'cli-session-token-value',
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       apiBaseUrl: 'https://postplus.example.com',
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
@@ -795,6 +819,9 @@ describe('doctor and status', () => {
     await setLocalSession({
       cliSessionToken: 'cli-session-token-value',
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       apiBaseUrl: 'https://postplus.example.com',
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
@@ -892,6 +919,9 @@ describe('doctor and status', () => {
     await setLocalSession({
       cliSessionToken: 'cli-session-token-value',
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       apiBaseUrl: 'https://postplus.example.com',
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
@@ -1016,6 +1046,9 @@ describe('doctor and status', () => {
           path: '/tmp/postplus/config.json',
           exists: true,
           accountId: 'account-1',
+          accountName: 'Team Workspace',
+          accountSlug: 'team-workspace',
+          accountType: 'team',
           sessionExpiresAt: 1_900_000_000,
           userEmail: 'user@example.com',
           userId: 'user-1',
@@ -1075,6 +1108,9 @@ describe('doctor and status', () => {
     await setLocalSession({
       cliSessionToken: 'cli-session-token-value',
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       apiBaseUrl: 'https://postplus.example.com',
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
@@ -1092,6 +1128,9 @@ describe('doctor and status', () => {
         return new Response(
           JSON.stringify({
             accountId: 'account-1',
+            accountName: 'Team Workspace',
+            accountSlug: 'team-workspace',
+            accountType: 'team',
             subscriptionStatus: 'active',
             userEmail: 'user@example.com',
             userId: 'user-1',
@@ -1158,6 +1197,9 @@ describe('doctor and status', () => {
     await setLocalSession({
       cliSessionToken: 'cli-session-token-value',
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       apiBaseUrl: 'https://postplus.example.com',
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
@@ -1203,6 +1245,9 @@ describe('doctor and status', () => {
     await setLocalSession({
       cliSessionToken: 'cli-session-token-value',
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       apiBaseUrl: 'https://postplus.example.com',
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
@@ -1253,6 +1298,9 @@ describe('doctor and status', () => {
     await setLocalSession({
       cliSessionToken: 'cli-session-token-value',
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       apiBaseUrl: 'https://postplus.example.com',
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
@@ -1320,7 +1368,10 @@ describe('doctor and status', () => {
       assert.equal(status.ok, true);
       assert.equal(status.doctor.ok, false);
       assert.equal(status.doctor.requiredOk, true);
-      assert.match(formatted, /Overall: OK \(task-specific checks need attention\)/);
+      assert.match(
+        formatted,
+        /Overall: OK \(task-specific checks need attention\)/,
+      );
       assert.match(formatted, /\[WARN\] Hosted capabilities/);
       assert.match(formatted, /Media generation: image-bad/);
     } finally {
@@ -1402,6 +1453,9 @@ describe('doctor and status', () => {
   it('shows CLI session expiry in auth status output', async () => {
     await setLocalSession({
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       apiBaseUrl: 'https://postplus.example.com',
       cliSessionToken: 'cli-session-token-value',
       sessionExpiresAt: Math.floor(Date.now() / 1_000) + 3600,
@@ -1411,7 +1465,31 @@ describe('doctor and status', () => {
 
     const formatted = formatAuthStatusReport(await generateAuthStatusReport());
 
+    assert.match(formatted, /Workspace: Team Workspace \(team\)/);
+    assert.match(formatted, /Workspace slug: team-workspace/);
+    assert.match(formatted, /Account ID: account-1/);
     assert.match(formatted, /Expires:/);
+  });
+
+  it('uses account wording for personal CLI auth status output', async () => {
+    await setLocalSession({
+      accountId: 'user-1',
+      accountName: 'Personal Account',
+      accountSlug: null,
+      accountType: 'personal',
+      apiBaseUrl: 'https://postplus.example.com',
+      cliSessionToken: 'cli-session-token-value',
+      sessionExpiresAt: Math.floor(Date.now() / 1_000) + 3600,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+
+    const formatted = formatAuthStatusReport(await generateAuthStatusReport());
+
+    assert.match(formatted, /Account: Personal Account/);
+    assert.match(formatted, /Account ID: user-1/);
+    assert.doesNotMatch(formatted, /Workspace:/);
+    assert.doesNotMatch(formatted, /Workspace slug:/);
   });
 
   it('refreshes a rejected CLI session before doctor checks remote auth', async () => {
@@ -1419,6 +1497,9 @@ describe('doctor and status', () => {
     process.env.POSTPLUS_REFRESH_TOKEN = 'stale-env-refresh-token';
     await setLocalSession({
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       apiBaseUrl: 'https://postplus.example.com',
       cliSessionToken: 'cli-session-token-value',
       sessionExpiresAt: 1_900_000_000,
@@ -1451,6 +1532,9 @@ describe('doctor and status', () => {
         return new Response(
           JSON.stringify({
             accountId: 'account-1',
+            accountName: 'Team Workspace',
+            accountSlug: 'team-workspace',
+            accountType: 'team',
             cliSessionToken: 'cli-session-token-refreshed',
             sessionExpiresAt: Math.floor(Date.now() / 1_000) + 3600,
             subscriptionStatus: 'active',
@@ -1488,6 +1572,9 @@ describe('doctor and status', () => {
         return new Response(
           JSON.stringify({
             accountId: 'account-1',
+            accountName: 'Team Workspace',
+            accountSlug: 'team-workspace',
+            accountType: 'team',
             subscriptionStatus: 'active',
             userEmail: 'user@example.com',
             userId: 'user-1',
@@ -1560,6 +1647,9 @@ describe('doctor and status', () => {
   it('refreshes a rejected CLI session before auth validate', async () => {
     await setLocalSession({
       accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
       apiBaseUrl: 'https://postplus.example.com',
       cliSessionToken: 'cli-session-token-value',
       sessionExpiresAt: 1_900_000_000,
@@ -1581,6 +1671,9 @@ describe('doctor and status', () => {
         return new Response(
           JSON.stringify({
             accountId: 'account-1',
+            accountName: 'Team Workspace',
+            accountSlug: 'team-workspace',
+            accountType: 'team',
             cliSessionToken: 'cli-session-token-refreshed',
             sessionExpiresAt: Math.floor(Date.now() / 1_000) + 3600,
             subscriptionStatus: 'active',
@@ -1616,6 +1709,9 @@ describe('doctor and status', () => {
       return new Response(
         JSON.stringify({
           accountId: 'account-1',
+          accountName: 'Team Workspace',
+          accountSlug: 'team-workspace',
+          accountType: 'team',
           subscriptionStatus: 'active',
           userEmail: 'user@example.com',
           userId: 'user-1',
@@ -1720,6 +1816,9 @@ describe('cloud auth handoff', () => {
       return new Response(
         JSON.stringify({
           accountId: 'account-1',
+          accountName: 'Team Workspace',
+          accountSlug: 'team-workspace',
+          accountType: 'team',
           cliSessionToken: 'cli-session-token-value',
           sessionExpiresAt: 1_900_000_000,
           status: 'completed',
@@ -2209,6 +2308,9 @@ describe('update checks', () => {
             path: 'config.json',
             exists: true,
             accountId: 'account-1',
+            accountName: 'Team Workspace',
+            accountSlug: 'team-workspace',
+            accountType: 'team',
             sessionExpiresAt: 1_900_000_000,
             userEmail: 'user@example.com',
             userId: 'user-1',
@@ -3185,11 +3287,11 @@ describe('studio commands', () => {
 
   it('prints Studio server help from the bundled runtime entrypoint', async () => {
     const { stdout } = await execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/studio-server.ts',
-        '--help',
-      ]);
+      '--import',
+      'tsx',
+      'src/studio-server.ts',
+      '--help',
+    ]);
 
     assert.match(stdout, /node build\/studio-server\.js --studio-root/);
   });

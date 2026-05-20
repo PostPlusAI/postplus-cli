@@ -12,6 +12,9 @@ export const CLI_AUTH_LOGIN_TIMEOUT_MS = 30 * 60 * 1000;
 
 export type AuthLoginReport = {
   accountId: string;
+  accountName: string;
+  accountSlug: string | null;
+  accountType: 'personal' | 'team';
   apiBaseUrl: string;
   ok: boolean;
   userEmail: string | null;
@@ -37,6 +40,9 @@ type CliAuthLoginPollPayload =
     }
   | {
       accountId: string;
+      accountName: string;
+      accountSlug: string | null;
+      accountType: 'personal' | 'team';
       cliSessionToken: string;
       sessionExpiresAt: number | null;
       status: 'completed';
@@ -50,6 +56,9 @@ type CliAuthLoginPollPayload =
 
 type ValidatedCliSession = {
   accountId: string;
+  accountName: string;
+  accountSlug: string | null;
+  accountType: 'personal' | 'team';
   sessionExpiresAt: number | null;
   subscriptionStatus: string | null;
   userEmail: string | null;
@@ -100,6 +109,9 @@ export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
 
   await setLocalSession({
     accountId: validated.accountId,
+    accountName: validated.accountName,
+    accountSlug: validated.accountSlug,
+    accountType: validated.accountType,
     apiBaseUrl: baseUrl,
     cliSessionToken: handoffPayload.cliSessionToken,
     sessionExpiresAt:
@@ -111,6 +123,9 @@ export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
 
   return {
     accountId: validated.accountId,
+    accountName: validated.accountName,
+    accountSlug: validated.accountSlug,
+    accountType: validated.accountType,
     apiBaseUrl: baseUrl,
     ok: true,
     userEmail: validated.userEmail,
@@ -252,7 +267,11 @@ export async function validateCliSession(input: {
     );
   }
 
-  return payload as ValidatedCliSession;
+  if (!isValidatedCliSessionPayload(payload)) {
+    throw new Error('PostPlus CLI auth validation returned incomplete data.');
+  }
+
+  return payload;
 }
 
 export function formatCliSessionAuthError(
@@ -301,6 +320,9 @@ function isCliAuthLoginCompletedPayload(
     payload.status === 'completed' &&
     typeof payload.cliSessionToken === 'string' &&
     typeof payload.accountId === 'string' &&
+    typeof payload.accountName === 'string' &&
+    (payload.accountSlug === null || typeof payload.accountSlug === 'string') &&
+    (payload.accountType === 'personal' || payload.accountType === 'team') &&
     typeof payload.userId === 'string'
   );
 }
@@ -309,6 +331,22 @@ function isCliAuthLoginPendingPayload(
   payload: CliAuthLoginPollPayload,
 ): payload is Extract<CliAuthLoginPollPayload, { status: 'pending' }> {
   return 'status' in payload && payload.status === 'pending';
+}
+
+function isValidatedCliSessionPayload(
+  payload: SessionWhoAmIErrorPayload | ValidatedCliSession,
+): payload is ValidatedCliSession {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    typeof (payload as { accountId?: unknown }).accountId === 'string' &&
+    typeof (payload as { accountName?: unknown }).accountName === 'string' &&
+    ((payload as { accountSlug?: unknown }).accountSlug === null ||
+      typeof (payload as { accountSlug?: unknown }).accountSlug === 'string') &&
+    ((payload as { accountType?: unknown }).accountType === 'personal' ||
+      (payload as { accountType?: unknown }).accountType === 'team') &&
+    typeof (payload as { userId?: unknown }).userId === 'string'
+  );
 }
 
 function formatRemoteAuthLoginError(
