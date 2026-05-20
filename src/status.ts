@@ -55,14 +55,18 @@ export async function generateStatusReportWithDependencies(
     dependencies.generateAuthStatus ?? generateAuthStatusReport;
   const generateDoctor = dependencies.generateDoctor ?? generateDoctorReport;
   const generateSkillStatus =
-    dependencies.generateSkillStatus ?? generateSkillInstallStatusReport;
+    dependencies.generateSkillStatus ??
+    (() =>
+      generateSkillInstallStatusReport(undefined, {
+        repairManagedBaseline: true,
+      }));
   const generateUpdateStatus =
     dependencies.generateUpdateStatus ?? generateUpdateStatusReport;
 
-  const [doctor, auth, skills, updates] = await Promise.all([
+  const skills = await generateSkillStatus();
+  const [doctor, auth, updates] = await Promise.all([
     generateDoctor({ skillId: options.skillId }),
     generateAuthStatus(),
-    generateSkillStatus(),
     generateUpdateStatus(),
   ]);
 

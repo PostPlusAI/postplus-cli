@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { after, beforeEach, describe, it } from 'node:test';
@@ -52,6 +59,7 @@ import {
 } from './skill-management.js';
 import {
   formatStatusReport,
+  generateStatusReport,
   generateStatusReportWithDependencies,
 } from './status.js';
 import {
@@ -549,6 +557,150 @@ describe('doctor and status', () => {
       assert.match(formatStatusReport(status), /PostPlus CLI status/);
       assert.match(formatStatusReport(status), /PostPlus skills status/);
       assert.match(formatStatusReport(status), /PostPlus update status/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('repairs stale managed skill metadata before hosted readiness during status', async () => {
+    await writeLocalConfig({
+      apiBaseUrl: 'https://postplus.example.com',
+      accountId: 'account-1',
+      cliSessionToken: 'cli-session-token-value',
+      managedSkills: {
+        releaseId: 'catalog-1',
+        skillNames: ['demo-skill'],
+      },
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    const fakeBinDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-bin-'));
+    tempDirs.push(fakeBinDir);
+    await mkdir(fakeBinDir, { recursive: true });
+    const fakeNpxPath = resolve(fakeBinDir, 'npx');
+    await writeFile(
+      fakeNpxPath,
+      `#!/usr/bin/env node
+const args = process.argv.slice(2).join(' ');
+if (args === '-y skills list --json') {
+  console.log(JSON.stringify([{ agents: ['Codex'], name: 'demo-skill', path: '/project/demo-skill', scope: 'project' }]));
+  process.exit(0);
+}
+if (args === '-y skills list --json --global') {
+  console.log(JSON.stringify([{ agents: ['Codex'], name: 'demo-skill', path: '/global/demo-skill', scope: 'global' }]));
+  process.exit(0);
+}
+console.error('Unexpected npx args: ' + args);
+process.exit(1);
+`,
+      {
+        encoding: 'utf8',
+        mode: 0o755,
+      },
+    );
+    process.env.PATH = `${fakeBinDir}:${process.env.PATH ?? ''}`;
+
+    const originalFetch = globalThis.fetch;
+    const hostedSkillsReleaseIds: (string | undefined)[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+
+      if (url.includes('registry.npmjs.org')) {
+        return new Response(JSON.stringify({ version: '0.1.33' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      if (isPublicCatalogUrl(url)) {
+        return new Response(
+          JSON.stringify({
+            schemaVersion: 1,
+            releaseId: 'catalog-2',
+            source: 'PostPlusAI/postplus-skills',
+            skills: [
+              {
+                name: 'demo-skill',
+                path: 'skills/demo-skill/SKILL.md',
+                requirements: {
+                  localDependencies: [],
+                },
+                status: 'released',
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return createWhoamiResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+        const headers = init?.headers as Record<string, string>;
+        const skillsReleaseId =
+          headers[POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.skillsReleaseId];
+        hostedSkillsReleaseIds.push(skillsReleaseId);
+
+        if (skillsReleaseId !== 'catalog-2') {
+          return new Response(
+            JSON.stringify({
+              code: 'postplus_client_upgrade_required',
+              error: 'Your PostPlus CLI or PostPlus skills are out of date.',
+              compatibility: {
+                upgrade: {
+                  cli: { command: 'npm install -g @postplus/cli@latest' },
+                  skills: { command: 'postplus update' },
+                  restartAgentSession: true,
+                },
+              },
+            }),
+            {
+              status: 409,
+              headers: { 'content-type': 'application/json' },
+            },
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            subscriptionActive: true,
+            subscriptionStatus: 'active',
+            capabilities: [],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const status = await generateStatusReport();
+
+      assert.equal(status.ok, true);
+      assert.equal(status.skills.managedSkillsReleaseId, 'catalog-2');
+      assert.deepEqual(status.skills.scopes, ['global', 'project']);
+      assert.equal(status.updates.skills.currentReleaseId, 'catalog-2');
+      assert.equal(status.updates.skills.latestReleaseId, 'catalog-2');
+      assert.equal(status.updates.skills.updateAvailable, false);
+      assert.deepEqual(hostedSkillsReleaseIds, ['catalog-2']);
+      assert.equal(
+        (await readLocalConfig())?.managedSkills?.releaseId,
+        'catalog-2',
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
