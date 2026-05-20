@@ -48,6 +48,10 @@ type SkillManagementDependencies = {
   runCommand: typeof runCommand;
 };
 
+type SkillInstallStatusOptions = {
+  repairManagedBaseline?: boolean;
+};
+
 type SkillMutationDependencies = {
   runInteractiveCommand: typeof runInteractiveCommand;
 };
@@ -139,8 +143,9 @@ export async function generateSkillInstallStatusReport(
   dependencies: SkillManagementDependencies = {
     runCommand,
   },
+  options: SkillInstallStatusOptions = {},
 ): Promise<SkillInstallStatusReport> {
-  return (await inspectPostPlusSkillInstall(dependencies)).report;
+  return (await inspectPostPlusSkillInstall(dependencies, options)).report;
 }
 
 export async function runPostPlusSkillVerify(
@@ -179,6 +184,7 @@ export async function runPostPlusSkillVerify(
 
 async function inspectPostPlusSkillInstall(
   dependencies: SkillManagementDependencies,
+  options: SkillInstallStatusOptions = {},
 ): Promise<{
   catalog: Awaited<ReturnType<typeof loadPublicSkillCatalog>>;
   report: SkillInstallStatusReport;
@@ -203,6 +209,28 @@ async function inspectPostPlusSkillInstall(
     const missingSkills = [...requiredSkills].filter(
       (skill) => !installedNames.has(skill),
     );
+    let managedSkillsReleaseId = baseline.releaseId;
+    let currentRetiredManagedSkills = retiredManagedSkills;
+
+    if (
+      options.repairManagedBaseline === true &&
+      missingSkills.length === 0 &&
+      shouldRepairManagedBaseline({
+        baseline,
+        releaseId: catalog.releaseId,
+        skillNames: requiredSkillNames,
+      })
+    ) {
+      await writeManagedSkillBaseline({
+        releaseId: catalog.releaseId,
+        skillNames: requiredSkillNames,
+      });
+      await writeCurrentCliVersionToLocalConfig();
+      await clearUpdateCheckCache();
+      managedSkillsReleaseId = catalog.releaseId;
+      currentRetiredManagedSkills = [];
+    }
+
     const scopes = [
       ...new Set(
         postPlusInstalled
@@ -218,10 +246,10 @@ async function inspectPostPlusSkillInstall(
         error: null,
         installCommand: formatPostPlusSkillsInstallCommand(catalog.source),
         installedCount: installedNames.size,
-        managedSkillsReleaseId: baseline.releaseId,
+        managedSkillsReleaseId,
         missingSkills,
         requiredCount: requiredSkills.size,
-        retiredManagedSkills,
+        retiredManagedSkills: currentRetiredManagedSkills,
         scopes,
         source: catalog.source,
         updateCommand: formatPostPlusSkillUpdateCommand(),
@@ -404,6 +432,28 @@ function buildSkillScopeArgs(scope: PostPlusSkillsInstallScope): string[] {
 
 function mergeSkillNames(left: string[], right: string[]): string[] {
   return [...new Set([...left, ...right])].sort((a, b) => a.localeCompare(b));
+}
+
+function shouldRepairManagedBaseline(input: {
+  baseline: { releaseId: string | null; skillNames: string[] };
+  releaseId: string;
+  skillNames: string[];
+}): boolean {
+  if (input.baseline.releaseId !== input.releaseId) {
+    return true;
+  }
+
+  return !haveSameSkillNames(input.baseline.skillNames, input.skillNames);
+}
+
+function haveSameSkillNames(left: string[], right: string[]): boolean {
+  const normalizedLeft = mergeSkillNames(left, []);
+  const normalizedRight = mergeSkillNames(right, []);
+
+  return (
+    normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((value, index) => value === normalizedRight[index])
+  );
 }
 
 async function listInstalledSkills(
