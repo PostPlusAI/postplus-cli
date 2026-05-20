@@ -1,3 +1,4 @@
+import { formatAccountBindingLines } from './account-binding-display.js';
 import { refreshRemoteAuthSession } from './auth-session.js';
 import { clearAuthState, generateAuthStatusReport } from './auth.js';
 import {
@@ -10,6 +11,9 @@ import { readSubscriptionStatusField } from './subscription-status.js';
 
 export type AuthRefreshReport = {
   accountId: string;
+  accountName: string;
+  accountSlug: string | null;
+  accountType: 'personal' | 'team';
   apiBaseUrl: string;
   ok: boolean;
   subscriptionStatus: string | null;
@@ -22,6 +26,9 @@ export async function refreshRemoteAuth(): Promise<AuthRefreshReport> {
 
   return {
     accountId: refreshed.accountId,
+    accountName: refreshed.accountName,
+    accountSlug: refreshed.accountSlug,
+    accountType: refreshed.accountType,
     apiBaseUrl: refreshed.apiBaseUrl,
     ok: true,
     subscriptionStatus: refreshed.subscriptionStatus,
@@ -36,7 +43,7 @@ export function formatAuthRefreshReport(report: AuthRefreshReport): string {
     '',
     `Remote auth: ${report.ok ? 'OK' : 'FAILED'}`,
     `PostPlus Cloud: ${report.apiBaseUrl}`,
-    `Account: ${report.accountId}`,
+    ...formatAccountBindingLines(report),
     `User: ${report.userEmail ?? report.userId}`,
     `Subscription: ${readSubscriptionStatusField(report).label}`,
   ].join('\n');

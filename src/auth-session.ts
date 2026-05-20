@@ -15,6 +15,9 @@ export type FreshRemoteAuth = {
 
 export type RemoteAuthRefreshResult = {
   accountId: string;
+  accountName: string;
+  accountSlug: string | null;
+  accountType: 'personal' | 'team';
   apiBaseUrl: string;
   cliSessionToken: string;
   sessionExpiresAt: number | null;
@@ -26,6 +29,9 @@ export type RemoteAuthRefreshResult = {
 type RemoteAuthRefreshPayload =
   | {
       accountId: string;
+      accountName: string;
+      accountSlug: string | null;
+      accountType: 'personal' | 'team';
       cliSessionToken: string;
       sessionExpiresAt: number | null;
       subscriptionStatus: string | null;
@@ -127,6 +133,9 @@ export async function refreshRemoteAuthSession(input?: {
 
   await setLocalSession({
     accountId: payload.accountId,
+    accountName: payload.accountName,
+    accountSlug: payload.accountSlug,
+    accountType: payload.accountType,
     apiBaseUrl,
     cliSessionToken: payload.cliSessionToken,
     sessionExpiresAt: payload.sessionExpiresAt,
@@ -152,6 +161,11 @@ function isRemoteAuthRefreshSuccessPayload(
     (payload as { cliSessionToken: string }).cliSessionToken.trim().length >
       0 &&
     typeof (payload as { accountId?: unknown }).accountId === 'string' &&
+    typeof (payload as { accountName?: unknown }).accountName === 'string' &&
+    ((payload as { accountSlug?: unknown }).accountSlug === null ||
+      typeof (payload as { accountSlug?: unknown }).accountSlug === 'string') &&
+    ((payload as { accountType?: unknown }).accountType === 'personal' ||
+      (payload as { accountType?: unknown }).accountType === 'team') &&
     typeof (payload as { userId?: unknown }).userId === 'string'
   );
 }

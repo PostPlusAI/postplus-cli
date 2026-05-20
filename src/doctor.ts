@@ -1,3 +1,4 @@
+import { formatAccountBindingName } from './account-binding-display.js';
 import {
   type FreshRemoteAuth,
   resolveFreshRemoteAuth,
@@ -278,6 +279,8 @@ async function checkRemoteAuth(input: FreshRemoteAuth): Promise<DoctorCheck> {
 
     const payload = (await response.json()) as {
       accountId?: unknown;
+      accountName?: unknown;
+      accountType?: unknown;
       error?: unknown;
       subscriptionStatus?: unknown;
       userEmail?: unknown;
@@ -295,6 +298,12 @@ async function checkRemoteAuth(input: FreshRemoteAuth): Promise<DoctorCheck> {
 
     const accountId =
       typeof payload.accountId === 'string' ? payload.accountId : 'unknown';
+    const accountName =
+      typeof payload.accountName === 'string' ? payload.accountName : null;
+    const accountType =
+      payload.accountType === 'personal' || payload.accountType === 'team'
+        ? payload.accountType
+        : null;
     const user =
       typeof payload.userEmail === 'string'
         ? payload.userEmail
@@ -306,7 +315,11 @@ async function checkRemoteAuth(input: FreshRemoteAuth): Promise<DoctorCheck> {
     return createPass(
       'remote_auth',
       'Remote auth',
-      `Account ${accountId}; user ${user}; subscription ${subscription}`,
+      `${formatAccountBindingName({
+        accountId,
+        accountName,
+        accountType,
+      })}; account ${accountId}; user ${user}; subscription ${subscription}`,
     );
   } catch (error) {
     return createFail(
@@ -421,7 +434,9 @@ async function checkHostedCapabilities(
   }
 }
 
-function readHostedCapabilityEntries(value: unknown): Record<string, unknown>[] {
+function readHostedCapabilityEntries(
+  value: unknown,
+): Record<string, unknown>[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -457,9 +472,8 @@ function readCapabilityFailureLabel(
         .filter((check): check is string => check !== null)
     : [];
 
-  const labelWithFailures = failedChecks.length > 0
-    ? `${label} (${failedChecks.join(', ')})`
-    : label;
+  const labelWithFailures =
+    failedChecks.length > 0 ? `${label} (${failedChecks.join(', ')})` : label;
 
   return skillScope
     ? `${labelWithFailures} for ${skillScope.skill.skillId}`
@@ -682,7 +696,9 @@ function identifierMatchesCapability(
   return prefix === capability;
 }
 
-function splitCapabilityIdentifier(identifier: string): [string | null, string] {
+function splitCapabilityIdentifier(
+  identifier: string,
+): [string | null, string] {
   const index = identifier.indexOf(':');
 
   if (index === -1) {

@@ -1,3 +1,4 @@
+import { formatAccountBindingLines } from './account-binding-display.js';
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import {
   buildPostPlusClientCompatibilityHeaders,
@@ -7,6 +8,9 @@ import { readSubscriptionStatusField } from './subscription-status.js';
 
 export type AuthValidateReport = {
   accountId: string;
+  accountName: string;
+  accountSlug: string | null;
+  accountType: 'personal' | 'team';
   apiBaseUrl: string;
   ok: boolean;
   source: 'config';
@@ -47,11 +51,17 @@ export async function validateRemoteAuth(): Promise<AuthValidateReport> {
     'subscriptionStatus',
   );
   const accountId = readRequiredString(payload, 'accountId');
+  const accountName = readRequiredString(payload, 'accountName');
+  const accountSlug = readNullableString(payload, 'accountSlug');
+  const accountType = readAccountType(payload);
   const userId = readRequiredString(payload, 'userId');
   const userEmail = readNullableString(payload, 'userEmail');
 
   return {
     accountId,
+    accountName,
+    accountSlug,
+    accountType,
     apiBaseUrl: auth.apiBaseUrl,
     ok: true,
     source: auth.source,
@@ -69,10 +79,24 @@ export function formatAuthValidateReport(report: AuthValidateReport): string {
     '',
     `Remote auth: ${report.ok ? 'OK' : 'FAILED'}`,
     `PostPlus Cloud: ${report.apiBaseUrl}`,
-    `Account: ${report.accountId}`,
+    ...formatAccountBindingLines(report),
     `User: ${report.userEmail ?? report.userId}`,
     `Subscription: ${readSubscriptionStatusField(report).label}`,
   ].join('\n');
+}
+
+function readAccountType(
+  payload: Record<string, unknown>,
+): 'personal' | 'team' {
+  const value = payload.accountType;
+
+  if (value !== 'personal' && value !== 'team') {
+    throw new Error(
+      'Invalid PostPlus auth response: accountType must be personal or team.',
+    );
+  }
+
+  return value;
 }
 
 async function fetchWhoami(input: {

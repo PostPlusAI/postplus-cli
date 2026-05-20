@@ -1,3 +1,4 @@
+import { formatAccountBindingLines } from './account-binding-display.js';
 import {
   clearLocalAuthState,
   getPostPlusConfigPath,
@@ -25,6 +26,9 @@ export type AuthStatusReport = {
     path: string;
     exists: boolean;
     accountId: string | null;
+    accountName: string | null;
+    accountSlug: string | null;
+    accountType: 'personal' | 'team' | null;
     sessionExpiresAt: number | null;
     userEmail: string | null;
     userId: string | null;
@@ -56,6 +60,18 @@ export async function generateAuthStatusReport(): Promise<AuthStatusReport> {
       path: getPostPlusConfigPath(),
       exists: configExists,
       accountId: config?.accountId?.trim() || null,
+      accountName:
+        typeof config?.accountName === 'string'
+          ? config.accountName.trim() || null
+          : null,
+      accountSlug:
+        typeof config?.accountSlug === 'string'
+          ? config.accountSlug.trim() || null
+          : null,
+      accountType:
+        config?.accountType === 'personal' || config?.accountType === 'team'
+          ? config.accountType
+          : null,
       sessionExpiresAt:
         typeof config?.sessionExpiresAt === 'number'
           ? config.sessionExpiresAt
@@ -95,7 +111,14 @@ export function formatAuthStatusReport(report: AuthStatusReport): string {
       ? `[PASS] local config: ${report.config.path}`
       : `[PASS] local config path: ${report.config.path}`,
   );
-  lines.push(`  Account: ${report.config.accountId ?? 'not bound'}`);
+  lines.push(
+    ...formatAccountBindingLines({
+      accountId: report.config.accountId,
+      accountName: report.config.accountName,
+      accountSlug: report.config.accountSlug,
+      accountType: report.config.accountType,
+    }).map((line) => `  ${line}`),
+  );
   lines.push(
     `  User: ${report.config.userEmail ?? report.config.userId ?? 'not bound'}`,
   );
