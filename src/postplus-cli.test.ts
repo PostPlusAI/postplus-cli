@@ -3355,6 +3355,7 @@ describe('hosted domain commands', () => {
       'help',
     ]);
     assert.match(researchHelp, /postplus research collect/u);
+    assert.match(researchHelp, /postplus research capability/u);
     assert.match(researchHelp, /postplus research schema/u);
 
     for (const domain of ['media', 'publish', 'mobile']) {
@@ -3393,6 +3394,21 @@ describe('hosted domain commands', () => {
       (researchReport.collectionKeys as string[]).includes(
         'youtube-channel-summary',
       ),
+    );
+    assert.ok(
+      (researchReport.sourceKeys as string[]).includes('youtube-videos'),
+    );
+    assert.deepEqual(
+      (
+        (
+          researchReport.examples as Record<string, unknown>
+        )['public-content-collection.scrape'] as Record<string, unknown>
+      ).input,
+      [
+        {
+          url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        },
+      ],
     );
     assert.deepEqual(
       (
@@ -3435,16 +3451,8 @@ describe('hosted domain commands', () => {
     assert.equal(request.operation, 'request');
     assert.equal(request.endpointKey, 'video-seedance-2-text-turbo');
     assert.equal(Object.hasOwn(request, 'skillName'), false);
-    assert.deepEqual(request.requestDimensions, {
-      audioMode: 'on',
-      billableUnitCount: 1,
-      duration: 5,
-      operationKey: 'video-seedance-2-text-turbo',
-      referenceVideoCount: 0,
-      referenceVideoMode: 'without_reference_videos',
-      requestBytes: 93,
-      resolution: '720p',
-    });
+    assert.equal(Object.hasOwn(request, 'operationId'), false);
+    assert.equal(Object.hasOwn(request, 'requestDimensions'), false);
 
     const { stdout: publishStdout } = await execFileAsync(process.execPath, [
       '--import',
@@ -3459,7 +3467,6 @@ describe('hosted domain commands', () => {
     assert.deepEqual(publishExamples['social-publishing.create-post'], {
       capability: 'social-publishing',
       operation: 'create-post',
-      operationId: 'social-publishing:create-post:demo',
       input: {
         body: {
           posts: [],
@@ -3601,6 +3608,169 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('posts public-content research capability requests', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    await writeFile(
+      requestPath,
+      JSON.stringify({
+        capability: 'public-content-collection',
+        input: [
+          {
+            url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+          },
+        ],
+        operation: 'scrape',
+        sourceKey: 'youtube-videos',
+      }),
+    );
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(
+        String(input),
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('research', [
+        'capability',
+        '--request',
+        requestPath,
+      ]);
+      assert.equal(result, 0);
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.capability, 'public-content-collection');
+      assert.equal(body.operation, 'scrape');
+      assert.equal(body.sourceKey, 'youtube-videos');
+      assert.match(
+        String(body.operationId),
+        /^postplus-cli:research:public-content-collection:scrape:/u,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('derives media-generation billing dimensions from the public request', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    await writeFile(
+      requestPath,
+      JSON.stringify({
+        capability: 'media-generation',
+        endpointKey: 'video-seedance-2-text-turbo',
+        input: {
+          duration: 5,
+          prompt: 'demo',
+          resolution: '720p',
+        },
+        operation: 'request',
+      }),
+    );
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(
+        String(input),
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'capability',
+        '--request',
+        requestPath,
+      ]);
+      assert.equal(result, 0);
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.capability, 'media-generation');
+      assert.equal(body.operation, 'request');
+      assert.match(
+        String(body.operationId),
+        /^postplus-cli:media:media-generation:request:/u,
+      );
+      assert.deepEqual(body.requestDimensions, {
+        audioMode: 'on',
+        billableUnitCount: 1,
+        duration: 5,
+        operationKey: 'video-seedance-2-text-turbo',
+        referenceVideoCount: 0,
+        referenceVideoMode: 'without_reference_videos',
+        requestBytes: 50,
+        resolution: '720p',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects public media-generation requests with hand-written billing dimensions', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    await writeFile(
+      requestPath,
+      JSON.stringify({
+        capability: 'media-generation',
+        endpointKey: 'video-seedance-2-text-turbo',
+        input: {
+          duration: 5,
+          prompt: 'demo',
+          resolution: '720p',
+        },
+        operation: 'request',
+        requestDimensions: {
+          billableUnitCount: 1,
+        },
+      }),
+    );
+
+    await assert.rejects(
+      () =>
+        runHostedDomainCommand('media', [
+          'capability',
+          '--request',
+          requestPath,
+        ]),
+      /must not include requestDimensions/u,
+    );
+  });
+
   it('writes quote confirmation challenges beside hosted command outputs', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);
@@ -3620,15 +3790,6 @@ describe('hosted domain commands', () => {
           resolution: '720p',
         },
         operation: 'request',
-        operationId: 'operation-media-generation-large',
-        requestDimensions: {
-          billableUnitCount: 1,
-          duration: 5,
-          operationKey: 'video-seedance-2-text-turbo',
-          referenceVideoMode: 'without_reference_videos',
-          requestBytes: 128,
-          resolution: '720p',
-        },
       }),
     );
     await setLocalSession({

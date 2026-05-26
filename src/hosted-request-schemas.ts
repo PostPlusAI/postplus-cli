@@ -9,8 +9,11 @@ type HostedRequestSchemaReport = {
   command: string;
   description: string;
   endpointKeys?: string[];
+  modelKeys?: string[];
   selectedCollectionKey?: string;
   selectedEndpointKey?: string;
+  sourceKeys?: string[];
+  toolKeys?: string[];
   notes: string[];
   schemas: Array<{
     id: string;
@@ -138,6 +141,36 @@ const RESEARCH_COLLECTION_HINTS: Record<string, Record<string, unknown>> = {
   },
 };
 
+const PUBLIC_CONTENT_SOURCE_HINTS: Record<string, Array<Record<string, unknown>>> = {
+  'facebook-group-posts': [
+    {
+      url: 'https://www.facebook.com/groups/example',
+    },
+  ],
+  'facebook-post-by-url': [
+    {
+      url: 'https://www.facebook.com/openai/posts/example',
+    },
+  ],
+  'facebook-profile-posts': [
+    {
+      url: 'https://www.facebook.com/openai',
+    },
+  ],
+  'youtube-videos': [
+    {
+      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    },
+  ],
+};
+
+const PUBLIC_CONTENT_DISCOVERY_TOOL_HINTS: Record<string, Record<string, unknown>> = {
+  'web-search': {
+    limit: 5,
+    query: 'portable blender reviews',
+  },
+};
+
 const MEDIA_ENDPOINT_HINTS: Record<string, Record<string, unknown>> = {
   'transcription-whisper': {
     audio: 'https://example.com/input-audio.mp3',
@@ -224,6 +257,20 @@ const MEDIA_ENDPOINT_HINTS: Record<string, Record<string, unknown>> = {
   },
 };
 
+const VIDEO_ANALYSIS_MODEL_HINTS: Record<string, Record<string, unknown>> = {
+  'gemini-video-analysis': {
+    contents: [
+      {
+        parts: [
+          {
+            text: 'Analyze this short video and return concise creative observations.',
+          },
+        ],
+      },
+    ],
+  },
+};
+
 export function buildHostedRequestSchemaReport(input: {
   collectionKey?: string | null;
   domain: HostedSchemaDomain;
@@ -263,15 +310,19 @@ function buildResearchSchemaReport(
     schemaVersion: 1,
     domain: 'research',
     command:
-      'postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> --output <result.json>',
+      'postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> --output <result.json>; postplus research capability --request <hosted-capability-request.json> --output <result.json>',
     description:
-      'Schema for the file passed to postplus research collect --input.',
+      'Schemas for files passed to hosted research commands.',
     collectionKeys: Object.keys(RESEARCH_COLLECTION_HINTS).sort(),
     selectedCollectionKey: collectionKey ?? undefined,
+    sourceKeys: Object.keys(PUBLIC_CONTENT_SOURCE_HINTS).sort(),
+    toolKeys: Object.keys(PUBLIC_CONTENT_DISCOVERY_TOOL_HINTS).sort(),
     notes: [
       'The collection key stays in the CLI flag, not inside the JSON file.',
       'Put the skill-specific provider input under input.',
       'Use --run-handle for polling instead of this envelope.',
+      'Use research capability for public-content sourceKey and discovery tool requests.',
+      'The CLI derives operationId before sending capability requests to PostPlus Cloud.',
     ],
     schemas: [
       {
@@ -296,11 +347,99 @@ function buildResearchSchemaReport(
           type: 'object',
         },
       },
+      {
+        id: 'public-content-collection.scrape',
+        description: 'Collect public content from a released sourceKey.',
+        required: ['capability', 'operation', 'sourceKey', 'input'],
+        jsonSchema: {
+          additionalProperties: false,
+          properties: {
+            capability: { const: 'public-content-collection' },
+            input: {
+              items: JSON_OBJECT_SCHEMA,
+              minItems: 1,
+              type: 'array',
+            },
+            operation: { const: 'scrape' },
+            operationId: OPERATION_ID_SCHEMA,
+            quoteConfirmationToken: {
+              minLength: 1,
+              type: 'string',
+            },
+            sourceKey: {
+              enum: Object.keys(PUBLIC_CONTENT_SOURCE_HINTS).sort(),
+              type: 'string',
+            },
+          },
+          required: ['capability', 'operation', 'sourceKey', 'input'],
+          type: 'object',
+        },
+      },
+      {
+        id: 'public-content-collection.status',
+        description: 'Poll a public-content collection job.',
+        required: ['capability', 'operation', 'handle'],
+        jsonSchema: {
+          additionalProperties: false,
+          properties: {
+            capability: { const: 'public-content-collection' },
+            handle: {
+              minLength: 1,
+              type: 'string',
+            },
+            operation: { const: 'status' },
+            operationId: OPERATION_ID_SCHEMA,
+          },
+          required: ['capability', 'operation', 'handle'],
+          type: 'object',
+        },
+      },
+      {
+        id: 'public-content-discovery.tool-call',
+        description: 'Run a hosted public-content discovery tool.',
+        required: ['capability', 'operation', 'toolKey', 'args'],
+        jsonSchema: {
+          additionalProperties: false,
+          properties: {
+            args: JSON_OBJECT_SCHEMA,
+            capability: { const: 'public-content-discovery' },
+            operation: { const: 'tool-call' },
+            operationId: OPERATION_ID_SCHEMA,
+            quoteConfirmationToken: {
+              minLength: 1,
+              type: 'string',
+            },
+            toolKey: {
+              enum: Object.keys(PUBLIC_CONTENT_DISCOVERY_TOOL_HINTS).sort(),
+              type: 'string',
+            },
+          },
+          required: ['capability', 'operation', 'toolKey', 'args'],
+          type: 'object',
+        },
+      },
     ],
     examples: {
       'research.collection-envelope': {
         schemaVersion: 1,
         input: collectionInput,
+      },
+      'public-content-collection.scrape': {
+        capability: 'public-content-collection',
+        operation: 'scrape',
+        sourceKey: 'youtube-videos',
+        input: PUBLIC_CONTENT_SOURCE_HINTS['youtube-videos'],
+      },
+      'public-content-collection.status': {
+        capability: 'public-content-collection',
+        operation: 'status',
+        handle: '<output.data.id>',
+      },
+      'public-content-discovery.tool-call': {
+        capability: 'public-content-discovery',
+        operation: 'tool-call',
+        toolKey: 'web-search',
+        args: PUBLIC_CONTENT_DISCOVERY_TOOL_HINTS['web-search'],
       },
     },
   };
@@ -323,13 +462,6 @@ function buildMediaSchemaReport(
         prompt: 'A realistic vertical short-form product reveal.',
       };
   const selectedEndpoint = endpointKey ?? '<endpoint-key>';
-  const requestDimensions = endpointKey
-    ? buildMediaGenerationRequestDimensions(endpointKey, endpointInput)
-    : {
-        billableUnitCount: 1,
-        operationKey: selectedEndpoint,
-      };
-
   return {
     schemaVersion: 1,
     domain: 'media',
@@ -338,11 +470,14 @@ function buildMediaSchemaReport(
     description:
       'Schemas for files passed to postplus media capability --request.',
     endpointKeys: Object.keys(MEDIA_ENDPOINT_HINTS).sort(),
+    modelKeys: Object.keys(VIDEO_ANALYSIS_MODEL_HINTS).sort(),
     selectedEndpointKey: endpointKey ?? undefined,
     notes: [
       'Use media-generation request for async generation, transcription, and voice jobs.',
       'Use media-generation status with the output.data.id handle returned by a pending request.',
       'Use media-file operations for upload/download setup when a workflow needs hosted media storage.',
+      'Use video-analysis analyze for Gemini video understanding payloads.',
+      'The CLI derives operationId and billing dimensions before sending requests to PostPlus Cloud.',
       'Endpoint-specific input belongs under input; top-level provider or billing fields are not public contract fields.',
     ],
     schemas: [
@@ -352,10 +487,8 @@ function buildMediaSchemaReport(
         required: [
           'capability',
           'operation',
-          'operationId',
           'endpointKey',
           'input',
-          'requestDimensions',
         ],
         jsonSchema: {
           additionalProperties: false,
@@ -372,15 +505,12 @@ function buildMediaSchemaReport(
               minLength: 1,
               type: 'string',
             },
-            requestDimensions: JSON_OBJECT_SCHEMA,
           },
           required: [
             'capability',
             'operation',
-            'operationId',
             'endpointKey',
             'input',
-            'requestDimensions',
           ],
           type: 'object',
         },
@@ -388,7 +518,7 @@ function buildMediaSchemaReport(
       {
         id: 'media-generation.status',
         description: 'Poll an async media generation/transcription job.',
-        required: ['capability', 'operation', 'operationId', 'handle'],
+        required: ['capability', 'operation', 'handle'],
         jsonSchema: {
           additionalProperties: false,
           properties: {
@@ -400,14 +530,14 @@ function buildMediaSchemaReport(
             operation: { const: 'status' },
             operationId: OPERATION_ID_SCHEMA,
           },
-          required: ['capability', 'operation', 'operationId', 'handle'],
+          required: ['capability', 'operation', 'handle'],
           type: 'object',
         },
       },
       {
         id: 'media-file.create-upload-url',
         description: 'Create a hosted media upload target.',
-        required: ['capability', 'operation', 'operationId', 'file'],
+        required: ['capability', 'operation', 'file'],
         jsonSchema: {
           additionalProperties: false,
           properties: {
@@ -429,7 +559,32 @@ function buildMediaSchemaReport(
               type: 'string',
             },
           },
-          required: ['capability', 'operation', 'operationId', 'file'],
+          required: ['capability', 'operation', 'file'],
+          type: 'object',
+        },
+      },
+      {
+        id: 'video-analysis.analyze',
+        description: 'Run hosted Gemini video analysis.',
+        required: ['capability', 'operation', 'modelKey', 'payload'],
+        jsonSchema: {
+          additionalProperties: false,
+          properties: {
+            capability: { const: 'video-analysis' },
+            estimatedUsage: JSON_OBJECT_SCHEMA,
+            modelKey: {
+              enum: Object.keys(VIDEO_ANALYSIS_MODEL_HINTS).sort(),
+              type: 'string',
+            },
+            operation: { const: 'analyze' },
+            operationId: OPERATION_ID_SCHEMA,
+            payload: JSON_OBJECT_SCHEMA,
+            quoteConfirmationToken: {
+              minLength: 1,
+              type: 'string',
+            },
+          },
+          required: ['capability', 'operation', 'modelKey', 'payload'],
           type: 'object',
         },
       },
@@ -438,32 +593,34 @@ function buildMediaSchemaReport(
       'media-generation.request': {
         capability: 'media-generation',
         operation: 'request',
-        operationId: `media-generation:${selectedEndpoint}:demo`,
         endpointKey: selectedEndpoint,
         input: endpointInput,
-        requestDimensions,
       },
       'media-generation.status': {
         capability: 'media-generation',
         operation: 'status',
-        operationId: 'media-generation:status:demo',
         handle: '<output.data.id>',
       },
       'media-file.create-upload-url': {
         capability: 'media-file',
         operation: 'create-upload-url',
-        operationId: 'media-file:create-upload-url:demo',
         file: {
           mimeType: 'video/mp4',
           name: 'input.mp4',
           sizeBytes: 1048576,
         },
       },
+      'video-analysis.analyze': {
+        capability: 'video-analysis',
+        operation: 'analyze',
+        modelKey: 'gemini-video-analysis',
+        payload: VIDEO_ANALYSIS_MODEL_HINTS['gemini-video-analysis'],
+      },
     },
   };
 }
 
-function buildMediaGenerationRequestDimensions(
+export function buildMediaGenerationRequestDimensions(
   endpointKey: string,
   input: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -534,7 +691,7 @@ function buildPublishSchemaReport(): HostedRequestSchemaReport {
       {
         id: 'social-publishing.request',
         description: 'Run a hosted social publishing operation.',
-        required: ['capability', 'operation', 'operationId', 'input'],
+        required: ['capability', 'operation', 'input'],
         jsonSchema: {
           additionalProperties: false,
           properties: {
@@ -565,7 +722,7 @@ function buildPublishSchemaReport(): HostedRequestSchemaReport {
               type: 'string',
             },
           },
-          required: ['capability', 'operation', 'operationId', 'input'],
+          required: ['capability', 'operation', 'input'],
           type: 'object',
         },
       },
@@ -574,13 +731,11 @@ function buildPublishSchemaReport(): HostedRequestSchemaReport {
       'social-publishing.list-channels': {
         capability: 'social-publishing',
         operation: 'list-channels',
-        operationId: 'social-publishing:list-channels:demo',
         input: {},
       },
       'social-publishing.create-post': {
         capability: 'social-publishing',
         operation: 'create-post',
-        operationId: 'social-publishing:create-post:demo',
         input: {
           body: {
             posts: [],
@@ -607,7 +762,7 @@ function buildMobileSchemaReport(): HostedRequestSchemaReport {
       {
         id: 'mobile-automation.request',
         description: 'Run a hosted mobile automation operation.',
-        required: ['capability', 'operation', 'operationId', 'input'],
+        required: ['capability', 'operation', 'input'],
         jsonSchema: {
           additionalProperties: false,
           properties: {
@@ -641,7 +796,7 @@ function buildMobileSchemaReport(): HostedRequestSchemaReport {
               type: 'string',
             },
           },
-          required: ['capability', 'operation', 'operationId', 'input'],
+          required: ['capability', 'operation', 'input'],
           type: 'object',
         },
       },
@@ -650,7 +805,6 @@ function buildMobileSchemaReport(): HostedRequestSchemaReport {
       'mobile-automation.list-cloud-phones': {
         capability: 'mobile-automation',
         operation: 'list-cloud-phones',
-        operationId: 'mobile-automation:list-cloud-phones:demo',
         input: {},
       },
     },

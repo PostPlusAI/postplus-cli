@@ -7,7 +7,10 @@ import {
   buildPostPlusClientCompatibilityHeaders,
   formatPostPlusCompatibilityError,
 } from './client-compatibility.js';
-import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
+import {
+  buildHostedRequestSchemaReport,
+  buildMediaGenerationRequestDimensions,
+} from './hosted-request-schemas.js';
 import {
   type LargeCreditQuoteConfirmationChallenge,
   readLargeCreditQuoteConfirmationChallenge,
@@ -38,13 +41,14 @@ class HostedQuoteConfirmationRequiredError extends Error {
   }
 }
 
-const HOSTED_DOMAIN_CAPABILITIES: Record<
-  Exclude<HostedDomain, 'research'>,
-  Set<string>
-> = {
+const HOSTED_DOMAIN_CAPABILITIES: Record<HostedDomain, Set<string>> = {
   media: new Set(['media-file', 'media-generation', 'video-analysis']),
   mobile: new Set(['mobile-automation']),
   publish: new Set(['social-publishing']),
+  research: new Set([
+    'public-content-collection',
+    'public-content-discovery',
+  ]),
 };
 
 export async function runHostedDomainCommand(
@@ -59,6 +63,9 @@ export async function runHostedDomainCommand(
     }
     if (subcommand === 'collect') {
       return runResearchCollect(rest);
+    }
+    if (subcommand === 'capability') {
+      return runHostedCapability(domain, rest);
     }
     printResearchHelp();
     return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
@@ -154,7 +161,7 @@ async function runHostedSchema(
 }
 
 async function runHostedCapability(
-  domain: Exclude<HostedDomain, 'research'>,
+  domain: HostedDomain,
   args: string[],
 ): Promise<number> {
   const flags = parseFlags(args, new Set(['json']));
@@ -178,8 +185,15 @@ async function runHostedCapability(
     normalizeString(record.quoteConfirmationToken);
   const publicRecord = { ...record };
   delete publicRecord.skillName;
+  const derivedFields = buildDerivedHostedCapabilityFields({
+    capability,
+    domain,
+    operation,
+    record,
+  });
   const body = {
     ...publicRecord,
+    ...derivedFields,
     capability,
     operation,
     operationId,
@@ -199,6 +213,37 @@ async function runHostedCapability(
 
   await writeResult(payload, outputPath, flags.booleans.has('json'));
   return 0;
+}
+
+function buildDerivedHostedCapabilityFields(input: {
+  capability: string;
+  domain: HostedDomain;
+  operation: string;
+  record: Record<string, unknown>;
+}): Record<string, unknown> {
+  if (
+    input.domain !== 'media' ||
+    input.capability !== 'media-generation' ||
+    input.operation !== 'request'
+  ) {
+    return {};
+  }
+
+  if (Object.hasOwn(input.record, 'requestDimensions')) {
+    throw new Error(
+      'Hosted media-generation request must not include requestDimensions. The CLI derives billing dimensions from endpointKey and input.',
+    );
+  }
+
+  const endpointKey = requireRecordString(input.record, 'endpointKey');
+  const mediaInput = requireRecordObject(input.record, 'input');
+
+  return {
+    requestDimensions: buildMediaGenerationRequestDimensions(
+      endpointKey,
+      mediaInput,
+    ),
+  };
 }
 
 async function postHostedJson(input: {
@@ -404,7 +449,7 @@ function requireFlag(flags: ParsedFlags, key: string): string {
 
 function requireDomainCapability(
   record: Record<string, unknown>,
-  domain: Exclude<HostedDomain, 'research'>,
+  domain: HostedDomain,
 ): string {
   const capability = requireRecordString(record, 'capability');
   const allowed = HOSTED_DOMAIN_CAPABILITIES[domain];
@@ -431,6 +476,19 @@ function requireRecordString(
   return value;
 }
 
+function requireRecordObject(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
+  const value = record[key];
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Hosted capability request must include object ${key}.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
 function normalizeString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
@@ -446,6 +504,7 @@ Usage:
   postplus research schema [--collection-key <key>] [--json]
   postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> [--output <result.json>]
   postplus research collect --run-handle <runHandle> [--output <result.json>]
+  postplus research capability --request <hosted-capability-request.json> [--output <result.json>]
 `);
 }
 
