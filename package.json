@@ -15,6 +15,7 @@
     "build/client-compatibility.js",
     "build/command-runner.js",
     "build/doctor.js",
+    "build/hosted-domain-commands.js",
     "build/hosted-release.js",
     "build/index.js",
     "build/local-dependencies.js",

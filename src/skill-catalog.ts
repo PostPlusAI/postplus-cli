@@ -22,8 +22,6 @@ export const POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND =
 export const POSTPLUS_SKILLS_LIST_COMMAND = formatPostPlusSkillsListCommand();
 export type PostPlusSkillsInstallScope = 'global' | 'current-directory';
 
-const POSTPLUS_SKILLS_INDEX_URL =
-  'https://raw.githubusercontent.com/PostPlusAI/postplus-skills/main/skills/INDEX.md';
 const POSTPLUS_SKILLS_CATALOG_URL =
   'https://raw.githubusercontent.com/PostPlusAI/postplus-skills/main/skills/catalog.json';
 
@@ -52,7 +50,6 @@ export type PublicSkillRequirements = Record<PublicSkillRequirementKey, string[]
 export type PublicSkillCatalogReport = {
   source: string;
   releaseId: string;
-  indexUrl: string;
   catalogUrl: string;
   installCommand: string;
   listCommand: string;
@@ -85,7 +82,6 @@ export async function loadPublicSkillCatalog(
   return {
     ...catalog,
     catalogUrl,
-    indexUrl: POSTPLUS_SKILLS_INDEX_URL,
     installCommand: formatPostPlusSkillsInstallCommand(skillsSource),
     listCommand: formatPostPlusSkillsListCommand(skillsSource),
     source: skillsSource,

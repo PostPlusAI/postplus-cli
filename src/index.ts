@@ -19,6 +19,7 @@ import {
 } from './auth.js';
 import { readCurrentCliVersion } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
+import { runHostedDomainCommand } from './hosted-domain-commands.js';
 import { assertConfigFilePermissions } from './local-state.js';
 import {
   readLargeCreditQuoteConfirmationChallenge,
@@ -73,6 +74,10 @@ Usage:
   postplus auth validate [--json]
   postplus auth logout [--json]
   postplus doctor [--skill <skill-id>] [--json]
+  postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> [--output <result.json>]
+  postplus media capability --request <hosted-capability-request.json> [--output <result.json>]
+  postplus publish capability --request <hosted-capability-request.json> [--output <result.json>]
+  postplus mobile capability --request <hosted-capability-request.json> [--output <result.json>]
   postplus quote confirm --json --challenge-file <path>
   postplus skills verify [--json]
   postplus studio init|open|status   Open bundled Local Studio
@@ -455,6 +460,18 @@ async function main(): Promise<void> {
     }
     case 'doctor':
       process.exitCode = await runDoctor(parseDiagnosticOptions(rest));
+      return;
+    case 'research':
+      process.exitCode = await runHostedDomainCommand('research', rest);
+      return;
+    case 'media':
+      process.exitCode = await runHostedDomainCommand('media', rest);
+      return;
+    case 'publish':
+      process.exitCode = await runHostedDomainCommand('publish', rest);
+      return;
+    case 'mobile':
+      process.exitCode = await runHostedDomainCommand('mobile', rest);
       return;
     case 'quote':
       process.exitCode = await runQuoteCommand(rest);

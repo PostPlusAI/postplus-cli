@@ -27,6 +27,7 @@ import {
 import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import { POSTPLUS_CLIENT_COMPATIBILITY_HEADERS } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
+import { runHostedDomainCommand } from './hosted-domain-commands.js';
 import { generateLocalDependencyReport } from './local-dependencies.js';
 import {
   readLocalConfig,
@@ -95,7 +96,6 @@ function createPublicCatalogResponse(): Response {
       schemaVersion: 1,
       releaseId: 'catalog-1',
       source: 'PostPlusAI/postplus-skills',
-      primaryIndex: 'skills/INDEX.md',
       skills: [
         {
           name: 'demo-skill',
@@ -120,7 +120,6 @@ function createVideoAnalysisCatalogResponse(): Response {
       schemaVersion: 1,
       releaseId: 'catalog-1',
       source: 'PostPlusAI/postplus-skills',
-      primaryIndex: 'skills/INDEX.md',
       skills: [
         {
           name: 'video-analysis',
@@ -157,7 +156,6 @@ function createSocialPublishingCatalogResponse(): Response {
       schemaVersion: 1,
       releaseId: 'catalog-1',
       source: 'PostPlusAI/postplus-skills',
-      primaryIndex: 'skills/INDEX.md',
       skills: [
         {
           name: 'social-media-publisher',
@@ -2030,7 +2028,6 @@ describe('public skill catalog', () => {
           schemaVersion: 1,
           releaseId: 'catalog-1',
           source: 'PostPlusAI/postplus-skills',
-          primaryIndex: 'skills/INDEX.md',
           skills: [
             {
               name: 'demo-skill',
@@ -2207,7 +2204,6 @@ describe('local dependency diagnostics', () => {
     const report = await generateLocalDependencyReport({
       loadCatalog: async () => ({
         catalogUrl: 'https://example.com/skills/catalog.json',
-        indexUrl: 'https://example.com/skills/INDEX.md',
         installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
         listCommand: 'npx -y skills add PostPlusAI/postplus-skills --list',
         releaseId: 'catalog-1',
@@ -3308,6 +3304,107 @@ describe('skill management commands', () => {
 
     assert.match(versionStdout.trim(), /^\d+\.\d+\.\d+$/);
     assert.equal(flagStdout, versionStdout);
+  });
+});
+
+describe('hosted domain commands', () => {
+  it('documents the thin public hosted command contracts', async () => {
+    const { stdout: researchHelp } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'research',
+      'help',
+    ]);
+    assert.match(researchHelp, /postplus research collect/u);
+
+    for (const domain of ['media', 'publish', 'mobile']) {
+      const { stdout } = await execFileAsync(process.execPath, [
+        '--import',
+        'tsx',
+        'src/index.ts',
+        domain,
+        'help',
+      ]);
+      assert.match(stdout, new RegExp(`postplus ${domain} capability`, 'u'));
+    }
+  });
+
+  it('fails fast when hosted capability request files omit capability fields', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    await writeFile(requestPath, JSON.stringify({ input: {} }));
+
+    await assert.rejects(
+      () =>
+        runHostedDomainCommand('media', [
+          'capability',
+          '--request',
+          requestPath,
+        ]),
+      /must include string capability/u,
+    );
+  });
+
+  it('posts hosted domain requests with explicit capability and operation', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    const outputPath = resolve(requestDir, 'result.json');
+    await writeFile(
+      requestPath,
+      JSON.stringify({
+        capability: 'media-generation',
+        operation: 'status',
+        handle: 'media-run-1',
+      }),
+    );
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(
+        String(input),
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'capability',
+        '--request',
+        requestPath,
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 0);
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.capability, 'media-generation');
+      assert.equal(body.handle, 'media-run-1');
+      assert.equal(body.operation, 'status');
+      assert.equal(body.quoteConfirmationToken, undefined);
+      assert.match(
+        String(body.operationId),
+        /^postplus-cli:media:media-generation:status:/u,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
