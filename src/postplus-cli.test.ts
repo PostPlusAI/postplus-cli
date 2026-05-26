@@ -1889,6 +1889,21 @@ describe('cloud auth handoff', () => {
     assert.equal(CLI_AUTH_LOGIN_TIMEOUT_MS, 30 * 60 * 1000);
   });
 
+  it('prints auth login help without starting browser sign-in', async () => {
+    const { stdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'auth',
+      'login',
+      '--help',
+    ]);
+
+    assert.match(stdout, /postplus auth login/u);
+    assert.doesNotMatch(stdout, /auth\/cli-login/u);
+    assert.doesNotMatch(stdout, /Waiting for browser sign-in/u);
+  });
+
   it('starts a cloud sign-in request without binding a local bridge', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
@@ -2645,7 +2660,7 @@ describe('skill management commands', () => {
   it('builds current-directory update and uninstall commands', () => {
     assert.equal(
       POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND,
-      "npx -y skills add PostPlusAI/postplus-skills --full-depth --skill '*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent --yes",
+      "for agent in claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent; do npx -y skills add PostPlusAI/postplus-skills --full-depth --skill '*' --agent \"$agent\" --yes; done",
     );
     assert.deepEqual(
       buildPostPlusSkillUpdateArgs(['a', 'b'], 'current-directory'),
@@ -2904,14 +2919,22 @@ describe('skill management commands', () => {
       const config = await readLocalConfig();
 
       assert.equal(exitCode, 0);
-      assert.equal(calls.length, 2);
+      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length * 2);
       assert.deepEqual(
         calls[0],
-        buildPostPlusSkillUpdateArgs(['demo-skill', 'new-skill']),
+        buildPostPlusSkillUpdateArgs(
+          ['demo-skill', 'new-skill'],
+          'global',
+          'claude-code',
+        ),
       );
       assert.deepEqual(
-        calls[1],
-        buildPostPlusSkillUninstallArgs(['retired-skill']),
+        calls[POSTPLUS_SKILLS_AGENT_TARGETS.length],
+        buildPostPlusSkillUninstallArgs(
+          ['retired-skill'],
+          'global',
+          'claude-code',
+        ),
       );
       assert.deepEqual(config?.managedSkills?.skillNames, [
         'demo-skill',
@@ -2959,9 +2982,15 @@ describe('skill management commands', () => {
       );
 
       assert.equal(exitCode, 0);
-      assert.deepEqual(calls, [
-        buildPostPlusSkillUpdateArgs(['demo-skill'], 'current-directory'),
-      ]);
+      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length);
+      assert.deepEqual(
+        calls[0],
+        buildPostPlusSkillUpdateArgs(
+          ['demo-skill'],
+          'current-directory',
+          'claude-code',
+        ),
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -3135,9 +3164,15 @@ describe('skill management commands', () => {
       const config = await readLocalConfig();
 
       assert.equal(exitCode, 0);
-      assert.deepEqual(calls, [
-        buildPostPlusSkillUninstallArgs(['demo-skill', 'retired-skill']),
-      ]);
+      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length);
+      assert.deepEqual(
+        calls[0],
+        buildPostPlusSkillUninstallArgs(
+          ['demo-skill', 'retired-skill'],
+          'global',
+          'claude-code',
+        ),
+      );
       assert.equal(config?.managedSkills, undefined);
     } finally {
       globalThis.fetch = originalFetch;
@@ -3184,12 +3219,15 @@ describe('skill management commands', () => {
       const config = await readLocalConfig();
 
       assert.equal(exitCode, 0);
-      assert.deepEqual(calls, [
+      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length);
+      assert.deepEqual(
+        calls[0],
         buildPostPlusSkillUninstallArgs(
           ['demo-skill', 'retired-skill'],
           'current-directory',
+          'claude-code',
         ),
-      ]);
+      );
       assert.equal(config?.managedSkills, undefined);
     } finally {
       globalThis.fetch = originalFetch;
@@ -3211,7 +3249,7 @@ describe('skill management commands', () => {
 
         assert.match(
           execError.stderr ?? '',
-          /npx -y skills add PostPlusAI\/postplus-skills --global --full-depth --skill '\*' --agent claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent --yes/,
+          /for agent in claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent; do npx -y skills add PostPlusAI\/postplus-skills --global --full-depth --skill '\*' --agent "\$agent" --yes; done/,
         );
         return true;
       },
@@ -3329,10 +3367,47 @@ describe('hosted domain commands', () => {
       ]);
       assert.match(stdout, new RegExp(`postplus ${domain} capability`, 'u'));
       assert.match(stdout, new RegExp(`postplus ${domain} schema`, 'u'));
+      if (domain === 'media') {
+        assert.match(stdout, /--endpoint <endpoint-key>/u);
+      }
     }
   });
 
   it('prints public hosted request schemas without requiring auth', async () => {
+    const { stdout: researchStdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'research',
+      'schema',
+      '--collection-key',
+      'youtube-channel-summary',
+      '--json',
+    ]);
+    const researchReport = JSON.parse(researchStdout) as Record<
+      string,
+      unknown
+    >;
+    assert.equal(researchReport.selectedCollectionKey, 'youtube-channel-summary');
+    assert.ok(
+      (researchReport.collectionKeys as string[]).includes(
+        'youtube-channel-summary',
+      ),
+    );
+    assert.deepEqual(
+      (
+        (
+          researchReport.examples as Record<string, unknown>
+        )['research.collection-envelope'] as Record<string, unknown>
+      ).input,
+      {
+        channels: ['@Google'],
+        includeChannelInfo: true,
+        includeVideos: false,
+        maxVideosPerChannel: 0,
+      },
+    );
+
     const { stdout } = await execFileAsync(process.execPath, [
       '--import',
       'tsx',
@@ -3359,9 +3434,37 @@ describe('hosted domain commands', () => {
     assert.equal(request.capability, 'media-generation');
     assert.equal(request.operation, 'request');
     assert.equal(request.endpointKey, 'video-seedance-2-text-turbo');
+    assert.equal(Object.hasOwn(request, 'skillName'), false);
     assert.deepEqual(request.requestDimensions, {
+      audioMode: 'on',
       billableUnitCount: 1,
+      duration: 5,
       operationKey: 'video-seedance-2-text-turbo',
+      referenceVideoCount: 0,
+      referenceVideoMode: 'without_reference_videos',
+      requestBytes: 93,
+      resolution: '720p',
+    });
+
+    const { stdout: publishStdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'publish',
+      'schema',
+      '--json',
+    ]);
+    const publishReport = JSON.parse(publishStdout) as Record<string, unknown>;
+    const publishExamples = publishReport.examples as Record<string, unknown>;
+    assert.deepEqual(publishExamples['social-publishing.create-post'], {
+      capability: 'social-publishing',
+      operation: 'create-post',
+      operationId: 'social-publishing:create-post:demo',
+      input: {
+        body: {
+          posts: [],
+        },
+      },
     });
   });
 
@@ -3387,6 +3490,33 @@ describe('hosted domain commands', () => {
           /Unknown media endpoint video-missing-provider/u,
         );
         assert.match(execError.stderr ?? '', /video-seedance-2-text-turbo/u);
+        return true;
+      },
+    );
+  });
+
+  it('rejects unknown hosted research schema collection keys', async () => {
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        '--import',
+        'tsx',
+        'src/index.ts',
+        'research',
+        'schema',
+        '--collection-key',
+        'instagram-missing-provider',
+        '--json',
+      ]),
+      (error) => {
+        const execError = error as Error & {
+          stderr?: string;
+        };
+
+        assert.match(
+          execError.stderr ?? '',
+          /Unknown research collection instagram-missing-provider/u,
+        );
+        assert.match(execError.stderr ?? '', /youtube-channel-summary/u);
         return true;
       },
     );
@@ -3420,6 +3550,7 @@ describe('hosted domain commands', () => {
         capability: 'media-generation',
         operation: 'status',
         handle: 'media-run-1',
+        skillName: 'video-batch-runner',
       }),
     );
     await setLocalSession({
@@ -3459,10 +3590,96 @@ describe('hosted domain commands', () => {
       assert.equal(body.capability, 'media-generation');
       assert.equal(body.handle, 'media-run-1');
       assert.equal(body.operation, 'status');
+      assert.equal(Object.hasOwn(body, 'skillName'), false);
       assert.equal(body.quoteConfirmationToken, undefined);
       assert.match(
         String(body.operationId),
         /^postplus-cli:media:media-generation:status:/u,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('writes quote confirmation challenges beside hosted command outputs', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    const outputPath = resolve(requestDir, 'result.json');
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 100_000,
+    });
+    await writeFile(
+      requestPath,
+      JSON.stringify({
+        capability: 'media-generation',
+        endpointKey: 'video-seedance-2-text-turbo',
+        input: {
+          duration: 5,
+          prompt: 'demo',
+          resolution: '720p',
+        },
+        operation: 'request',
+        operationId: 'operation-media-generation-large',
+        requestDimensions: {
+          billableUnitCount: 1,
+          duration: 5,
+          operationKey: 'video-seedance-2-text-turbo',
+          referenceVideoMode: 'without_reference_videos',
+          requestBytes: 128,
+          resolution: '720p',
+        },
+      }),
+    );
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          error: 'This request may reserve 100 credits and requires confirmation.',
+          productErrorCode: 'postplus_cli_quote_confirmation_required',
+          quoteConfirmation: challenge,
+        }),
+        {
+          status: 402,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'capability',
+            '--request',
+            requestPath,
+            '--output',
+            outputPath,
+          ]),
+        (error) => {
+          assert.match(
+            String((error as Error).message),
+            /Quote confirmation challenge:/u,
+          );
+          assert.match(
+            String((error as Error).message),
+            /--quote-confirmation-token <token>/u,
+          );
+          return true;
+        },
+      );
+      assert.deepEqual(
+        JSON.parse(await readFile(`${outputPath}.quote-confirmation.json`, 'utf8')),
+        challenge,
       );
     } finally {
       globalThis.fetch = originalFetch;

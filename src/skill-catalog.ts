@@ -105,7 +105,7 @@ export function formatPostPlusSkillsInstallCommand(
   scope: PostPlusSkillsInstallScope = 'global',
 ): string {
   const scopeArgs = scope === 'global' ? ' --global' : '';
-  return `npx -y skills add ${source}${scopeArgs} --full-depth --skill '*' --agent ${POSTPLUS_SKILLS_AGENT_ARGS} --yes`;
+  return `for agent in ${POSTPLUS_SKILLS_AGENT_ARGS}; do npx -y skills add ${source}${scopeArgs} --full-depth --skill '*' --agent "$agent" --yes; done`;
 }
 
 export function formatPostPlusSkillsListCommand(

@@ -1,11 +1,15 @@
+import { Buffer } from 'node:buffer';
+
 type HostedSchemaDomain = 'media' | 'mobile' | 'publish' | 'research';
 
 type HostedRequestSchemaReport = {
   schemaVersion: 1;
   domain: HostedSchemaDomain;
+  collectionKeys?: string[];
   command: string;
   description: string;
   endpointKeys?: string[];
+  selectedCollectionKey?: string;
   selectedEndpointKey?: string;
   notes: string[];
   schemas: Array<{
@@ -27,6 +31,112 @@ const OPERATION_ID_SCHEMA = {
   minLength: 1,
   type: 'string',
 } as const;
+
+const RESEARCH_COLLECTION_HINTS: Record<string, Record<string, unknown>> = {
+  'amazon-asins': {
+    asins: ['B0C1234567'],
+    country: 'US',
+  },
+  'amazon-bestsellers': {
+    categoryUrl: 'https://www.amazon.com/Best-Sellers/zgbs',
+    maxItems: 5,
+  },
+  'amazon-free-products': {
+    keyword: 'portable blender',
+    maxItems: 5,
+  },
+  'amazon-products': {
+    country: 'US',
+    keyword: 'portable blender',
+    maxItems: 5,
+  },
+  'amazon-reviews': {
+    asin: 'B0C1234567',
+    country: 'US',
+    maxReviews: 10,
+  },
+  'amazon-reviews-v2': {
+    asin: 'B0C1234567',
+    domainCode: 'com',
+    maxReviews: 10,
+  },
+  'google-trends-fast': {
+    queries: ['portable blender'],
+  },
+  'instagram-comments': {
+    directUrls: ['https://www.instagram.com/p/example/'],
+    resultsLimit: 5,
+  },
+  'instagram-email-search': {
+    Country: 'www',
+    Email_Type: '0',
+    Keyword: 'skincare creator',
+    Limit: '10',
+    social_network: 'instagram.com/',
+  },
+  'instagram-hashtags': {
+    hashtags: ['desksetup'],
+    resultsLimit: 3,
+  },
+  'instagram-posts': {
+    resultsLimit: 3,
+    username: ['openai'],
+  },
+  'instagram-profiles': {
+    resultsLimit: 3,
+    usernames: ['instagram'],
+  },
+  'instagram-search': {
+    searchLimit: 3,
+    searchTerms: ['skincare routine'],
+    searchType: 'user',
+  },
+  'tiktok-ads-top': {
+    include_analytics: true,
+    limit: 1,
+  },
+  'tiktok-comments': {
+    postURLs: ['https://www.tiktok.com/@example/video/1234567890'],
+    resultsPerPage: 5,
+  },
+  'tiktok-profiles': {
+    usernames: ['tiktok'],
+  },
+  'tiktok-related-videos': {
+    maxItems: 3,
+    postURLs: ['https://www.tiktok.com/@example/video/1234567890'],
+  },
+  'tiktok-users': {
+    maxItems: 5,
+    searchQueries: ['skincare creator'],
+  },
+  'tiktok-videos': {
+    maxItems: 3,
+    proxyCountryCode: 'US',
+    queries: ['portable blender'],
+    searchSection: '/video',
+  },
+  'youtube-channel-summary': {
+    channels: ['@Google'],
+    includeChannelInfo: true,
+    includeVideos: false,
+    maxVideosPerChannel: 0,
+  },
+  'youtube-comments': {
+    maxComments: 10,
+    startUrls: ['https://www.youtube.com/watch?v=dQw4w9WgXcQ'],
+  },
+  'youtube-video-download': {
+    urls: ['https://www.youtube.com/watch?v=dQw4w9WgXcQ'],
+  },
+  'x-posts': {
+    maxItems: 5,
+    searchTerms: ['product launch'],
+  },
+  'x-profiles': {
+    handles: ['OpenAI'],
+  },
+};
 
 const MEDIA_ENDPOINT_HINTS: Record<string, Record<string, unknown>> = {
   'transcription-whisper': {
@@ -115,12 +225,13 @@ const MEDIA_ENDPOINT_HINTS: Record<string, Record<string, unknown>> = {
 };
 
 export function buildHostedRequestSchemaReport(input: {
+  collectionKey?: string | null;
   domain: HostedSchemaDomain;
   endpointKey?: string | null;
 }): HostedRequestSchemaReport {
   switch (input.domain) {
     case 'research':
-      return buildResearchSchemaReport();
+      return buildResearchSchemaReport(input.collectionKey ?? null);
     case 'media':
       return buildMediaSchemaReport(input.endpointKey ?? null);
     case 'publish':
@@ -130,7 +241,24 @@ export function buildHostedRequestSchemaReport(input: {
   }
 }
 
-function buildResearchSchemaReport(): HostedRequestSchemaReport {
+function buildResearchSchemaReport(
+  collectionKey: string | null,
+): HostedRequestSchemaReport {
+  if (collectionKey && !RESEARCH_COLLECTION_HINTS[collectionKey]) {
+    throw new Error(
+      `Unknown research collection ${collectionKey}. Known collections: ${Object.keys(
+        RESEARCH_COLLECTION_HINTS,
+      ).join(', ')}`,
+    );
+  }
+
+  const collectionInput = collectionKey
+    ? RESEARCH_COLLECTION_HINTS[collectionKey]
+    : {
+        maxItems: 20,
+        query: 'electric toothbrush morning routine',
+      };
+
   return {
     schemaVersion: 1,
     domain: 'research',
@@ -138,6 +266,8 @@ function buildResearchSchemaReport(): HostedRequestSchemaReport {
       'postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> --output <result.json>',
     description:
       'Schema for the file passed to postplus research collect --input.',
+    collectionKeys: Object.keys(RESEARCH_COLLECTION_HINTS).sort(),
+    selectedCollectionKey: collectionKey ?? undefined,
     notes: [
       'The collection key stays in the CLI flag, not inside the JSON file.',
       'Put the skill-specific provider input under input.',
@@ -170,10 +300,7 @@ function buildResearchSchemaReport(): HostedRequestSchemaReport {
     examples: {
       'research.collection-envelope': {
         schemaVersion: 1,
-        input: {
-          maxItems: 20,
-          query: 'electric toothbrush morning routine',
-        },
+        input: collectionInput,
       },
     },
   };
@@ -196,6 +323,12 @@ function buildMediaSchemaReport(
         prompt: 'A realistic vertical short-form product reveal.',
       };
   const selectedEndpoint = endpointKey ?? '<endpoint-key>';
+  const requestDimensions = endpointKey
+    ? buildMediaGenerationRequestDimensions(endpointKey, endpointInput)
+    : {
+        billableUnitCount: 1,
+        operationKey: selectedEndpoint,
+      };
 
   return {
     schemaVersion: 1,
@@ -240,10 +373,6 @@ function buildMediaSchemaReport(
               type: 'string',
             },
             requestDimensions: JSON_OBJECT_SCHEMA,
-            skillName: {
-              minLength: 1,
-              type: 'string',
-            },
           },
           required: [
             'capability',
@@ -270,10 +399,6 @@ function buildMediaSchemaReport(
             },
             operation: { const: 'status' },
             operationId: OPERATION_ID_SCHEMA,
-            skillName: {
-              minLength: 1,
-              type: 'string',
-            },
           },
           required: ['capability', 'operation', 'operationId', 'handle'],
           type: 'object',
@@ -311,19 +436,14 @@ function buildMediaSchemaReport(
     ],
     examples: {
       'media-generation.request': {
-        skillName: 'video-batch-runner',
         capability: 'media-generation',
         operation: 'request',
         operationId: `media-generation:${selectedEndpoint}:demo`,
         endpointKey: selectedEndpoint,
         input: endpointInput,
-        requestDimensions: {
-          billableUnitCount: 1,
-          operationKey: selectedEndpoint,
-        },
+        requestDimensions,
       },
       'media-generation.status': {
-        skillName: 'video-batch-runner',
         capability: 'media-generation',
         operation: 'status',
         operationId: 'media-generation:status:demo',
@@ -341,6 +461,61 @@ function buildMediaSchemaReport(
       },
     },
   };
+}
+
+function buildMediaGenerationRequestDimensions(
+  endpointKey: string,
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  const dimensions: Record<string, unknown> = {
+    billableUnitCount: 1,
+    operationKey: endpointKey,
+  };
+
+  if (endpointKey.startsWith('video-')) {
+    const duration = readPositiveNumber(input.duration) ?? 5;
+    const resolution =
+      typeof input.resolution === 'string' && input.resolution.trim()
+        ? input.resolution.trim()
+        : '720p';
+
+    dimensions.audioMode =
+      endpointKey.startsWith('video-kling-v3-0-') && input.sound !== true
+        ? 'off'
+        : 'on';
+    dimensions.duration = Math.ceil(duration);
+    dimensions.requestBytes = Buffer.byteLength(JSON.stringify(input));
+    dimensions.resolution = resolution;
+
+    if (endpointKey.startsWith('video-seedance-2-')) {
+      const referenceVideoCount = Array.isArray(input.reference_videos)
+        ? input.reference_videos.length
+        : 0;
+      dimensions.referenceVideoCount = referenceVideoCount;
+      dimensions.referenceVideoMode =
+        referenceVideoCount > 0
+          ? 'with_reference_videos'
+          : 'without_reference_videos';
+    }
+
+    if (endpointKey === 'video-kling-v2-6-pro-motion-control') {
+      dimensions.characterOrientation =
+        typeof input.character_orientation === 'string'
+          ? input.character_orientation
+          : 'image';
+      dimensions.motionControlMode = 'reference_motion_transfer';
+    }
+  }
+
+  return dimensions;
+}
+
+function readPositiveNumber(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  return value;
 }
 
 function buildPublishSchemaReport(): HostedRequestSchemaReport {
@@ -389,10 +564,6 @@ function buildPublishSchemaReport(): HostedRequestSchemaReport {
               minLength: 1,
               type: 'string',
             },
-            skillName: {
-              minLength: 1,
-              type: 'string',
-            },
           },
           required: ['capability', 'operation', 'operationId', 'input'],
           type: 'object',
@@ -401,11 +572,20 @@ function buildPublishSchemaReport(): HostedRequestSchemaReport {
     ],
     examples: {
       'social-publishing.list-channels': {
-        skillName: 'social-media-publisher',
         capability: 'social-publishing',
         operation: 'list-channels',
         operationId: 'social-publishing:list-channels:demo',
         input: {},
+      },
+      'social-publishing.create-post': {
+        capability: 'social-publishing',
+        operation: 'create-post',
+        operationId: 'social-publishing:create-post:demo',
+        input: {
+          body: {
+            posts: [],
+          },
+        },
       },
     },
   };
@@ -460,10 +640,6 @@ function buildMobileSchemaReport(): HostedRequestSchemaReport {
               minLength: 1,
               type: 'string',
             },
-            skillName: {
-              minLength: 1,
-              type: 'string',
-            },
           },
           required: ['capability', 'operation', 'operationId', 'input'],
           type: 'object',
@@ -472,7 +648,6 @@ function buildMobileSchemaReport(): HostedRequestSchemaReport {
     ],
     examples: {
       'mobile-automation.list-cloud-phones': {
-        skillName: 'geelark-mobile-automation',
         capability: 'mobile-automation',
         operation: 'list-cloud-phones',
         operationId: 'mobile-automation:list-cloud-phones:demo',

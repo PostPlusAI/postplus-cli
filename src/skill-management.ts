@@ -81,23 +81,31 @@ export async function runPostPlusSkillUpdate(
     throw new Error('PostPlus public skill catalog has no released skills.');
   }
 
-  const updateExitCode = await dependencies.runInteractiveCommand(
-    'npx',
-    buildPostPlusSkillUpdateArgs(skillNames, options.scope),
-  );
+  for (const agentTarget of POSTPLUS_SKILLS_AGENT_TARGETS) {
+    const updateExitCode = await dependencies.runInteractiveCommand(
+      'npx',
+      buildPostPlusSkillUpdateArgs(skillNames, options.scope, agentTarget),
+    );
 
-  if (updateExitCode !== 0) {
-    return updateExitCode;
+    if (updateExitCode !== 0) {
+      return updateExitCode;
+    }
   }
 
   if (retiredSkillNames.length > 0) {
-    const removeExitCode = await dependencies.runInteractiveCommand(
-      'npx',
-      buildPostPlusSkillUninstallArgs(retiredSkillNames, options.scope),
-    );
+    for (const agentTarget of POSTPLUS_SKILLS_AGENT_TARGETS) {
+      const removeExitCode = await dependencies.runInteractiveCommand(
+        'npx',
+        buildPostPlusSkillUninstallArgs(
+          retiredSkillNames,
+          options.scope,
+          agentTarget,
+        ),
+      );
 
-    if (removeExitCode !== 0) {
-      return removeExitCode;
+      if (removeExitCode !== 0) {
+        return removeExitCode;
+      }
     }
   }
 
@@ -126,17 +134,25 @@ export async function runPostPlusSkillUninstall(
     throw new Error('PostPlus public skill catalog has no released skills.');
   }
 
-  const exitCode = await dependencies.runInteractiveCommand(
-    'npx',
-    buildPostPlusSkillUninstallArgs(allKnownSkillNames, options.scope),
-  );
+  for (const agentTarget of POSTPLUS_SKILLS_AGENT_TARGETS) {
+    const exitCode = await dependencies.runInteractiveCommand(
+      'npx',
+      buildPostPlusSkillUninstallArgs(
+        allKnownSkillNames,
+        options.scope,
+        agentTarget,
+      ),
+    );
 
-  if (exitCode === 0) {
-    await clearManagedSkillBaseline();
-    await clearUpdateCheckCache();
+    if (exitCode !== 0) {
+      return exitCode;
+    }
   }
 
-  return exitCode;
+  await clearManagedSkillBaseline();
+  await clearUpdateCheckCache();
+
+  return 0;
 }
 
 export async function generateSkillInstallStatusReport(
@@ -374,6 +390,7 @@ export function formatSkillBaselineVerifyReport(
 export function buildPostPlusSkillUpdateArgs(
   skillNames: string[],
   scope: PostPlusSkillsInstallScope = 'global',
+  agentTarget?: (typeof POSTPLUS_SKILLS_AGENT_TARGETS)[number],
 ): string[] {
   if (skillNames.length === 0) {
     throw new Error('PostPlus public skill catalog has no released skills.');
@@ -390,7 +407,7 @@ export function buildPostPlusSkillUpdateArgs(
     '--skill',
     '*',
     '--agent',
-    ...POSTPLUS_SKILLS_AGENT_TARGETS,
+    ...(agentTarget ? [agentTarget] : POSTPLUS_SKILLS_AGENT_TARGETS),
     '--yes',
   ];
 }
@@ -398,6 +415,7 @@ export function buildPostPlusSkillUpdateArgs(
 export function buildPostPlusSkillUninstallArgs(
   skillNames: string[],
   scope: PostPlusSkillsInstallScope = 'global',
+  agentTarget?: (typeof POSTPLUS_SKILLS_AGENT_TARGETS)[number],
 ): string[] {
   return [
     ...NPX_SKILLS,
@@ -405,7 +423,7 @@ export function buildPostPlusSkillUninstallArgs(
     ...skillNames,
     ...buildSkillScopeArgs(scope),
     '--agent',
-    ...POSTPLUS_SKILLS_AGENT_TARGETS,
+    ...(agentTarget ? [agentTarget] : POSTPLUS_SKILLS_AGENT_TARGETS),
     '--yes',
   ];
 }

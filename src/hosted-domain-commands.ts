@@ -8,6 +8,10 @@ import {
   formatPostPlusCompatibilityError,
 } from './client-compatibility.js';
 import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
+import {
+  type LargeCreditQuoteConfirmationChallenge,
+  readLargeCreditQuoteConfirmationChallenge,
+} from './quote-confirmation.js';
 
 type HostedDomain = 'media' | 'mobile' | 'publish' | 'research';
 
@@ -23,6 +27,16 @@ type HostedEnvelope = {
   quoteConfirmationToken?: unknown;
   schemaVersion?: unknown;
 };
+
+class HostedQuoteConfirmationRequiredError extends Error {
+  constructor(
+    message: string,
+    readonly challenge: LargeCreditQuoteConfirmationChallenge,
+  ) {
+    super(message);
+    this.name = 'HostedQuoteConfirmationRequiredError';
+  }
+}
 
 const HOSTED_DOMAIN_CAPABILITIES: Record<
   Exclude<HostedDomain, 'research'>,
@@ -100,7 +114,12 @@ async function runResearchCollect(args: string[]): Promise<number> {
     },
     pathName: '/api/postplus-cli/hosted/collection',
     skillName,
-  });
+  }).catch((error: unknown) =>
+    buildHostedCommandError(error, {
+      inputPath,
+      outputPath,
+    }),
+  );
 
   await writeResult(payload, outputPath, flags.booleans.has('json'));
   return 0;
@@ -111,7 +130,12 @@ async function runHostedSchema(
   args: string[],
 ): Promise<number> {
   const flags = parseFlags(args, new Set(['json']));
-  const allowedFlags = new Set(['endpoint']);
+  const allowedFlags =
+    domain === 'media'
+      ? new Set(['endpoint'])
+      : domain === 'research'
+        ? new Set(['collection-key'])
+        : new Set<string>();
 
   for (const key of flags.values.keys()) {
     if (!allowedFlags.has(key)) {
@@ -121,6 +145,7 @@ async function runHostedSchema(
 
   writeJson(
     buildHostedRequestSchemaReport({
+      collectionKey: flags.values.get('collection-key') ?? null,
       domain,
       endpointKey: flags.values.get('endpoint') ?? null,
     }),
@@ -151,8 +176,10 @@ async function runHostedCapability(
   const quoteConfirmationToken =
     flags.values.get('quote-confirmation-token') ??
     normalizeString(record.quoteConfirmationToken);
+  const publicRecord = { ...record };
+  delete publicRecord.skillName;
   const body = {
-    ...record,
+    ...publicRecord,
     capability,
     operation,
     operationId,
@@ -163,7 +190,12 @@ async function runHostedCapability(
     body,
     pathName: '/api/postplus-cli/hosted/capability',
     skillName,
-  });
+  }).catch((error: unknown) =>
+    buildHostedCommandError(error, {
+      inputPath: requestPath,
+      outputPath,
+    }),
+  );
 
   await writeResult(payload, outputPath, flags.booleans.has('json'));
   return 0;
@@ -196,6 +228,14 @@ async function postHostedJson(input: {
 
   const payload = await readJsonResponse(response);
   if (!response.ok) {
+    const challenge = readLargeCreditQuoteConfirmationChallenge(payload);
+    if (challenge) {
+      throw new HostedQuoteConfirmationRequiredError(
+        readProductError(payload),
+        challenge,
+      );
+    }
+
     const compatibilityError = formatPostPlusCompatibilityError(payload);
     if (compatibilityError) {
       throw new Error(compatibilityError);
@@ -204,6 +244,42 @@ async function postHostedJson(input: {
   }
 
   return payload;
+}
+
+async function buildHostedCommandError(
+  error: unknown,
+  input: {
+    inputPath: string;
+    outputPath: string | null;
+  },
+): Promise<never> {
+  if (!(error instanceof HostedQuoteConfirmationRequiredError)) {
+    throw error;
+  }
+
+  const challengePath = path.resolve(
+    input.outputPath
+      ? `${input.outputPath}.quote-confirmation.json`
+      : `${input.inputPath}.quote-confirmation.json`,
+  );
+  await mkdir(path.dirname(challengePath), { recursive: true });
+  await writeFile(
+    challengePath,
+    `${JSON.stringify(error.challenge, null, 2)}\n`,
+    {
+      encoding: 'utf8',
+      mode: 0o600,
+    },
+  );
+
+  throw new Error(
+    [
+      error.message,
+      `Quote confirmation challenge: ${challengePath}`,
+      `Confirm: postplus quote confirm --json --challenge-file "${challengePath}"`,
+      'Then rerun the hosted command with --quote-confirmation-token <token>.',
+    ].join('\n'),
+  );
 }
 
 async function postJson(input: {
@@ -367,7 +443,7 @@ function printResearchHelp(): void {
   process.stdout.write(`PostPlus CLI - research commands
 
 Usage:
-  postplus research schema [--json]
+  postplus research schema [--collection-key <key>] [--json]
   postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> [--output <result.json>]
   postplus research collect --run-handle <runHandle> [--output <result.json>]
 `);
@@ -377,7 +453,7 @@ function printCapabilityHelp(domain: Exclude<HostedDomain, 'research'>): void {
   process.stdout.write(`PostPlus CLI - ${domain} commands
 
 Usage:
-  postplus ${domain} schema [--json]
+  postplus ${domain} schema${domain === 'media' ? ' [--endpoint <endpoint-key>]' : ''} [--json]
   postplus ${domain} capability --request <hosted-capability-request.json> [--output <result.json>]
 `);
 }

@@ -74,7 +74,7 @@ Usage:
   postplus auth validate [--json]
   postplus auth logout [--json]
   postplus doctor [--skill <skill-id>] [--json]
-  postplus research schema [--json]
+  postplus research schema [--collection-key <key>] [--json]
   postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> [--output <result.json>]
   postplus media schema [--endpoint <endpoint-key>] [--json]
   postplus media capability --request <hosted-capability-request.json> [--output <result.json>]
@@ -327,6 +327,10 @@ function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+function isHelpArg(value: string): boolean {
+  return value === 'help' || value === '--help' || value === '-h';
+}
+
 function parseDiagnosticOptions(args: string[]): DiagnosticCommandOptions {
   const options: DiagnosticCommandOptions = {
     json: false,
@@ -508,6 +512,17 @@ async function main(): Promise<void> {
       const [subcommand, ...authRest] = rest;
       switch (subcommand) {
         case 'login':
+          if (authRest.some(isHelpArg)) {
+            printAuthHelp();
+            process.exitCode = 0;
+            return;
+          }
+          if (authRest.length > 0) {
+            process.stderr.write(`Unknown auth login option: ${authRest[0]}\n\n`);
+            printAuthHelp();
+            process.exitCode = 1;
+            return;
+          }
           process.exitCode = await runAuthLogin();
           return;
         case 'refresh':

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { constants } from 'node:fs';
 import { access, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,6 +28,15 @@ async function assertPathExists(targetPath, message) {
   } catch {
     throw new Error(message);
   }
+}
+
+async function assertPathMissing(targetPath, message) {
+  try {
+    await access(targetPath);
+  } catch {
+    return;
+  }
+  throw new Error(message);
 }
 
 function createIsolatedNpxEnv(tempRoot) {
@@ -77,9 +87,24 @@ async function run(command, args, options = {}) {
 }
 
 await assertPathExists(
-  path.resolve(skillsRepoRoot, 'skills', 'INDEX.md'),
-  `PostPlus skills checkout is missing skills/INDEX.md: ${skillsRepoRoot}`,
+  path.resolve(skillsRepoRoot, 'skills', 'catalog.json'),
+  `PostPlus skills checkout is missing skills/catalog.json: ${skillsRepoRoot}`,
 );
+await assertPathMissing(
+  path.resolve(skillsRepoRoot, 'skills', 'INDEX.md'),
+  `PostPlus skills checkout must not publish skills/INDEX.md: ${skillsRepoRoot}`,
+);
+await assertPathExists(
+  path.resolve(repoRoot, 'build', 'index.js'),
+  'PostPlus CLI build is missing build/index.js. Run pnpm build before acceptance.',
+);
+try {
+  await access(path.resolve(repoRoot, 'build', 'index.js'), constants.X_OK);
+} catch {
+  throw new Error(
+    'PostPlus CLI build/index.js must be executable because package.json exposes it as the postplus bin.',
+  );
+}
 
 const tempRoot = await mkdtemp(
   path.join(os.tmpdir(), 'postplus-cli-acceptance-'),
@@ -89,9 +114,13 @@ try {
   await mkdir(path.join(tempRoot, 'home'), { recursive: true });
   await mkdir(path.join(tempRoot, 'npm-cache'), { recursive: true });
   await mkdir(path.join(tempRoot, 'npm-prefix', 'lib'), { recursive: true });
-  await run('npx', ['-y', 'skills', 'add', skillsRepoRoot, '--list'], {
-    env: createIsolatedNpxEnv(tempRoot),
-  });
+  await run(
+    'npx',
+    ['-y', 'skills', 'add', skillsRepoRoot, '--list', '--full-depth'],
+    {
+      env: createIsolatedNpxEnv(tempRoot),
+    },
+  );
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }

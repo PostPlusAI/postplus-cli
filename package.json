@@ -44,7 +44,7 @@
     "postplus": "build/index.js"
   },
   "scripts": {
-    "build": "node ./scripts/clean-build.mjs && tsc",
+    "build": "node ./scripts/clean-build.mjs && tsc && node ./scripts/finalize-build.mjs",
     "clean": "rm -rf .turbo node_modules build",
     "release:package": "node ./scripts/package-release.mjs",
     "start": "tsx src/index.ts",
