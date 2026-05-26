@@ -3317,6 +3317,7 @@ describe('hosted domain commands', () => {
       'help',
     ]);
     assert.match(researchHelp, /postplus research collect/u);
+    assert.match(researchHelp, /postplus research schema/u);
 
     for (const domain of ['media', 'publish', 'mobile']) {
       const { stdout } = await execFileAsync(process.execPath, [
@@ -3327,7 +3328,68 @@ describe('hosted domain commands', () => {
         'help',
       ]);
       assert.match(stdout, new RegExp(`postplus ${domain} capability`, 'u'));
+      assert.match(stdout, new RegExp(`postplus ${domain} schema`, 'u'));
     }
+  });
+
+  it('prints public hosted request schemas without requiring auth', async () => {
+    const { stdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'media',
+      'schema',
+      '--endpoint',
+      'video-seedance-2-text-turbo',
+      '--json',
+    ]);
+    const report = JSON.parse(stdout) as Record<string, unknown>;
+
+    assert.equal(report.schemaVersion, 1);
+    assert.equal(report.domain, 'media');
+    assert.match(String(report.command), /postplus media capability/u);
+    assert.ok(
+      (report.endpointKeys as string[]).includes('video-seedance-2-text-turbo'),
+    );
+
+    const examples = report.examples as Record<string, unknown>;
+    const request = examples[
+      'media-generation.request'
+    ] as Record<string, unknown>;
+    assert.equal(request.capability, 'media-generation');
+    assert.equal(request.operation, 'request');
+    assert.equal(request.endpointKey, 'video-seedance-2-text-turbo');
+    assert.deepEqual(request.requestDimensions, {
+      billableUnitCount: 1,
+      operationKey: 'video-seedance-2-text-turbo',
+    });
+  });
+
+  it('rejects unknown hosted media schema endpoints', async () => {
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        '--import',
+        'tsx',
+        'src/index.ts',
+        'media',
+        'schema',
+        '--endpoint',
+        'video-missing-provider',
+        '--json',
+      ]),
+      (error) => {
+        const execError = error as Error & {
+          stderr?: string;
+        };
+
+        assert.match(
+          execError.stderr ?? '',
+          /Unknown media endpoint video-missing-provider/u,
+        );
+        assert.match(execError.stderr ?? '', /video-seedance-2-text-turbo/u);
+        return true;
+      },
+    );
   });
 
   it('fails fast when hosted capability request files omit capability fields', async () => {

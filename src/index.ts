@@ -74,9 +74,13 @@ Usage:
   postplus auth validate [--json]
   postplus auth logout [--json]
   postplus doctor [--skill <skill-id>] [--json]
+  postplus research schema [--json]
   postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> [--output <result.json>]
+  postplus media schema [--endpoint <endpoint-key>] [--json]
   postplus media capability --request <hosted-capability-request.json> [--output <result.json>]
+  postplus publish schema [--json]
   postplus publish capability --request <hosted-capability-request.json> [--output <result.json>]
+  postplus mobile schema [--json]
   postplus mobile capability --request <hosted-capability-request.json> [--output <result.json>]
   postplus quote confirm --json --challenge-file <path>
   postplus skills verify [--json]

@@ -7,6 +7,7 @@ import {
   buildPostPlusClientCompatibilityHeaders,
   formatPostPlusCompatibilityError,
 } from './client-compatibility.js';
+import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 
 type HostedDomain = 'media' | 'mobile' | 'publish' | 'research';
 
@@ -39,11 +40,18 @@ export async function runHostedDomainCommand(
   const [subcommand, ...rest] = args;
 
   if (domain === 'research') {
+    if (subcommand === 'schema') {
+      return runHostedSchema(domain, rest);
+    }
     if (subcommand === 'collect') {
       return runResearchCollect(rest);
     }
     printResearchHelp();
     return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+  }
+
+  if (subcommand === 'schema') {
+    return runHostedSchema(domain, rest);
   }
 
   if (subcommand === 'capability') {
@@ -95,6 +103,28 @@ async function runResearchCollect(args: string[]): Promise<number> {
   });
 
   await writeResult(payload, outputPath, flags.booleans.has('json'));
+  return 0;
+}
+
+async function runHostedSchema(
+  domain: HostedDomain,
+  args: string[],
+): Promise<number> {
+  const flags = parseFlags(args, new Set(['json']));
+  const allowedFlags = new Set(['endpoint']);
+
+  for (const key of flags.values.keys()) {
+    if (!allowedFlags.has(key)) {
+      throw new Error(`Unknown option for ${domain} schema: --${key}.`);
+    }
+  }
+
+  writeJson(
+    buildHostedRequestSchemaReport({
+      domain,
+      endpointKey: flags.values.get('endpoint') ?? null,
+    }),
+  );
   return 0;
 }
 
@@ -337,6 +367,7 @@ function printResearchHelp(): void {
   process.stdout.write(`PostPlus CLI - research commands
 
 Usage:
+  postplus research schema [--json]
   postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> [--output <result.json>]
   postplus research collect --run-handle <runHandle> [--output <result.json>]
 `);
@@ -346,6 +377,11 @@ function printCapabilityHelp(domain: Exclude<HostedDomain, 'research'>): void {
   process.stdout.write(`PostPlus CLI - ${domain} commands
 
 Usage:
+  postplus ${domain} schema [--json]
   postplus ${domain} capability --request <hosted-capability-request.json> [--output <result.json>]
 `);
+}
+
+function writeJson(value: unknown): void {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }

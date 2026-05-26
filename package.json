@@ -17,6 +17,7 @@
     "build/doctor.js",
     "build/hosted-domain-commands.js",
     "build/hosted-release.js",
+    "build/hosted-request-schemas.js",
     "build/index.js",
     "build/local-dependencies.js",
     "build/local-state.js",
