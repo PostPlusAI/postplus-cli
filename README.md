@@ -231,6 +231,7 @@ Example requests:
 "Generate a storyboard for a 15-second hook."
 "Transcribe this video, create subtitles, and suggest B-roll placements."
 "Prepare provider-ready image or video generation requests."
+"Turn this product into a UGC-style video workflow with image, voice, clip, montage, and QA handoffs."
 ```
 
 Typical outputs:
@@ -240,6 +241,7 @@ Typical outputs:
 - hook and pattern breakdowns
 - storyboards and prompt requests
 - B-roll plans and edit-ready packages
+- image, video, audio, and UGC workflow controller handoffs
 - generated media candidates and manifests
 
 ### Strategy, Copy, SEO, and Growth
