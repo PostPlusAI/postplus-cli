@@ -264,6 +264,19 @@ export const MEDIA_ENDPOINT_HINTS: Record<string, Record<string, unknown>> = {
     prompt: 'A realistic vertical short-form product reveal.',
     sound: false,
   },
+  'video-wanx2-1-i2v-turbo': {
+    aspect_ratio: '9:16',
+    duration: 5,
+    image: 'https://example.com/start-frame.png',
+    prompt: 'A realistic vertical short-form product reveal.',
+    resolution: '720p',
+  },
+  'video-wanx2-1-t2v-turbo': {
+    aspect_ratio: '9:16',
+    duration: 5,
+    prompt: 'A realistic vertical short-form product reveal.',
+    resolution: '720p',
+  },
   'video-seedance-2-image': {
     duration: 5,
     image: 'https://example.com/start-frame.png',
