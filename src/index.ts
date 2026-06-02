@@ -22,6 +22,10 @@ import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import { runHostedDomainCommand } from './hosted-domain-commands.js';
 import { assertConfigFilePermissions } from './local-state.js';
 import {
+  QUOTE_AUTO_CONFIRM_UNDER_ENV,
+  QuoteAutoConfirmCeilingExceededError,
+  QuoteConfirmationNonInteractiveError,
+  confirmLargeCreditQuote,
   readLargeCreditQuoteConfirmationChallenge,
   resolveLargeCreditQuoteConfirmation,
 } from './quote-confirmation.js';
@@ -82,7 +86,7 @@ Usage:
   postplus publish capability --request <hosted-capability-request.json> [--output <result.json>]
   postplus mobile schema [--json]
   postplus mobile capability --request <hosted-capability-request.json> [--output <result.json>]
-  postplus quote confirm --json --challenge-file <path>
+  postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <millicredits>]
   postplus skills verify [--json]
   postplus studio init|open|status   Open bundled Local Studio
   postplus update [--current-directory]
@@ -284,15 +288,65 @@ async function runQuoteCommand(rest: string[]): Promise<number> {
     return 1;
   }
 
-  writeJson(await resolveLargeCreditQuoteConfirmation(challenge));
+  const ceilingMillicredits = resolveQuoteAutoConfirmCeiling(parsed.autoConfirmUnder);
+
+  try {
+    writeJson(
+      await resolveLargeCreditQuoteConfirmation(challenge, {
+        confirm: confirmLargeCreditQuote,
+        ceilingMillicredits,
+      }),
+    );
+  } catch (error) {
+    if (
+      error instanceof QuoteAutoConfirmCeilingExceededError ||
+      error instanceof QuoteConfirmationNonInteractiveError
+    ) {
+      process.stderr.write(`${error.message}\n`);
+      return 1;
+    }
+
+    throw error;
+  }
+
   return 0;
 }
 
+/**
+ * Resolves the bounded auto-confirm ceiling in millicredits. Precedence:
+ * explicit --auto-confirm-under flag, then the
+ * POSTPLUS_QUOTE_AUTO_CONFIRM_UNDER_MILLICREDITS env var. Returns null when
+ * neither is set, leaving today's interactive behavior unchanged.
+ */
+function resolveQuoteAutoConfirmCeiling(
+  flagValue: number | null,
+): number | null {
+  if (flagValue !== null) {
+    return flagValue;
+  }
+
+  const envValue = process.env[QUOTE_AUTO_CONFIRM_UNDER_ENV];
+  if (envValue === undefined || envValue.trim() === '') {
+    return null;
+  }
+
+  const parsed = Number(envValue);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(
+      `Invalid ${QUOTE_AUTO_CONFIRM_UNDER_ENV}: expected a non-negative number of millicredits.`,
+    );
+  }
+
+  return parsed;
+}
+
 function parseQuoteConfirmOptions(args: string[]): {
+  autoConfirmUnder: number | null;
   challengeFile: string | null;
   json: boolean;
 } {
   const options = {
+    autoConfirmUnder: null as number | null,
     challengeFile: null as string | null,
     json: false,
   };
@@ -313,6 +367,25 @@ function parseQuoteConfirmOptions(args: string[]): {
       }
 
       options.challengeFile = challengeFile;
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--auto-confirm-under') {
+      const rawValue = args[index + 1];
+
+      if (!rawValue || rawValue.startsWith('--')) {
+        throw new Error('Missing value for --auto-confirm-under.');
+      }
+
+      const value = Number(rawValue);
+      if (!Number.isFinite(value) || value < 0) {
+        throw new Error(
+          'Invalid value for --auto-confirm-under: expected a non-negative number of millicredits.',
+        );
+      }
+
+      options.autoConfirmUnder = value;
       index += 1;
       continue;
     }

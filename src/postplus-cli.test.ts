@@ -36,6 +36,8 @@ import {
   writeManagedSkillBaseline,
 } from './local-state.js';
 import {
+  QuoteAutoConfirmCeilingExceededError,
+  QuoteConfirmationNonInteractiveError,
   buildLargeCreditConfirmationPrompt,
   readLargeCreditQuoteConfirmationChallenge,
   resolveLargeCreditQuoteConfirmation,
@@ -2514,6 +2516,7 @@ describe('skill management commands', () => {
         confirm: async () => {
           promptCount += 1;
         },
+        isTty: () => true,
       },
     );
 
@@ -2526,6 +2529,7 @@ describe('skill management commands', () => {
         confirm: async () => {
           promptCount += 1;
         },
+        isTty: () => true,
       },
     );
 
@@ -2538,6 +2542,7 @@ describe('skill management commands', () => {
         confirm: async () => {
           promptCount += 1;
         },
+        isTty: () => true,
       },
     );
 
@@ -2550,6 +2555,120 @@ describe('skill management commands', () => {
         ?.acknowledgedTierMillicreditsByAccountId?.['account-1'],
       300_000,
     );
+  });
+
+  it('auto-confirms under the ceiling without prompting and caches the tier', async () => {
+    let promptCount = 0;
+    const notices: string[] = [];
+
+    const report = await resolveLargeCreditQuoteConfirmation(
+      buildLargeCreditChallenge({ requiredTierMillicredits: 100_000 }),
+      {
+        confirm: async () => {
+          promptCount += 1;
+        },
+        ceilingMillicredits: 300_000,
+        isTty: () => false,
+        now: () => new Date('2026-06-02T00:00:00.000Z'),
+        logNotice: (line) => {
+          notices.push(line);
+        },
+      },
+    );
+
+    assert.deepEqual(report, { schemaVersion: 1, token: 'token-100000' });
+    assert.equal(promptCount, 0);
+    assert.equal(notices.length, 1);
+
+    const notice = JSON.parse(notices[0]);
+    assert.equal(notice.event, 'quote_auto_confirm');
+    assert.equal(notice.costMillicredits, 288_000);
+    assert.equal(notice.ceilingMillicredits, 300_000);
+
+    const config = await readLocalConfig();
+    assert.equal(
+      config?.largeCreditConfirmation
+        ?.acknowledgedTierMillicreditsByAccountId?.['account-1'],
+      100_000,
+    );
+  });
+
+  it('throws a distinct error when the cost exceeds the auto-confirm ceiling', async () => {
+    let promptCount = 0;
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 300_000,
+    });
+
+    await assert.rejects(
+      resolveLargeCreditQuoteConfirmation(challenge, {
+        confirm: async () => {
+          promptCount += 1;
+        },
+        ceilingMillicredits: 100_000,
+        isTty: () => false,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof QuoteAutoConfirmCeilingExceededError);
+        assert.equal(
+          error.code,
+          'postplus_cli_quote_auto_confirm_ceiling_exceeded',
+        );
+        assert.equal(error.costMillicredits, 288_000);
+        assert.equal(error.ceilingMillicredits, 100_000);
+        assert.deepEqual(error.challenge, challenge);
+        return true;
+      },
+    );
+
+    assert.equal(promptCount, 0);
+
+    const config = await readLocalConfig();
+    assert.equal(
+      config?.largeCreditConfirmation
+        ?.acknowledgedTierMillicreditsByAccountId?.['account-1'],
+      undefined,
+    );
+  });
+
+  it('fails fast without hanging when no ceiling is set and stdin is not a TTY', async () => {
+    let promptCount = 0;
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 100_000,
+    });
+
+    await assert.rejects(
+      resolveLargeCreditQuoteConfirmation(challenge, {
+        confirm: async () => {
+          promptCount += 1;
+        },
+        isTty: () => false,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof QuoteConfirmationNonInteractiveError);
+        assert.match(error.message, /--auto-confirm-under/u);
+        assert.deepEqual(error.challenge, challenge);
+        return true;
+      },
+    );
+
+    assert.equal(promptCount, 0);
+  });
+
+  it('still prompts interactively when a TTY is present and no ceiling is set', async () => {
+    let promptCount = 0;
+
+    const report = await resolveLargeCreditQuoteConfirmation(
+      buildLargeCreditChallenge({ requiredTierMillicredits: 100_000 }),
+      {
+        confirm: async () => {
+          promptCount += 1;
+        },
+        isTty: () => true,
+      },
+    );
+
+    assert.deepEqual(report, { schemaVersion: 1, token: 'token-100000' });
+    assert.equal(promptCount, 1);
   });
 
   it('formats large credit quote confirmation prompts with public labels', () => {

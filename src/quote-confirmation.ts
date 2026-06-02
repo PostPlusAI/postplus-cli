@@ -4,6 +4,61 @@ import { readLocalConfig, updateLocalConfig } from './local-state.js';
 
 const PRODUCT_ERROR_CODE = 'postplus_cli_quote_confirmation_required';
 
+export const QUOTE_AUTO_CONFIRM_CEILING_EXCEEDED_CODE =
+  'postplus_cli_quote_auto_confirm_ceiling_exceeded';
+
+export const QUOTE_AUTO_CONFIRM_UNDER_ENV =
+  'POSTPLUS_QUOTE_AUTO_CONFIRM_UNDER_MILLICREDITS';
+
+/**
+ * Thrown when a bounded auto-confirm ceiling is configured but the challenge
+ * cost exceeds it. Carries the original challenge so an orchestrator or human
+ * can confirm explicitly instead of the CLI hanging on a readline prompt.
+ */
+export class QuoteAutoConfirmCeilingExceededError extends Error {
+  readonly code = QUOTE_AUTO_CONFIRM_CEILING_EXCEEDED_CODE;
+  readonly challenge: LargeCreditQuoteConfirmationChallenge;
+  readonly ceilingMillicredits: number;
+  readonly costMillicredits: number;
+
+  constructor(input: {
+    challenge: LargeCreditQuoteConfirmationChallenge;
+    ceilingMillicredits: number;
+    costMillicredits: number;
+  }) {
+    super(
+      `Quote cost ${input.costMillicredits} millicredits exceeds the ` +
+        `auto-confirm ceiling of ${input.ceilingMillicredits} millicredits. ` +
+        'Confirm explicitly or raise --auto-confirm-under / ' +
+        `${QUOTE_AUTO_CONFIRM_UNDER_ENV}.`,
+    );
+    this.name = 'QuoteAutoConfirmCeilingExceededError';
+    this.challenge = input.challenge;
+    this.ceilingMillicredits = input.ceilingMillicredits;
+    this.costMillicredits = input.costMillicredits;
+  }
+}
+
+/**
+ * Thrown when no auto-confirm ceiling is configured and stdin is not a TTY, so
+ * the interactive readline prompt would hang. Fails fast with an actionable
+ * message instead.
+ */
+export class QuoteConfirmationNonInteractiveError extends Error {
+  readonly code = 'postplus_cli_quote_confirmation_non_interactive';
+  readonly challenge: LargeCreditQuoteConfirmationChallenge;
+
+  constructor(challenge: LargeCreditQuoteConfirmationChallenge) {
+    super(
+      'Quote confirmation required but stdin is not a TTY and no auto-confirm ' +
+        'ceiling is configured. Pass --auto-confirm-under <millicredits>, set ' +
+        `${QUOTE_AUTO_CONFIRM_UNDER_ENV}, or run interactively.`,
+    );
+    this.name = 'QuoteConfirmationNonInteractiveError';
+    this.challenge = challenge;
+  }
+}
+
 export type LargeCreditQuoteConfirmationChallenge = {
   action: string;
   accountId: string;
@@ -33,7 +88,27 @@ export type LargeCreditQuoteConfirmationReport = {
 
 type ConfirmationDependencies = {
   confirm: (challenge: LargeCreditQuoteConfirmationChallenge) => Promise<void>;
+  /**
+   * Bounded auto-confirm ceiling in millicredits. When set, challenges whose
+   * cost is at or below the ceiling are confirmed without a readline prompt;
+   * challenges above it throw {@link QuoteAutoConfirmCeilingExceededError}.
+   */
+  ceilingMillicredits?: number | null;
+  /** Whether stdin is a TTY. Defaults to `process.stdin.isTTY`. */
+  isTty?: () => boolean;
+  /** Clock for the auto-confirm notice timestamp. Defaults to `Date`. */
+  now?: () => Date;
+  /** Sink for the one-line auto-confirm notice. Defaults to stderr. */
+  logNotice?: (line: string) => void;
 };
+
+function resolveChallengeCostMillicredits(
+  challenge: LargeCreditQuoteConfirmationChallenge,
+): number {
+  return typeof challenge.estimatedMillicredits === 'number'
+    ? challenge.estimatedMillicredits
+    : challenge.requiredTierMillicredits;
+}
 
 export function readLargeCreditQuoteConfirmationChallenge(
   value: unknown,
@@ -109,7 +184,7 @@ export async function resolveLargeCreditQuoteConfirmation(
     await readAcknowledgedTierMillicredits(challenge);
 
   if (acknowledgedTierMillicredits < challenge.requiredTierMillicredits) {
-    await dependencies.confirm(challenge);
+    await runQuoteConfirmation(challenge, dependencies);
     await writeAcknowledgedTierMillicredits(challenge);
   }
 
@@ -117,6 +192,51 @@ export async function resolveLargeCreditQuoteConfirmation(
     schemaVersion: 1,
     token: challenge.token,
   };
+}
+
+async function runQuoteConfirmation(
+  challenge: LargeCreditQuoteConfirmationChallenge,
+  dependencies: ConfirmationDependencies,
+): Promise<void> {
+  const ceiling = dependencies.ceilingMillicredits;
+
+  if (typeof ceiling === 'number' && Number.isFinite(ceiling)) {
+    const cost = resolveChallengeCostMillicredits(challenge);
+
+    if (cost > ceiling) {
+      throw new QuoteAutoConfirmCeilingExceededError({
+        challenge,
+        ceilingMillicredits: ceiling,
+        costMillicredits: cost,
+      });
+    }
+
+    const log = dependencies.logNotice ?? defaultLogNotice;
+    const now = (dependencies.now ?? (() => new Date()))();
+    log(
+      JSON.stringify({
+        event: 'quote_auto_confirm',
+        timestamp: now.toISOString(),
+        accountId: challenge.accountId,
+        operationId: challenge.operationId,
+        costMillicredits: cost,
+        ceilingMillicredits: ceiling,
+        requiredTierMillicredits: challenge.requiredTierMillicredits,
+      }),
+    );
+    return;
+  }
+
+  const isTty = dependencies.isTty ?? (() => Boolean(process.stdin.isTTY));
+  if (!isTty()) {
+    throw new QuoteConfirmationNonInteractiveError(challenge);
+  }
+
+  await dependencies.confirm(challenge);
+}
+
+function defaultLogNotice(line: string): void {
+  process.stderr.write(`${line}\n`);
 }
 
 export async function confirmLargeCreditQuote(
