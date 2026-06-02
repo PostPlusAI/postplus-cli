@@ -2,33 +2,6 @@
 // Keep keys in sync with apps/web hosted capability and collection catalogs.
 
 export const RESEARCH_COLLECTION_HINTS: Record<string, Record<string, unknown>> = {
-  'amazon-asins': {
-    asins: ['B0C1234567'],
-    country: 'US',
-  },
-  'amazon-bestsellers': {
-    categoryUrl: 'https://www.amazon.com/Best-Sellers/zgbs',
-    maxItems: 5,
-  },
-  'amazon-free-products': {
-    keyword: 'portable blender',
-    maxItems: 5,
-  },
-  'amazon-products': {
-    country: 'US',
-    keyword: 'portable blender',
-    maxItems: 5,
-  },
-  'amazon-reviews': {
-    asin: 'B0C1234567',
-    country: 'US',
-    maxReviews: 10,
-  },
-  'amazon-reviews-v2': {
-    asin: 'B0C1234567',
-    domainCode: 'com',
-    maxReviews: 10,
-  },
   'google-trends-fast': {
     queries: ['portable blender'],
   },
@@ -97,13 +70,6 @@ export const RESEARCH_COLLECTION_HINTS: Record<string, Record<string, unknown>> 
   },
   'youtube-video-download': {
     urls: ['https://www.youtube.com/watch?v=dQw4w9WgXcQ'],
-  },
-  'x-posts': {
-    maxItems: 5,
-    searchTerms: ['product launch'],
-  },
-  'x-profiles': {
-    handles: ['OpenAI'],
   },
 } as const;
 
