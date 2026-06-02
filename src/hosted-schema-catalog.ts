@@ -3,7 +3,10 @@
 
 export const RESEARCH_COLLECTION_HINTS: Record<string, Record<string, unknown>> = {
   'google-trends-fast': {
-    queries: ['portable blender'],
+    enableTrendingSearches: false,
+    geo: 'US',
+    keyword: 'portable blender',
+    timeframe: 'today 12-m',
   },
   'instagram-comments': {
     directUrls: ['https://www.instagram.com/p/example/'],
