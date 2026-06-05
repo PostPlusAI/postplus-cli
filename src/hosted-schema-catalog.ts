@@ -1,13 +1,14 @@
 // Generated from the PostPlus Cloud hosted catalog release gate.
 // Keep keys in sync with apps/web hosted capability and collection catalogs.
 //
-// The result-count field in each hint is the actor's real cap parameter and its
-// value mirrors the bounded first-pass default enforced server-side
-// (HOSTED_COLLECTION_LIMIT_POLICY / FACEBOOK_POST_LIST_* in apps/web). clockworks
-// TikTok actors cap per-input via resultsPerPage / maxProfilesPerQuery /
-// commentsPerPost (maxItems is a run option they ignore as input), apidojo
-// youtube-comments caps via maxItems (not maxComments), and Bright Data Facebook
-// post lists cap via num_of_posts.
+// The result-count field in each hint is a fetch-volume example using the actor's
+// REAL input field (it shapes how much the actor fetches, not the cost ceiling).
+// Total spend is bounded server-side by a per-request USD budget — pay-per-event
+// actors via Apify maxTotalChargeUsd, Bright Data Facebook via
+// limit_multiple_results — so these values are starting points, not the cap.
+// Field names matter: clockworks TikTok actors fetch per resultsPerPage /
+// maxProfilesPerQuery / commentsPerPost (maxItems is a run option they ignore as
+// input) and apidojo youtube-comments uses maxItems (not maxComments).
 
 export const RESEARCH_COLLECTION_HINTS: Record<
   string,
