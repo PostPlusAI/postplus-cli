@@ -1,7 +1,18 @@
 // Generated from the PostPlus Cloud hosted catalog release gate.
 // Keep keys in sync with apps/web hosted capability and collection catalogs.
+//
+// The result-count field in each hint is the actor's real cap parameter and its
+// value mirrors the bounded first-pass default enforced server-side
+// (HOSTED_COLLECTION_LIMIT_POLICY / FACEBOOK_POST_LIST_* in apps/web). clockworks
+// TikTok actors cap per-input via resultsPerPage / maxProfilesPerQuery /
+// commentsPerPost (maxItems is a run option they ignore as input), apidojo
+// youtube-comments caps via maxItems (not maxComments), and Bright Data Facebook
+// post lists cap via num_of_posts.
 
-export const RESEARCH_COLLECTION_HINTS: Record<string, Record<string, unknown>> = {
+export const RESEARCH_COLLECTION_HINTS: Record<
+  string,
+  Record<string, unknown>
+> = {
   'google-trends-fast': {
     enableTrendingSearches: false,
     geo: 'US',
@@ -10,55 +21,55 @@ export const RESEARCH_COLLECTION_HINTS: Record<string, Record<string, unknown>> 
   },
   'instagram-comments': {
     directUrls: ['https://www.instagram.com/p/example/'],
-    resultsLimit: 5,
+    resultsLimit: 20,
   },
   'instagram-email-search': {
     Country: 'www',
     Email_Type: '0',
     Keyword: 'skincare creator',
-    Limit: '10',
+    Limit: '25',
     social_network: 'instagram.com/',
   },
   'instagram-hashtags': {
     hashtags: ['desksetup'],
-    resultsLimit: 3,
+    resultsLimit: 10,
   },
   'instagram-posts': {
-    resultsLimit: 3,
+    resultsLimit: 12,
     username: ['openai'],
   },
   'instagram-profiles': {
-    resultsLimit: 3,
     usernames: ['instagram'],
   },
   'instagram-search': {
-    searchLimit: 3,
+    searchLimit: 10,
     searchTerms: ['skincare routine'],
     searchType: 'user',
   },
   'tiktok-ads-top': {
     include_analytics: true,
-    limit: 1,
+    limit: 20,
   },
   'tiktok-comments': {
+    commentsPerPost: 20,
     postURLs: ['https://www.tiktok.com/@example/video/1234567890'],
-    resultsPerPage: 5,
   },
   'tiktok-profiles': {
+    resultsPerPage: 12,
     usernames: ['tiktok'],
   },
   'tiktok-related-videos': {
-    maxItems: 3,
     postURLs: ['https://www.tiktok.com/@example/video/1234567890'],
+    resultsPerPage: 10,
   },
   'tiktok-users': {
-    maxItems: 5,
+    maxProfilesPerQuery: 10,
     searchQueries: ['skincare creator'],
   },
   'tiktok-videos': {
-    maxItems: 3,
     proxyCountryCode: 'US',
     queries: ['portable blender'],
+    resultsPerPage: 10,
     searchSection: '/video',
   },
   'youtube-channel-summary': {
@@ -68,7 +79,7 @@ export const RESEARCH_COLLECTION_HINTS: Record<string, Record<string, unknown>> 
     maxVideosPerChannel: 0,
   },
   'youtube-comments': {
-    maxComments: 10,
+    maxItems: 50,
     startUrls: ['https://www.youtube.com/watch?v=dQw4w9WgXcQ'],
   },
   'youtube-video-download': {
@@ -76,9 +87,13 @@ export const RESEARCH_COLLECTION_HINTS: Record<string, Record<string, unknown>> 
   },
 } as const;
 
-export const PUBLIC_CONTENT_SOURCE_HINTS: Record<string, Array<Record<string, unknown>>> = {
+export const PUBLIC_CONTENT_SOURCE_HINTS: Record<
+  string,
+  Array<Record<string, unknown>>
+> = {
   'facebook-group-posts': [
     {
+      num_of_posts: 25,
       url: 'https://www.facebook.com/groups/example',
     },
   ],
@@ -89,6 +104,7 @@ export const PUBLIC_CONTENT_SOURCE_HINTS: Record<string, Array<Record<string, un
   ],
   'facebook-profile-posts': [
     {
+      num_of_posts: 25,
       url: 'https://www.facebook.com/openai',
     },
   ],
@@ -99,7 +115,10 @@ export const PUBLIC_CONTENT_SOURCE_HINTS: Record<string, Array<Record<string, un
   ],
 } as const;
 
-export const PUBLIC_CONTENT_DISCOVERY_TOOL_HINTS: Record<string, Record<string, unknown>> = {
+export const PUBLIC_CONTENT_DISCOVERY_TOOL_HINTS: Record<
+  string,
+  Record<string, unknown>
+> = {
   'web-search': {
     limit: 5,
     query: 'portable blender reviews',
@@ -279,7 +298,10 @@ export const MEDIA_ENDPOINT_HINTS: Record<string, Record<string, unknown>> = {
   },
 } as const;
 
-export const VIDEO_ANALYSIS_MODEL_HINTS: Record<string, Record<string, unknown>> = {
+export const VIDEO_ANALYSIS_MODEL_HINTS: Record<
+  string,
+  Record<string, unknown>
+> = {
   'gemini-video-analysis': {
     contents: [
       {
