@@ -45,10 +45,7 @@ const HOSTED_DOMAIN_CAPABILITIES: Record<HostedDomain, Set<string>> = {
   media: new Set(['media-file', 'media-generation', 'video-analysis']),
   mobile: new Set(['mobile-automation']),
   publish: new Set(['social-publishing']),
-  research: new Set([
-    'public-content-collection',
-    'public-content-discovery',
-  ]),
+  research: new Set(['public-content-collection', 'public-content-discovery']),
 };
 
 export async function runHostedDomainCommand(
@@ -111,6 +108,17 @@ async function runResearchCollect(args: string[]): Promise<number> {
     flags.values.get('quote-confirmation-token') ??
     normalizeString(envelope.quoteConfirmationToken);
 
+  // Optional per-request cost ceiling (USD) overriding the hosted default.
+  const maxChargeFlag = flags.values.get('max-charge-usd');
+  let maxTotalChargeUsd: number | undefined;
+  if (maxChargeFlag !== undefined) {
+    const parsed = Number(maxChargeFlag);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error('--max-charge-usd must be a positive number of USD.');
+    }
+    maxTotalChargeUsd = parsed;
+  }
+
   const payload = await postHostedJson({
     body: {
       collectionKey,
@@ -118,6 +126,7 @@ async function runResearchCollect(args: string[]): Promise<number> {
       operationId,
       quoteConfirmationToken: quoteConfirmationToken ?? undefined,
       skillName,
+      maxTotalChargeUsd,
     },
     pathName: '/api/postplus-cli/hosted/collection',
     skillName,
@@ -170,7 +179,9 @@ async function runHostedCapability(
   const request = await readJsonFile(requestPath);
 
   if (!request || typeof request !== 'object' || Array.isArray(request)) {
-    throw new Error(`Hosted ${domain} capability request must be a JSON object.`);
+    throw new Error(
+      `Hosted ${domain} capability request must be a JSON object.`,
+    );
   }
 
   const record = request as Record<string, unknown>;
@@ -199,7 +210,8 @@ async function runHostedCapability(
     operationId,
     quoteConfirmationToken: quoteConfirmationToken ?? undefined,
   };
-  const skillName = flags.values.get('skill') ?? normalizeString(record.skillName);
+  const skillName =
+    flags.values.get('skill') ?? normalizeString(record.skillName);
   const payload = await postHostedJson({
     body,
     pathName: '/api/postplus-cli/hosted/capability',
@@ -502,7 +514,7 @@ function printResearchHelp(): void {
 
 Usage:
   postplus research schema [--collection-key <key>] [--json]
-  postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> [--output <result.json>]
+  postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> [--max-charge-usd <usd>] [--output <result.json>]
   postplus research collect --run-handle <runHandle> [--output <result.json>]
   postplus research capability --request <hosted-capability-request.json> [--output <result.json>]
 `);
