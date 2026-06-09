@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import {
   mkdir,
   mkdtemp,
@@ -75,6 +76,13 @@ import {
 const tempDirs: string[] = [];
 const originalEnv = { ...process.env };
 const execFileAsync = promisify(execFile);
+const CURRENT_CLI_VERSION = JSON.parse(
+  readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'),
+).version as string;
+const NEXT_CLI_VERSION = CURRENT_CLI_VERSION.replace(
+  /\.(\d+)$/,
+  (_match, patch: string) => `.${Number(patch) + 1}`,
+);
 
 function createEmptySkillRequirements(): PublicSkillRequirements {
   return {
@@ -470,7 +478,7 @@ describe('doctor and status', () => {
           (init?.headers as Record<string, string>)[
             POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.cliVersion
           ],
-          '0.1.38',
+          CURRENT_CLI_VERSION,
         );
         assert.equal(
           (init?.headers as Record<string, string>)[
@@ -551,8 +559,8 @@ describe('doctor and status', () => {
           ok: true,
           source: 'remote',
           cli: {
-            currentVersion: '0.1.38',
-            latestVersion: '0.1.38',
+            currentVersion: CURRENT_CLI_VERSION,
+            latestVersion: CURRENT_CLI_VERSION,
             updateAvailable: false,
             updateCommand: 'npm install -g @postplus/cli@latest',
           },
@@ -566,7 +574,7 @@ describe('doctor and status', () => {
         }),
       });
       assert.equal(status.schemaVersion, 1);
-      assert.equal((await readLocalConfig())?.cliVersion, '0.1.38');
+      assert.equal((await readLocalConfig())?.cliVersion, CURRENT_CLI_VERSION);
       assert.equal(status.ok, true);
       assert.equal(status.doctor.schemaVersion, 1);
       assert.equal(status.auth.ok, true);
@@ -2298,7 +2306,7 @@ describe('update checks', () => {
 
         assert.match(url, /registry\.npmjs\.org/);
 
-        return new Response(JSON.stringify({ version: '0.1.39' }), {
+        return new Response(JSON.stringify({ version: NEXT_CLI_VERSION }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         });
@@ -2313,8 +2321,8 @@ describe('update checks', () => {
     });
 
     assert.equal(result.updateAvailable, true);
-    assert.equal(result.currentVersion, '0.1.38');
-    assert.equal(result.latestVersion, '0.1.39');
+    assert.equal(result.currentVersion, CURRENT_CLI_VERSION);
+    assert.equal(result.latestVersion, NEXT_CLI_VERSION);
     assert.equal(result.exitCode, 0);
     assert.equal(result.command, POSTPLUS_CLI_UPDATE_COMMAND);
     assert.deepEqual(calls, [['npm', 'install', '-g', '@postplus/cli@latest']]);
@@ -3088,7 +3096,7 @@ describe('skill management commands', () => {
         'new-skill',
       ]);
       assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
-      assert.equal(config?.cliVersion, '0.1.38');
+      assert.equal(config?.cliVersion, CURRENT_CLI_VERSION);
     } finally {
       globalThis.fetch = originalFetch;
     }
