@@ -3853,6 +3853,32 @@ describe('hosted domain commands', () => {
     });
   });
 
+  it('prints WaveSpeed transcription media schema examples with current provider fields', async () => {
+    const { stdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'media',
+      'schema',
+      '--endpoint',
+      'transcription-whisper',
+      '--json',
+    ]);
+    const report = JSON.parse(stdout) as Record<string, unknown>;
+    const examples = report.examples as Record<string, unknown>;
+    const request = examples[
+      'media-generation.request'
+    ] as Record<string, unknown>;
+    const input = request.input as Record<string, unknown>;
+
+    assert.equal(request.endpointKey, 'transcription-whisper');
+    assert.equal(input.audio, 'https://example.com/input-audio.mp3');
+    assert.equal(input.enable_timestamps, true);
+    assert.equal(input.task, 'transcribe');
+    assert.equal(Object.hasOwn(input, 'response_format'), false);
+    assert.equal(Object.hasOwn(input, 'timestamp_granularities'), false);
+  });
+
   it('rejects unknown hosted media schema endpoints', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [

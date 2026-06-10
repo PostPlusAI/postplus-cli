@@ -203,20 +203,19 @@ export const MEDIA_ENDPOINT_HINTS: Record<string, Record<string, unknown>> = {
   },
   'transcription-whisper': {
     audio: 'https://example.com/input-audio.mp3',
+    enable_timestamps: true,
     language: 'en',
-    response_format: 'verbose_json',
-    timestamp_granularities: ['segment'],
+    task: 'transcribe',
   },
   'transcription-whisper-turbo': {
     audio: 'https://example.com/input-audio.mp3',
     language: 'en',
-    response_format: 'verbose_json',
-    timestamp_granularities: ['segment'],
+    task: 'transcribe',
   },
   'transcription-whisper-with-video': {
+    enable_timestamps: true,
     language: 'en',
-    response_format: 'verbose_json',
-    timestamp_granularities: ['segment'],
+    task: 'transcribe',
     video: 'https://example.com/input-video.mp4',
   },
   'video-infinitetalk': {
