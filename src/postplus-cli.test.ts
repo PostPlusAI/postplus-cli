@@ -4175,6 +4175,110 @@ describe('hosted domain commands', () => {
     );
   });
 
+  it('submits a manifest-driven transcribe request with derived billing dimensions', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(
+        String(input),
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'transcribe',
+        'transcription-whisper',
+        '--audio',
+        'https://example.com/a.mp3',
+        '--duration-seconds',
+        '30',
+        '--enable-timestamps',
+      ]);
+      assert.equal(result, 0);
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.capability, 'media-generation');
+      assert.equal(body.operation, 'request');
+      assert.match(
+        String(body.operationId),
+        /^postplus-cli:media:media-generation:request:/u,
+      );
+      assert.deepEqual(body.input, {
+        audio: 'https://example.com/a.mp3',
+        duration_seconds: 30,
+        enable_timestamps: true,
+        language: 'auto',
+        task: 'transcribe',
+      });
+      assert.deepEqual(body.requestDimensions, {
+        billableUnitCount: 1,
+        operationKey: 'transcription-whisper',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fast-fails the transcribe verb without a duration before any hosted call', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'transcribe',
+            'transcription-whisper',
+            '--audio',
+            'https://example.com/a.mp3',
+          ]),
+        /Missing required option --duration-seconds/u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects runner-managed billing flags on the transcribe verb', async () => {
+    await assert.rejects(
+      () =>
+        runHostedDomainCommand('media', [
+          'transcribe',
+          'transcription-whisper',
+          '--audio',
+          'https://example.com/a.mp3',
+          '--duration-seconds',
+          '30',
+          '--media-seconds',
+          '30',
+        ]),
+      /Unknown option for media transcribe: --media-seconds/u,
+    );
+  });
+
   it('writes quote confirmation challenges beside hosted command outputs', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);

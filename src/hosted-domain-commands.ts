@@ -11,12 +11,77 @@ import {
   buildHostedRequestSchemaReport,
   buildMediaGenerationRequestDimensions,
 } from './hosted-request-schemas.js';
+import { HOSTED_EXECUTION_MANIFESTS } from './generated/hosted-execution-manifest.generated.js';
 import {
   type LargeCreditQuoteConfirmationChallenge,
   readLargeCreditQuoteConfirmationChallenge,
 } from './quote-confirmation.js';
 
 type HostedDomain = 'media' | 'mobile' | 'publish' | 'research';
+
+// Generated execution manifest (SSOT projected from apps/web + public-skill-metadata).
+// The verb/flag grammar, runner-managed set, and enum sets all come from here so
+// the CLI never hand-maintains a mirror of the Web hosted catalog.
+type ManifestField = {
+  name: string;
+  class: 'intent' | 'default' | 'runner-managed';
+  flag: string | null;
+  type: 'string' | 'number' | 'boolean' | 'media-url';
+  enumValues?: readonly string[];
+  default?: string | number | boolean;
+  required: boolean;
+  derivedFrom?: string;
+};
+
+type ManifestEndpoint = {
+  endpointKey: string;
+  fields: readonly ManifestField[];
+};
+
+type ManifestEntry = {
+  skill: string;
+  surface: string;
+  verb: string;
+  domain: string;
+  capability: string;
+  endpoints: readonly ManifestEndpoint[];
+};
+
+type ResolvedVerbEndpoint = {
+  skill: string;
+  capability: string;
+  endpoint: ManifestEndpoint;
+};
+
+const MEDIA_VERB_ENDPOINTS = buildMediaVerbIndex();
+
+function buildMediaVerbIndex(): Map<string, Map<string, ResolvedVerbEndpoint>> {
+  const index = new Map<string, Map<string, ResolvedVerbEndpoint>>();
+
+  for (const entry of Object.values(
+    HOSTED_EXECUTION_MANIFESTS,
+  ) as unknown as ManifestEntry[]) {
+    if (entry.domain !== 'media') {
+      continue;
+    }
+
+    let endpoints = index.get(entry.verb);
+    if (!endpoints) {
+      endpoints = new Map<string, ResolvedVerbEndpoint>();
+      index.set(entry.verb, endpoints);
+    }
+
+    for (const endpoint of entry.endpoints) {
+      endpoints.set(endpoint.endpointKey, {
+        skill: entry.skill,
+        capability: entry.capability,
+        endpoint,
+      });
+    }
+  }
+
+  return index;
+}
 
 type ParsedFlags = {
   values: Map<string, string>;
@@ -76,8 +141,164 @@ export async function runHostedDomainCommand(
     return runHostedCapability(domain, rest);
   }
 
+  if (domain === 'media' && subcommand && MEDIA_VERB_ENDPOINTS.has(subcommand)) {
+    return runMediaVerb(subcommand, rest);
+  }
+
   printCapabilityHelp(domain);
   return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+}
+
+// Manifest-driven verb grammar: `postplus media <verb> <endpointKey> --<flags>`.
+// Scalar intent/default fields map to flags; runner-managed fields (billing
+// dimensions, ids, tokens) have no flag and are derived/minted by the runner,
+// so the agent structurally cannot pass them.
+async function runMediaVerb(verb: string, args: string[]): Promise<number> {
+  const endpoints = MEDIA_VERB_ENDPOINTS.get(verb);
+  if (!endpoints) {
+    throw new Error(`Unknown media verb ${verb}.`);
+  }
+
+  const [endpointKey, ...rest] = args;
+  if (!endpointKey || endpointKey.startsWith('--')) {
+    throw new Error(
+      `postplus media ${verb} requires an endpoint key. Run \`postplus media schema --json\` to list endpoints.`,
+    );
+  }
+
+  const resolved = endpoints.get(endpointKey);
+  if (!resolved) {
+    throw new Error(
+      `Unknown ${verb} endpoint ${endpointKey}. Valid: ${[...endpoints.keys()].join(', ')}.`,
+    );
+  }
+
+  const fields = resolved.endpoint.fields;
+  const flagToField = new Map<string, ManifestField>();
+  const booleanKeys = new Set<string>(['json']);
+
+  for (const field of fields) {
+    if (!field.flag) {
+      continue;
+    }
+    const key = field.flag.replace(/^--/u, '');
+    flagToField.set(key, field);
+    if (field.type === 'boolean') {
+      booleanKeys.add(key);
+    }
+  }
+
+  const flags = parseFlags(rest, booleanKeys);
+  const outputPath = flags.values.get('output') ?? null;
+  const controlKeys = new Set([
+    'hosted-operation-id',
+    'json',
+    'output',
+    'quote-confirmation-token',
+    'skill',
+  ]);
+
+  // Reject unknown flags. This is how runner-managed fields (no flag) and typos
+  // are caught locally before any hosted call.
+  for (const key of [...flags.values.keys(), ...flags.booleans]) {
+    if (!flagToField.has(key) && !controlKeys.has(key)) {
+      throw new Error(`Unknown option for media ${verb}: --${key}.`);
+    }
+  }
+
+  const input = buildMediaVerbInput({
+    endpointKey,
+    fields,
+    flags,
+    verb,
+  });
+
+  const operationId =
+    flags.values.get('hosted-operation-id') ??
+    `postplus-cli:media:${resolved.capability}:request:${randomUUID()}`;
+  const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
+  const skillName = flags.values.get('skill') ?? resolved.skill;
+
+  const body = {
+    capability: resolved.capability,
+    endpointKey,
+    input,
+    operation: 'request',
+    operationId,
+    quoteConfirmationToken: quoteConfirmationToken ?? undefined,
+    requestDimensions: buildMediaGenerationRequestDimensions(endpointKey, input),
+  };
+
+  const payload = await postHostedJson({
+    body,
+    pathName: '/api/postplus-cli/hosted/capability',
+    skillName,
+  }).catch((error: unknown) =>
+    buildHostedCommandError(error, {
+      inputPath: `media-${verb}-${endpointKey}`,
+      outputPath,
+    }),
+  );
+
+  await writeResult(payload, outputPath, flags.booleans.has('json'));
+  return 0;
+}
+
+function buildMediaVerbInput(input: {
+  endpointKey: string;
+  fields: readonly ManifestField[];
+  flags: ParsedFlags;
+  verb: string;
+}): Record<string, unknown> {
+  const record: Record<string, unknown> = {};
+
+  for (const field of input.fields) {
+    if (field.class === 'runner-managed' || !field.flag) {
+      continue;
+    }
+
+    const key = field.flag.replace(/^--/u, '');
+
+    if (field.type === 'boolean') {
+      if (input.flags.booleans.has(key)) {
+        record[field.name] = true;
+      } else if (typeof field.default === 'boolean') {
+        record[field.name] = field.default;
+      }
+      continue;
+    }
+
+    const raw = input.flags.values.get(key);
+
+    if (raw === undefined) {
+      if (field.class === 'default' && field.default !== undefined) {
+        record[field.name] = field.default;
+      } else if (field.required) {
+        throw new Error(
+          `Missing required option --${key} for media ${input.verb} ${input.endpointKey}.`,
+        );
+      }
+      continue;
+    }
+
+    if (field.enumValues && !field.enumValues.includes(raw)) {
+      throw new Error(
+        `--${key} must be one of ${field.enumValues.join(', ')}.`,
+      );
+    }
+
+    if (field.type === 'number') {
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new Error(`--${key} must be a positive number.`);
+      }
+      record[field.name] = parsed;
+    } else {
+      record[field.name] = raw;
+    }
+  }
+
+  return record;
 }
 
 async function runResearchCollect(args: string[]): Promise<number> {
@@ -521,10 +742,20 @@ Usage:
 }
 
 function printCapabilityHelp(domain: Exclude<HostedDomain, 'research'>): void {
+  const verbUsage =
+    domain === 'media'
+      ? [...MEDIA_VERB_ENDPOINTS.keys()]
+          .map(
+            (verb) =>
+              `  postplus media ${verb} <endpoint-key> --<intent/default flags> [--json] [--output <result.json>]\n`,
+          )
+          .join('')
+      : '';
+
   process.stdout.write(`PostPlus CLI - ${domain} commands
 
 Usage:
-  postplus ${domain} schema${domain === 'media' ? ' [--endpoint <endpoint-key>]' : ''} [--json]
+${verbUsage}  postplus ${domain} schema${domain === 'media' ? ' [--endpoint <endpoint-key>]' : ''} [--json]
   postplus ${domain} capability --request <hosted-capability-request.json> [--output <result.json>]
 `);
 }
