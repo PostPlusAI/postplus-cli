@@ -81,7 +81,7 @@ function buildResearchSchemaReport(
     schemaVersion: 1,
     domain: 'research',
     command:
-      'postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> --output <result.json>; postplus research capability --request <hosted-capability-request.json> --output <result.json>',
+      'postplus research collect <collection-key> --request <input.json> --output <result.json>; postplus research scrape <source-key> --request <input-array.json> --output <result.json>',
     description:
       'Schemas for files passed to hosted research commands.',
     collectionKeys: Object.keys(RESEARCH_COLLECTION_HINTS).sort(),
@@ -92,8 +92,8 @@ function buildResearchSchemaReport(
       'The collection key stays in the CLI flag, not inside the JSON file.',
       'Put the skill-specific provider input under input.',
       'Use --run-handle for polling instead of this envelope.',
-      'Use research capability for public-content sourceKey and discovery tool requests.',
-      'The CLI derives operationId before sending capability requests to PostPlus Cloud.',
+      'Use research scrape <source-key> for public-content sourceKey requests.',
+      'The CLI derives operationId before sending requests to PostPlus Cloud.',
     ],
     schemas: [
       {
@@ -237,9 +237,9 @@ function buildMediaSchemaReport(
     schemaVersion: 1,
     domain: 'media',
     command:
-      'postplus media capability --request <hosted-capability-request.json> --output <result.json>',
+      'postplus media <verb> <endpoint-key> --request <input.json> --output <result.json>',
     description:
-      'Schemas for files passed to postplus media capability --request.',
+      'Schemas for files passed to hosted media commands.',
     endpointKeys: Object.keys(MEDIA_ENDPOINT_HINTS).sort(),
     modelKeys: Object.keys(VIDEO_ANALYSIS_MODEL_HINTS).sort(),
     selectedEndpointKey: endpointKey ?? undefined,
@@ -501,9 +501,9 @@ function buildPublishSchemaReport(): HostedRequestSchemaReport {
     schemaVersion: 1,
     domain: 'publish',
     command:
-      'postplus publish capability --request <hosted-capability-request.json> --output <result.json>',
+      'postplus publish <operation> --request <input.json> --output <result.json>',
     description:
-      'Schema for files passed to postplus publish capability --request.',
+      'Schema for files passed to hosted publish commands.',
     notes: [
       'Use social-publishing operations only through PostPlus Cloud.',
       'Put the operation-specific publishing payload under input.',

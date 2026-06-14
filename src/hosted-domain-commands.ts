@@ -255,12 +255,6 @@ class HostedProductRequestError extends Error {
   }
 }
 
-const HOSTED_DOMAIN_CAPABILITIES: Record<HostedDomain, Set<string>> = {
-  media: new Set(['media-file', 'media-generation', 'video-analysis']),
-  publish: new Set(['social-publishing']),
-  research: new Set(['public-content-collection', 'public-content-discovery']),
-};
-
 export async function runHostedDomainCommand(
   domain: HostedDomain,
   args: string[],
@@ -277,19 +271,12 @@ export async function runHostedDomainCommand(
     if (subcommand === 'scrape') {
       return runResearchScrape(rest);
     }
-    if (subcommand === 'capability') {
-      return runHostedCapability(domain, rest);
-    }
     printResearchHelp();
     return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
   }
 
   if (subcommand === 'schema') {
     return runHostedSchema(domain, rest);
-  }
-
-  if (subcommand === 'capability') {
-    return runHostedCapability(domain, rest);
   }
 
   if (domain === 'media' && subcommand && MEDIA_VERB_ENDPOINTS.has(subcommand)) {
@@ -305,7 +292,7 @@ export async function runHostedDomainCommand(
     return runPublishOperation(subcommand, rest);
   }
 
-  printCapabilityHelp(domain);
+  printDomainVerbHelp(domain);
   return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
 }
 
@@ -977,93 +964,6 @@ async function runHostedSchema(
   return 0;
 }
 
-async function runHostedCapability(
-  domain: HostedDomain,
-  args: string[],
-): Promise<number> {
-  const flags = parseFlags(args, new Set(['json']));
-  const requestPath = requireFlag(flags, 'request');
-  const outputPath = flags.values.get('output') ?? null;
-  const request = await readJsonFile(requestPath);
-
-  if (!request || typeof request !== 'object' || Array.isArray(request)) {
-    throw new Error(
-      `Hosted ${domain} capability request must be a JSON object.`,
-    );
-  }
-
-  const record = request as Record<string, unknown>;
-  const capability = requireDomainCapability(record, domain);
-  const operation = requireRecordString(record, 'operation');
-  const operationId =
-    flags.values.get('hosted-operation-id') ??
-    normalizeString(record.operationId) ??
-    `postplus-cli:${domain}:${capability}:${operation}:${randomUUID()}`;
-  const quoteConfirmationToken =
-    flags.values.get('quote-confirmation-token') ??
-    normalizeString(record.quoteConfirmationToken);
-  const publicRecord = { ...record };
-  delete publicRecord.skillName;
-  const derivedFields = buildDerivedHostedCapabilityFields({
-    capability,
-    domain,
-    operation,
-    record,
-  });
-  const body = {
-    ...publicRecord,
-    ...derivedFields,
-    capability,
-    operation,
-    operationId,
-    quoteConfirmationToken: quoteConfirmationToken ?? undefined,
-  };
-  const skillName =
-    flags.values.get('skill') ?? normalizeString(record.skillName);
-  return runHostedCommand({
-    request: () =>
-      postHostedJson({
-        body,
-        pathName: '/api/postplus-cli/hosted/capability',
-        skillName,
-      }),
-    errorInputLabel: requestPath,
-    json: flags.booleans.has('json'),
-    outputPath,
-  });
-}
-
-function buildDerivedHostedCapabilityFields(input: {
-  capability: string;
-  domain: HostedDomain;
-  operation: string;
-  record: Record<string, unknown>;
-}): Record<string, unknown> {
-  if (
-    input.domain !== 'media' ||
-    input.capability !== 'media-generation' ||
-    input.operation !== 'request'
-  ) {
-    return {};
-  }
-
-  if (Object.hasOwn(input.record, 'requestDimensions')) {
-    throw new Error(
-      'Hosted media-generation request must not include requestDimensions. The CLI derives billing dimensions from endpointKey and input.',
-    );
-  }
-
-  const endpointKey = requireRecordString(input.record, 'endpointKey');
-  const mediaInput = requireRecordObject(input.record, 'input');
-
-  return {
-    requestDimensions: buildMediaGenerationRequestDimensions(
-      endpointKey,
-      mediaInput,
-    ),
-  };
-}
-
 async function postHostedJson(input: {
   body: unknown;
   pathName: string;
@@ -1320,48 +1220,6 @@ function requireFlag(flags: ParsedFlags, key: string): string {
   return value;
 }
 
-function requireDomainCapability(
-  record: Record<string, unknown>,
-  domain: HostedDomain,
-): string {
-  const capability = requireRecordString(record, 'capability');
-  const allowed = HOSTED_DOMAIN_CAPABILITIES[domain];
-
-  if (!allowed.has(capability)) {
-    throw new Error(
-      `Hosted ${domain} capability request uses unsupported capability ${capability}.`,
-    );
-  }
-
-  return capability;
-}
-
-function requireRecordString(
-  record: Record<string, unknown>,
-  key: string,
-): string {
-  const value = normalizeString(record[key]);
-
-  if (!value) {
-    throw new Error(`Hosted capability request must include string ${key}.`);
-  }
-
-  return value;
-}
-
-function requireRecordObject(
-  record: Record<string, unknown>,
-  key: string,
-): Record<string, unknown> {
-  const value = record[key];
-
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`Hosted capability request must include object ${key}.`);
-  }
-
-  return value as Record<string, unknown>;
-}
-
 function normalizeString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
@@ -1378,11 +1236,10 @@ Usage:
   postplus research collect <collection-key> --request <input.json> [--skill <skill-id>] [--max-charge-usd <usd>] [--output <result.json>]
   postplus research collect --run-handle <runHandle> [--output <result.json>]
   postplus research scrape <source-key> --request <input-array.json> [--skill <skill-id>] [--max-charge-usd <usd>] [--output <result.json>]
-  postplus research capability --request <hosted-capability-request.json> [--output <result.json>]
 `);
 }
 
-function printCapabilityHelp(domain: Exclude<HostedDomain, 'research'>): void {
+function printDomainVerbHelp(domain: Exclude<HostedDomain, 'research'>): void {
   const verbUsage =
     domain === 'media'
       ? [...MEDIA_VERB_ENDPOINTS.keys()]
@@ -1391,13 +1248,12 @@ function printCapabilityHelp(domain: Exclude<HostedDomain, 'research'>): void {
               `  postplus media ${verb} <endpoint-key> --<intent/default flags> [--json] [--output <result.json>]\n`,
           )
           .join('')
-      : '';
+      : '  postplus publish <operation> --request <input.json> [--json] [--output <result.json>]\n';
 
   process.stdout.write(`PostPlus CLI - ${domain} commands
 
 Usage:
 ${verbUsage}  postplus ${domain} schema${domain === 'media' ? ' [--endpoint <endpoint-key>]' : ''} [--json]
-  postplus ${domain} capability --request <hosted-capability-request.json> [--output <result.json>]
 `);
 }
 

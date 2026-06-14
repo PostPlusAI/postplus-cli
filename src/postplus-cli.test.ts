@@ -3734,7 +3734,7 @@ describe('hosted domain commands', () => {
       'help',
     ]);
     assert.match(researchHelp, /postplus research collect/u);
-    assert.match(researchHelp, /postplus research capability/u);
+    assert.match(researchHelp, /postplus research scrape/u);
     assert.match(researchHelp, /postplus research schema/u);
 
     for (const domain of ['media', 'publish']) {
@@ -3745,10 +3745,12 @@ describe('hosted domain commands', () => {
         domain,
         'help',
       ]);
-      assert.match(stdout, new RegExp(`postplus ${domain} capability`, 'u'));
       assert.match(stdout, new RegExp(`postplus ${domain} schema`, 'u'));
       if (domain === 'media') {
         assert.match(stdout, /--endpoint <endpoint-key>/u);
+        assert.match(stdout, /postplus media create <endpoint-key>/u);
+      } else {
+        assert.match(stdout, /postplus publish <operation> --request/u);
       }
     }
   });
@@ -3817,7 +3819,7 @@ describe('hosted domain commands', () => {
 
     assert.equal(report.schemaVersion, 1);
     assert.equal(report.domain, 'media');
-    assert.match(String(report.command), /postplus media capability/u);
+    assert.match(String(report.command), /postplus media <verb> <endpoint-key>/u);
     assert.ok(
       (report.endpointKeys as string[]).includes('video-seedance-2-text-turbo'),
     );
@@ -3932,146 +3934,6 @@ describe('hosted domain commands', () => {
         return true;
       },
     );
-  });
-
-  it('fails fast when hosted capability request files omit capability fields', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(requestPath, JSON.stringify({ input: {} }));
-
-    await assert.rejects(
-      () =>
-        runHostedDomainCommand('media', [
-          'capability',
-          '--request',
-          requestPath,
-        ]),
-      /must include string capability/u,
-    );
-  });
-
-  it('posts hosted domain requests with explicit capability and operation', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    const outputPath = resolve(requestDir, 'result.json');
-    await writeFile(
-      requestPath,
-      JSON.stringify({
-        capability: 'media-generation',
-        operation: 'status',
-        handle: 'media-run-1',
-        skillName: 'video-batch-runner',
-      }),
-    );
-    await setLocalSession({
-      accountId: 'account_1',
-      accountName: 'Account',
-      apiBaseUrl: 'https://postplus.test',
-      cliSessionToken: 'cli-session-token',
-      sessionExpiresAt: null,
-      userEmail: 'agent@example.com',
-      userId: 'user_1',
-    });
-
-    const originalFetch = globalThis.fetch;
-    let postedBody: unknown = null;
-    globalThis.fetch = async (input, init) => {
-      assert.equal(
-        String(input),
-        'https://postplus.test/api/postplus-cli/hosted/capability',
-      );
-      postedBody = JSON.parse(String(init?.body));
-      return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    };
-
-    try {
-      const result = await runHostedDomainCommand('media', [
-        'capability',
-        '--request',
-        requestPath,
-        '--output',
-        outputPath,
-      ]);
-      assert.equal(result, 0);
-      const body = postedBody as Record<string, unknown>;
-      assert.equal(body.capability, 'media-generation');
-      assert.equal(body.handle, 'media-run-1');
-      assert.equal(body.operation, 'status');
-      assert.equal(Object.hasOwn(body, 'skillName'), false);
-      assert.equal(body.quoteConfirmationToken, undefined);
-      assert.match(
-        String(body.operationId),
-        /^postplus-cli:media:media-generation:status:/u,
-      );
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('posts public-content research capability requests', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(
-      requestPath,
-      JSON.stringify({
-        capability: 'public-content-collection',
-        input: [
-          {
-            url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-          },
-        ],
-        operation: 'scrape',
-        sourceKey: 'youtube-videos',
-      }),
-    );
-    await setLocalSession({
-      accountId: 'account_1',
-      accountName: 'Account',
-      apiBaseUrl: 'https://postplus.test',
-      cliSessionToken: 'cli-session-token',
-      sessionExpiresAt: null,
-      userEmail: 'agent@example.com',
-      userId: 'user_1',
-    });
-
-    const originalFetch = globalThis.fetch;
-    let postedBody: unknown = null;
-    globalThis.fetch = async (input, init) => {
-      assert.equal(
-        String(input),
-        'https://postplus.test/api/postplus-cli/hosted/capability',
-      );
-      postedBody = JSON.parse(String(init?.body));
-      return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    };
-
-    try {
-      const result = await runHostedDomainCommand('research', [
-        'capability',
-        '--request',
-        requestPath,
-      ]);
-      assert.equal(result, 0);
-      const body = postedBody as Record<string, unknown>;
-      assert.equal(body.capability, 'public-content-collection');
-      assert.equal(body.operation, 'scrape');
-      assert.equal(body.sourceKey, 'youtube-videos');
-      assert.match(
-        String(body.operationId),
-        /^postplus-cli:research:public-content-collection:scrape:/u,
-      );
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
   });
 
   it('posts the manifest-driven research collect verb to /hosted/collection', async () => {
@@ -4250,108 +4112,6 @@ describe('hosted domain commands', () => {
         requestPath,
       ]),
       /Unknown research scrape source not-a-source/u,
-    );
-  });
-
-  it('derives media-generation billing dimensions from the public request', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(
-      requestPath,
-      JSON.stringify({
-        capability: 'media-generation',
-        endpointKey: 'video-seedance-2-text-turbo',
-        input: {
-          duration: 5,
-          prompt: 'demo',
-          resolution: '720p',
-        },
-        operation: 'request',
-      }),
-    );
-    await setLocalSession({
-      accountId: 'account_1',
-      accountName: 'Account',
-      apiBaseUrl: 'https://postplus.test',
-      cliSessionToken: 'cli-session-token',
-      sessionExpiresAt: null,
-      userEmail: 'agent@example.com',
-      userId: 'user_1',
-    });
-
-    const originalFetch = globalThis.fetch;
-    let postedBody: unknown = null;
-    globalThis.fetch = async (input, init) => {
-      assert.equal(
-        String(input),
-        'https://postplus.test/api/postplus-cli/hosted/capability',
-      );
-      postedBody = JSON.parse(String(init?.body));
-      return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    };
-
-    try {
-      const result = await runHostedDomainCommand('media', [
-        'capability',
-        '--request',
-        requestPath,
-      ]);
-      assert.equal(result, 0);
-      const body = postedBody as Record<string, unknown>;
-      assert.equal(body.capability, 'media-generation');
-      assert.equal(body.operation, 'request');
-      assert.match(
-        String(body.operationId),
-        /^postplus-cli:media:media-generation:request:/u,
-      );
-      assert.deepEqual(body.requestDimensions, {
-        audioMode: 'on',
-        billableUnitCount: 1,
-        duration: 5,
-        operationKey: 'video-seedance-2-text-turbo',
-        referenceVideoCount: 0,
-        referenceVideoMode: 'without_reference_videos',
-        requestBytes: 50,
-        resolution: '720p',
-      });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('rejects public media-generation requests with hand-written billing dimensions', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(
-      requestPath,
-      JSON.stringify({
-        capability: 'media-generation',
-        endpointKey: 'video-seedance-2-text-turbo',
-        input: {
-          duration: 5,
-          prompt: 'demo',
-          resolution: '720p',
-        },
-        operation: 'request',
-        requestDimensions: {
-          billableUnitCount: 1,
-        },
-      }),
-    );
-
-    await assert.rejects(
-      () =>
-        runHostedDomainCommand('media', [
-          'capability',
-          '--request',
-          requestPath,
-        ]),
-      /must not include requestDimensions/u,
     );
   });
 
@@ -4962,14 +4722,9 @@ describe('hosted domain commands', () => {
     await writeFile(
       requestPath,
       JSON.stringify({
-        capability: 'media-generation',
-        endpointKey: 'video-seedance-2-text-turbo',
-        input: {
-          duration: 5,
-          prompt: 'demo',
-          resolution: '720p',
-        },
-        operation: 'request',
+        duration: 5,
+        prompt: 'demo',
+        resolution: '720p',
       }),
     );
     await setLocalSession({
@@ -5000,7 +4755,8 @@ describe('hosted domain commands', () => {
       await assert.rejects(
         () =>
           runHostedDomainCommand('media', [
-            'capability',
+            'create',
+            'video-seedance-2-text-turbo',
             '--request',
             requestPath,
             '--output',
