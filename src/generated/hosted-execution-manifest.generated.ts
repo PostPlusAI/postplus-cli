@@ -231,6 +231,11 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             "class": "default",
             "flag": "--resolution",
             "type": "string",
+            "enumValues": [
+              "1k",
+              "2k",
+              "4k"
+            ],
             "default": "1k",
             "required": false
           },
@@ -239,6 +244,11 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             "class": "default",
             "flag": "--quality",
             "type": "string",
+            "enumValues": [
+              "low",
+              "medium",
+              "high"
+            ],
             "default": "medium",
             "required": false
           },
@@ -295,6 +305,11 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             "class": "default",
             "flag": "--resolution",
             "type": "string",
+            "enumValues": [
+              "1k",
+              "2k",
+              "4k"
+            ],
             "default": "1k",
             "required": false
           },
@@ -303,6 +318,11 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             "class": "default",
             "flag": "--quality",
             "type": "string",
+            "enumValues": [
+              "low",
+              "medium",
+              "high"
+            ],
             "default": "medium",
             "required": false
           },
@@ -351,6 +371,12 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             "class": "default",
             "flag": "--resolution",
             "type": "string",
+            "enumValues": [
+              "0.5k",
+              "1k",
+              "2k",
+              "4k"
+            ],
             "default": "1k",
             "required": false
           },
@@ -422,6 +448,12 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             "class": "default",
             "flag": "--resolution",
             "type": "string",
+            "enumValues": [
+              "0.5k",
+              "1k",
+              "2k",
+              "4k"
+            ],
             "default": "1k",
             "required": false
           },

@@ -4524,6 +4524,48 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('early-validates image resolution/quality enums locally before any hosted call', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'image-gpt-image-2-text',
+            '--prompt',
+            'a hero shot',
+            '--quality',
+            'ultra',
+          ]),
+        /--quality must be one of low, medium, high\./u,
+      );
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'image-nano-banana-2-text',
+            '--prompt',
+            'a hero shot',
+            '--resolution',
+            '8k',
+          ]),
+        /--resolution must be one of 0\.5k, 1k, 2k, 4k\./u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('preserves the structured product error envelope and exits non-zero', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);
