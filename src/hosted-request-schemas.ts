@@ -406,7 +406,7 @@ function buildManifestFieldDefaults(): Map<
 > {
   const index = new Map<string, Map<string, ManifestDefaultValue>>();
 
-  for (const entry of Object.values(HOSTED_EXECUTION_MANIFESTS) as Array<{
+  for (const entry of Object.values(HOSTED_EXECUTION_MANIFESTS).flat() as Array<{
     endpoints?: ReadonlyArray<{
       endpointKey: string;
       fields: ReadonlyArray<{ name: string; default?: ManifestDefaultValue }>;

@@ -4555,7 +4555,7 @@ describe('hosted domain commands', () => {
     // The manifest is the single source for these platform defaults; the runner
     // reads them instead of the CLI duplicating literal 720p / 5s.
     const seedanceFields = (
-      HOSTED_EXECUTION_MANIFESTS['seedance-submitter'] as unknown as {
+      HOSTED_EXECUTION_MANIFESTS['seedance-submitter'][0] as unknown as {
         endpoints: ReadonlyArray<{
           endpointKey: string;
           fields: ReadonlyArray<{ name: string; default?: unknown }>;

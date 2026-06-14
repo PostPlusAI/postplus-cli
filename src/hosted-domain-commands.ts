@@ -93,7 +93,7 @@ function buildMediaVerbIndex(): Map<string, Map<string, ResolvedVerbEndpoint>> {
 
   for (const entry of Object.values(
     HOSTED_EXECUTION_MANIFESTS,
-  ) as unknown as ManifestEntry[]) {
+  ).flat() as unknown as ManifestEntry[]) {
     if (entry.domain !== 'media') {
       continue;
     }
@@ -146,7 +146,7 @@ function buildResearchVerbIndex(): Map<
 
   for (const entry of Object.values(
     HOSTED_EXECUTION_MANIFESTS,
-  ) as unknown as ManifestEntry[]) {
+  ).flat() as unknown as ManifestEntry[]) {
     if (entry.domain !== 'research') {
       continue;
     }
