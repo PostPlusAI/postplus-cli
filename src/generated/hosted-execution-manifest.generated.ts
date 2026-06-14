@@ -1142,6 +1142,48 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       }
     ]
   },
+  "instagram-tools": {
+    "skill": "instagram-tools",
+    "mode": "cli-runner",
+    "surface": "request-json",
+    "verb": "collect",
+    "domain": "research",
+    "capability": "hosted-collection",
+    "collectionKeys": [
+      "instagram-comments",
+      "instagram-email-search",
+      "instagram-hashtags",
+      "instagram-posts",
+      "instagram-profiles",
+      "instagram-search"
+    ],
+    "collections": [
+      {
+        "collectionKey": "instagram-comments",
+        "actorId": "apify/instagram-comment-scraper"
+      },
+      {
+        "collectionKey": "instagram-email-search",
+        "actorId": "bhansalisoft/instagram-email-scraper"
+      },
+      {
+        "collectionKey": "instagram-hashtags",
+        "actorId": "apify/instagram-hashtag-scraper"
+      },
+      {
+        "collectionKey": "instagram-posts",
+        "actorId": "apify/instagram-post-scraper"
+      },
+      {
+        "collectionKey": "instagram-profiles",
+        "actorId": "apify/instagram-profile-scraper"
+      },
+      {
+        "collectionKey": "instagram-search",
+        "actorId": "apify/instagram-search-scraper"
+      }
+    ]
+  },
   "seedance-submitter": {
     "skill": "seedance-submitter",
     "mode": "cli-runner",
