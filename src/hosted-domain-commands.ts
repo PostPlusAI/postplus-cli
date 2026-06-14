@@ -46,6 +46,11 @@ type ManifestModel = {
   providerModelPath: string;
 };
 
+type ManifestCollection = {
+  collectionKey: string;
+  actorId: string;
+};
+
 type ManifestEntry = {
   skill: string;
   surface: string;
@@ -53,20 +58,24 @@ type ManifestEntry = {
   domain: string;
   capability: string;
   // media-generation entries carry `endpoints`; video-analysis entries carry
-  // `models`. Each is optional so the union serializes/reads cleanly.
+  // `models`; hosted-collection entries carry `collections`. Each is optional so
+  // the union serializes/reads cleanly.
   endpoints?: readonly ManifestEndpoint[];
   models?: readonly ManifestModel[];
+  collections?: readonly ManifestCollection[];
 };
 
 // A resolved (verb, target) entry. media-generation resolves to an `endpoint`;
-// video-analysis resolves to a `model`. capability discriminates the two so the
-// dispatcher routes to the right input surface.
+// video-analysis resolves to a `model`; hosted-collection resolves to a
+// `collection`. capability discriminates them so the dispatcher routes to the
+// right input surface.
 type ResolvedVerbEndpoint = {
   skill: string;
   capability: string;
   surface: string;
   endpoint?: ManifestEndpoint;
   model?: ManifestModel;
+  collection?: ManifestCollection;
 };
 
 const MEDIA_VERB_ENDPOINTS = buildMediaVerbIndex();
@@ -112,18 +121,48 @@ function buildMediaVerbIndex(): Map<string, Map<string, ResolvedVerbEndpoint>> {
   return index;
 }
 
+const RESEARCH_VERB_COLLECTIONS = buildResearchVerbIndex();
+
+// Manifest-driven research verb grammar: `postplus research <verb> <collectionKey>`.
+// Built from HOSTED_EXECUTION_MANIFESTS entries in the research domain with the
+// hosted-collection capability, mapping verb -> collectionKey -> resolved entry
+// (with the actorId resolved by reference in the generated manifest).
+function buildResearchVerbIndex(): Map<
+  string,
+  Map<string, ResolvedVerbEndpoint>
+> {
+  const index = new Map<string, Map<string, ResolvedVerbEndpoint>>();
+
+  for (const entry of Object.values(
+    HOSTED_EXECUTION_MANIFESTS,
+  ) as unknown as ManifestEntry[]) {
+    if (entry.domain !== 'research' || entry.capability !== 'hosted-collection') {
+      continue;
+    }
+
+    let targets = index.get(entry.verb);
+    if (!targets) {
+      targets = new Map<string, ResolvedVerbEndpoint>();
+      index.set(entry.verb, targets);
+    }
+
+    for (const collection of entry.collections ?? []) {
+      targets.set(collection.collectionKey, {
+        skill: entry.skill,
+        capability: entry.capability,
+        surface: entry.surface,
+        collection,
+      });
+    }
+  }
+
+  return index;
+}
+
 type ParsedFlags = {
   values: Map<string, string>;
   booleans: Set<string>;
   arrays: Map<string, string[]>;
-};
-
-type HostedEnvelope = {
-  hostedOperationId?: unknown;
-  input?: unknown;
-  operationId?: unknown;
-  quoteConfirmationToken?: unknown;
-  schemaVersion?: unknown;
 };
 
 class HostedQuoteConfirmationRequiredError extends Error {
@@ -570,12 +609,22 @@ function buildMediaVerbInput(input: {
   return record;
 }
 
+// Manifest-driven hosted-collection verb (request-json surface). The polling path
+// (`--run-handle`) resumes a pending run unchanged. The launch path resolves the
+// positional `<collectionKey>` against the research verb index for verb `collect`,
+// reads the collection input object directly from `--request <file>` (NOT a
+// schemaVersion envelope), and posts to /hosted/collection. The resolved entry
+// gives the default skillName (overridable by `--skill`); the actorId stays
+// internal and is never placed on the public body.
 async function runResearchCollect(args: string[]): Promise<number> {
-  const flags = parseFlags(args, new Set(['json']));
-  const runHandle = flags.values.get('run-handle');
-  const outputPath = flags.values.get('output') ?? null;
+  const [first, ...rest] = args;
 
-  if (runHandle) {
+  // Polling path: `research collect --run-handle <h>`. No positional collectionKey.
+  if (!first || first.startsWith('--')) {
+    const flags = parseFlags(args, new Set(['json']));
+    const runHandle = requireFlag(flags, 'run-handle');
+    const outputPath = flags.values.get('output') ?? null;
+
     return runHostedCommand({
       request: () =>
         postHostedJson({
@@ -589,18 +638,48 @@ async function runResearchCollect(args: string[]): Promise<number> {
     });
   }
 
-  const skillName = requireFlag(flags, 'skill');
-  const collectionKey = requireFlag(flags, 'collection-key');
-  const inputPath = requireFlag(flags, 'input');
-  const envelope = readHostedEnvelope(await readJsonFile(inputPath), inputPath);
+  const verb = 'collect';
+  const collectionKey = first;
+  const targets = RESEARCH_VERB_COLLECTIONS.get(verb);
+  const resolved = targets?.get(collectionKey);
+  if (!resolved) {
+    const valid = targets ? [...targets.keys()].join(', ') : '';
+    throw new Error(
+      `Unknown research collect collection ${collectionKey}. Valid: ${valid}.`,
+    );
+  }
+
+  const flags = parseFlags(rest, new Set(['json']));
+  const allowedKeys = new Set([
+    'hosted-operation-id',
+    'json',
+    'max-charge-usd',
+    'output',
+    'quote-confirmation-token',
+    'request',
+    'skill',
+  ]);
+  for (const key of [...flags.values.keys(), ...flags.booleans]) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`Unknown option for research ${verb}: --${key}.`);
+    }
+  }
+
+  const requestPath = requireFlag(flags, 'request');
+  const outputPath = flags.values.get('output') ?? null;
+  const raw = await readJsonFile(requestPath);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(
+      `research ${verb} ${collectionKey} --request must be a JSON object of collection input.`,
+    );
+  }
+  const input = raw as Record<string, unknown>;
+
+  const skillName = flags.values.get('skill') ?? resolved.skill;
   const operationId =
     flags.values.get('hosted-operation-id') ??
-    normalizeString(envelope.hostedOperationId) ??
-    normalizeString(envelope.operationId) ??
-    `postplus-cli:research:${collectionKey}:${randomUUID()}`;
-  const quoteConfirmationToken =
-    flags.values.get('quote-confirmation-token') ??
-    normalizeString(envelope.quoteConfirmationToken);
+    `postplus-cli:research:collect:${collectionKey}:${randomUUID()}`;
+  const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
 
   // Optional per-request cost ceiling (USD) overriding the hosted default.
   const maxChargeFlag = flags.values.get('max-charge-usd');
@@ -618,7 +697,7 @@ async function runResearchCollect(args: string[]): Promise<number> {
       postHostedJson({
         body: {
           collectionKey,
-          input: envelope.input,
+          input,
           operationId,
           quoteConfirmationToken: quoteConfirmationToken ?? undefined,
           skillName,
@@ -627,7 +706,7 @@ async function runResearchCollect(args: string[]): Promise<number> {
         pathName: '/api/postplus-cli/hosted/collection',
         skillName,
       }),
-    errorInputLabel: inputPath,
+    errorInputLabel: requestPath,
     json: flags.booleans.has('json'),
     outputPath,
   });
@@ -945,17 +1024,6 @@ async function readJsonFile(filePath: string): Promise<unknown> {
   }
 }
 
-function readHostedEnvelope(value: unknown, filePath: string): HostedEnvelope {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`${filePath} must be a schemaVersion 1 hosted envelope.`);
-  }
-  const envelope = value as HostedEnvelope;
-  if (envelope.schemaVersion !== 1 || !Object.hasOwn(envelope, 'input')) {
-    throw new Error(`${filePath} must be a schemaVersion 1 hosted envelope.`);
-  }
-  return envelope;
-}
-
 async function writeResult(
   payload: unknown,
   outputPath: string | null,
@@ -1070,7 +1138,7 @@ function printResearchHelp(): void {
 
 Usage:
   postplus research schema [--collection-key <key>] [--json]
-  postplus research collect --skill <skill-id> --collection-key <key> --input <hosted-envelope.json> [--max-charge-usd <usd>] [--output <result.json>]
+  postplus research collect <collection-key> --request <input.json> [--skill <skill-id>] [--max-charge-usd <usd>] [--output <result.json>]
   postplus research collect --run-handle <runHandle> [--output <result.json>]
   postplus research capability --request <hosted-capability-request.json> [--output <result.json>]
 `);

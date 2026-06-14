@@ -4074,6 +4074,94 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('posts the manifest-driven research collect verb to /hosted/collection', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    const outputPath = resolve(requestDir, 'result.json');
+    await writeFile(
+      requestPath,
+      JSON.stringify({
+        keyword: 'portable blender',
+        geo: 'US',
+        timeframe: 'today 12-m',
+        enableTrendingSearches: false,
+      }),
+    );
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedUrl: string | null = null;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      postedUrl = String(input);
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({ status: 'completed', payload: { itemCount: 1 } }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    };
+
+    try {
+      const result = await runHostedDomainCommand('research', [
+        'collect',
+        'google-trends-fast',
+        '--request',
+        requestPath,
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 0);
+      assert.equal(
+        postedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/collection',
+      );
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.collectionKey, 'google-trends-fast');
+      assert.equal(body.skillName, 'google-trends-research');
+      assert.deepEqual(body.input, {
+        keyword: 'portable blender',
+        geo: 'US',
+        timeframe: 'today 12-m',
+        enableTrendingSearches: false,
+      });
+      assert.match(
+        String(body.operationId),
+        /^postplus-cli:research:collect:google-trends-fast:/u,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects an unknown research collect collection key', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    await writeFile(requestPath, JSON.stringify({ keyword: 'x' }));
+
+    await assert.rejects(
+      runHostedDomainCommand('research', [
+        'collect',
+        'not-a-collection',
+        '--request',
+        requestPath,
+      ]),
+      /Unknown research collect collection not-a-collection/u,
+    );
+  });
+
   it('derives media-generation billing dimensions from the public request', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);

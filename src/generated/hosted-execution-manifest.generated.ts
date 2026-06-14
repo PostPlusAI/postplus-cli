@@ -182,6 +182,23 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       }
     ]
   },
+  "google-trends-research": {
+    "skill": "google-trends-research",
+    "mode": "cli-runner",
+    "surface": "request-json",
+    "verb": "collect",
+    "domain": "research",
+    "capability": "hosted-collection",
+    "collectionKeys": [
+      "google-trends-fast"
+    ],
+    "collections": [
+      {
+        "collectionKey": "google-trends-fast",
+        "actorId": "google-trends-fast-scraper"
+      }
+    ]
+  },
   "image-batch-runner": {
     "skill": "image-batch-runner",
     "mode": "cli-runner",
