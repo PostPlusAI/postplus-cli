@@ -56,6 +56,10 @@ type ManifestSource = {
   datasetId: string;
 };
 
+type ManifestOperation = {
+  operation: string;
+};
+
 type ManifestEntry = {
   skill: string;
   surface: string;
@@ -64,12 +68,14 @@ type ManifestEntry = {
   capability: string;
   // media-generation entries carry `endpoints`; video-analysis entries carry
   // `models`; hosted-collection entries carry `collections`;
-  // public-content-collection entries carry `sources`. Each is optional so the
-  // union serializes/reads cleanly.
+  // public-content-collection entries carry `sources`; social-publishing
+  // entries carry `operations`. Each is optional so the union serializes/reads
+  // cleanly.
   endpoints?: readonly ManifestEndpoint[];
   models?: readonly ManifestModel[];
   collections?: readonly ManifestCollection[];
   sources?: readonly ManifestSource[];
+  operations?: readonly ManifestOperation[];
 };
 
 // A resolved (verb, target) entry. media-generation resolves to an `endpoint`;
@@ -84,6 +90,7 @@ type ResolvedVerbEndpoint = {
   model?: ManifestModel;
   collection?: ManifestCollection;
   source?: ManifestSource;
+  operation?: string;
 };
 
 const MEDIA_VERB_ENDPOINTS = buildMediaVerbIndex();
@@ -184,6 +191,36 @@ function buildResearchVerbIndex(): Map<
   return index;
 }
 
+const PUBLISH_VERB_OPERATIONS = buildPublishVerbIndex();
+
+// Manifest-driven publish grammar: `postplus publish <operation> --request <file>`.
+// Unlike media/research (a fixed verb + a positional target), the publish OPERATION
+// IS the subcommand — there is no separate target positional. The index is a flat
+// map keyed by operation, since the operation is both the subcommand and the
+// target. Built from HOSTED_EXECUTION_MANIFESTS entries in the publish domain.
+function buildPublishVerbIndex(): Map<string, ResolvedVerbEndpoint> {
+  const index = new Map<string, ResolvedVerbEndpoint>();
+
+  for (const entry of Object.values(
+    HOSTED_EXECUTION_MANIFESTS,
+  ).flat() as unknown as ManifestEntry[]) {
+    if (entry.domain !== 'publish' || entry.capability !== 'social-publishing') {
+      continue;
+    }
+
+    for (const { operation } of entry.operations ?? []) {
+      index.set(operation, {
+        skill: entry.skill,
+        capability: entry.capability,
+        surface: entry.surface,
+        operation,
+      });
+    }
+  }
+
+  return index;
+}
+
 type ParsedFlags = {
   values: Map<string, string>;
   booleans: Set<string>;
@@ -257,6 +294,15 @@ export async function runHostedDomainCommand(
 
   if (domain === 'media' && subcommand && MEDIA_VERB_ENDPOINTS.has(subcommand)) {
     return runMediaVerb(subcommand, rest);
+  }
+
+  // publish: the OPERATION is the subcommand (no separate target positional).
+  if (
+    domain === 'publish' &&
+    subcommand &&
+    PUBLISH_VERB_OPERATIONS.has(subcommand)
+  ) {
+    return runPublishOperation(subcommand, rest);
   }
 
   printCapabilityHelp(domain);
@@ -825,6 +871,74 @@ async function runResearchScrape(args: string[]): Promise<number> {
           operationId,
           quoteConfirmationToken: quoteConfirmationToken ?? undefined,
           maxTotalChargeUsd,
+        },
+        pathName: '/api/postplus-cli/hosted/capability',
+        skillName,
+      }),
+    errorInputLabel: requestPath,
+    json: flags.booleans.has('json'),
+    outputPath,
+  });
+}
+
+// Manifest-driven publish operation (request-json surface). The OPERATION is the
+// subcommand and the target: `postplus publish <operation> --request <file>`. The
+// publishing input object is read directly from `--request <file>` and posted to
+// /hosted/capability with capability `social-publishing` / the resolved operation.
+// Side-effecting operations surface the Web quote-confirmation challenge; the
+// shared runHostedCommand handles the challenge -> retry-with-token path. There is
+// no requestDimensions/approval/execute — those were private-runtime concepts.
+async function runPublishOperation(
+  operation: string,
+  args: string[],
+): Promise<number> {
+  const resolved = PUBLISH_VERB_OPERATIONS.get(operation);
+  if (!resolved) {
+    throw new Error(
+      `Unknown publish operation ${operation}. Valid: ${[...PUBLISH_VERB_OPERATIONS.keys()].join(', ')}.`,
+    );
+  }
+
+  const flags = parseFlags(args, new Set(['json']));
+  const allowedKeys = new Set([
+    'hosted-operation-id',
+    'json',
+    'output',
+    'quote-confirmation-token',
+    'request',
+    'skill',
+  ]);
+  for (const key of [...flags.values.keys(), ...flags.booleans]) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`Unknown option for publish ${operation}: --${key}.`);
+    }
+  }
+
+  const requestPath = requireFlag(flags, 'request');
+  const outputPath = flags.values.get('output') ?? null;
+  const raw = await readJsonFile(requestPath);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(
+      `publish ${operation} --request must be a JSON object of publishing input.`,
+    );
+  }
+  const input = raw as Record<string, unknown>;
+
+  const skillName = flags.values.get('skill') ?? resolved.skill;
+  const operationId =
+    flags.values.get('hosted-operation-id') ??
+    `postplus-cli:publish:social-publishing:request:${randomUUID()}`;
+  const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
+
+  return runHostedCommand({
+    request: () =>
+      postHostedJson({
+        body: {
+          capability: 'social-publishing',
+          operation,
+          input,
+          operationId,
+          quoteConfirmationToken: quoteConfirmationToken ?? undefined,
         },
         pathName: '/api/postplus-cli/hosted/capability',
         skillName,

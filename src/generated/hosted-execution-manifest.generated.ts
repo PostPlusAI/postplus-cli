@@ -1544,6 +1544,60 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       ]
     }
   ],
+  "social-media-publisher": [
+    {
+      "skill": "social-media-publisher",
+      "mode": "cli-runner",
+      "surface": "request-json",
+      "verb": "publish",
+      "domain": "publish",
+      "capability": "social-publishing",
+      "operations": [
+        {
+          "operation": "analytics"
+        },
+        {
+          "operation": "channel-settings"
+        },
+        {
+          "operation": "create-post"
+        },
+        {
+          "operation": "delete-post"
+        },
+        {
+          "operation": "delete-post-group"
+        },
+        {
+          "operation": "list-channels"
+        },
+        {
+          "operation": "list-posts"
+        },
+        {
+          "operation": "missing-content"
+        },
+        {
+          "operation": "notifications"
+        },
+        {
+          "operation": "set-release-id"
+        },
+        {
+          "operation": "trigger-channel-tool"
+        },
+        {
+          "operation": "update-post-status"
+        },
+        {
+          "operation": "upload-file"
+        },
+        {
+          "operation": "upload-from-url"
+        }
+      ]
+    }
+  ],
   "tiktok-ad-research": [
     {
       "skill": "tiktok-ad-research",
