@@ -28,6 +28,8 @@ type ManifestField = {
   flag: string | null;
   type: 'string' | 'number' | 'boolean' | 'media-url';
   enumValues?: readonly string[];
+  min?: number;
+  max?: number;
   default?: string | number | boolean;
   required: boolean;
   derivedFrom?: string;
@@ -50,6 +52,7 @@ type ManifestEntry = {
 type ResolvedVerbEndpoint = {
   skill: string;
   capability: string;
+  surface: string;
   endpoint: ManifestEndpoint;
 };
 
@@ -75,6 +78,7 @@ function buildMediaVerbIndex(): Map<string, Map<string, ResolvedVerbEndpoint>> {
       endpoints.set(endpoint.endpointKey, {
         skill: entry.skill,
         capability: entry.capability,
+        surface: entry.surface,
         endpoint,
       });
     }
@@ -167,10 +171,11 @@ export async function runHostedDomainCommand(
   return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
 }
 
-// Manifest-driven verb grammar: `postplus media <verb> <endpointKey> --<flags>`.
-// Scalar intent/default fields map to flags; runner-managed fields (billing
-// dimensions, ids, tokens) have no flag and are derived/minted by the runner,
-// so the agent structurally cannot pass them.
+// Manifest-driven verb grammar: `postplus media <verb> <endpointKey> ...`. The
+// endpoint's executionSurface decides the input shape — a flags surface maps
+// scalar intent/default fields to flags, a request-json surface reads the nested
+// envelope from `--request <file>`. Either way runner-managed fields (billing
+// dimensions, ids, tokens) are derived/minted by the runner, never agent-supplied.
 async function runMediaVerb(verb: string, args: string[]): Promise<number> {
   const endpoints = MEDIA_VERB_ENDPOINTS.get(verb);
   if (!endpoints) {
@@ -191,6 +196,22 @@ async function runMediaVerb(verb: string, args: string[]): Promise<number> {
     );
   }
 
+  if (resolved.surface === 'request-json') {
+    return runMediaVerbRequestJson({ args: rest, endpointKey, resolved, verb });
+  }
+
+  return runMediaVerbFlags({ args: rest, endpointKey, resolved, verb });
+}
+
+// Flags surface (e.g. audio-transcription): scalar intent/default fields map to
+// flags; runner-managed fields have no flag so the agent cannot pass them.
+async function runMediaVerbFlags(args: {
+  args: string[];
+  endpointKey: string;
+  resolved: ResolvedVerbEndpoint;
+  verb: string;
+}): Promise<number> {
+  const { endpointKey, resolved, verb } = args;
   const fields = resolved.endpoint.fields;
   const flagToField = new Map<string, ManifestField>();
   const booleanKeys = new Set<string>(['json']);
@@ -206,7 +227,7 @@ async function runMediaVerb(verb: string, args: string[]): Promise<number> {
     }
   }
 
-  const flags = parseFlags(rest, booleanKeys);
+  const flags = parseFlags(args.args, booleanKeys);
   const outputPath = flags.values.get('output') ?? null;
   const controlKeys = new Set([
     'hosted-operation-id',
@@ -231,20 +252,109 @@ async function runMediaVerb(verb: string, args: string[]): Promise<number> {
     verb,
   });
 
-  const operationId =
-    flags.values.get('hosted-operation-id') ??
-    `postplus-cli:media:${resolved.capability}:request:${randomUUID()}`;
-  const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
-  const skillName = flags.values.get('skill') ?? resolved.skill;
-
-  const body = {
+  return submitMediaGenerationRequest({
     capability: resolved.capability,
     endpointKey,
+    errorInputLabel: `media-${verb}-${endpointKey}`,
     input,
+    json: flags.booleans.has('json'),
+    operationId:
+      flags.values.get('hosted-operation-id') ??
+      `postplus-cli:media:${resolved.capability}:request:${randomUUID()}`,
+    outputPath,
+    quoteConfirmationToken: flags.values.get('quote-confirmation-token'),
+    skillName: flags.values.get('skill') ?? resolved.skill,
+  });
+}
+
+// Request-json surface (e.g. seedance-submitter): the nested envelope is supplied
+// via `--request <file>`. capability/endpointKey come from the verb + positional,
+// so the body carries only the media-generation input. Runner-managed fields have
+// no flag and must not appear in the body — the CLI fast-fails if they do.
+async function runMediaVerbRequestJson(args: {
+  args: string[];
+  endpointKey: string;
+  resolved: ResolvedVerbEndpoint;
+  verb: string;
+}): Promise<number> {
+  const { endpointKey, resolved, verb } = args;
+  const flags = parseFlags(args.args, new Set(['json']));
+  const allowedKeys = new Set([
+    'hosted-operation-id',
+    'json',
+    'output',
+    'quote-confirmation-token',
+    'request',
+    'skill',
+  ]);
+  for (const key of [...flags.values.keys(), ...flags.booleans]) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`Unknown option for media ${verb}: --${key}.`);
+    }
+  }
+
+  const requestPath = requireFlag(flags, 'request');
+  const outputPath = flags.values.get('output') ?? null;
+  const raw = await readJsonFile(requestPath);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(
+      `media ${verb} ${endpointKey} --request must be a JSON object of media-generation input.`,
+    );
+  }
+  const input = raw as Record<string, unknown>;
+
+  // Runner-managed fields are minted/derived by the CLI; reject them in the body so
+  // the agent cannot smuggle in ids, tokens, or billing dimensions.
+  for (const field of resolved.endpoint.fields) {
+    if (
+      field.class === 'runner-managed' &&
+      Object.hasOwn(input, field.name)
+    ) {
+      throw new Error(
+        `media ${verb} ${endpointKey} input must not include runner-managed field "${field.name}"; the CLI mints or derives it.`,
+      );
+    }
+  }
+
+  return submitMediaGenerationRequest({
+    capability: resolved.capability,
+    endpointKey,
+    errorInputLabel: requestPath,
+    input,
+    json: flags.booleans.has('json'),
+    operationId:
+      flags.values.get('hosted-operation-id') ??
+      `postplus-cli:media:${resolved.capability}:request:${randomUUID()}`,
+    outputPath,
+    quoteConfirmationToken: flags.values.get('quote-confirmation-token'),
+    skillName: flags.values.get('skill') ?? resolved.skill,
+  });
+}
+
+// Shared submit path for both surfaces: wrap the media input, derive billing
+// dimensions from endpointKey + input, and POST to the Web boundary.
+function submitMediaGenerationRequest(params: {
+  capability: string;
+  endpointKey: string;
+  errorInputLabel: string;
+  input: Record<string, unknown>;
+  json: boolean;
+  operationId: string;
+  outputPath: string | null;
+  quoteConfirmationToken: string | undefined;
+  skillName: string;
+}): Promise<number> {
+  const body = {
+    capability: params.capability,
+    endpointKey: params.endpointKey,
+    input: params.input,
     operation: 'request',
-    operationId,
-    quoteConfirmationToken: quoteConfirmationToken ?? undefined,
-    requestDimensions: buildMediaGenerationRequestDimensions(endpointKey, input),
+    operationId: params.operationId,
+    quoteConfirmationToken: params.quoteConfirmationToken ?? undefined,
+    requestDimensions: buildMediaGenerationRequestDimensions(
+      params.endpointKey,
+      params.input,
+    ),
   };
 
   return runHostedCommand({
@@ -252,11 +362,11 @@ async function runMediaVerb(verb: string, args: string[]): Promise<number> {
       postHostedJson({
         body,
         pathName: '/api/postplus-cli/hosted/capability',
-        skillName,
+        skillName: params.skillName,
       }),
-    errorInputLabel: `media-${verb}-${endpointKey}`,
-    json: flags.booleans.has('json'),
-    outputPath,
+    errorInputLabel: params.errorInputLabel,
+    json: params.json,
+    outputPath: params.outputPath,
   });
 }
 

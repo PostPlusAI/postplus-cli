@@ -4279,6 +4279,116 @@ describe('hosted domain commands', () => {
     );
   });
 
+  it('submits a manifest-driven seedance request (request-json) with derived billing dimensions', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    await writeFile(
+      requestPath,
+      JSON.stringify({
+        prompt: 'a blue sticky note slides across a white desk',
+        resolution: '720p',
+        duration: 5,
+        aspect_ratio: '9:16',
+      }),
+    );
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(
+        String(input),
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'video-seedance-2-text-turbo',
+        '--request',
+        requestPath,
+      ]);
+      assert.equal(result, 0);
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.capability, 'media-generation');
+      assert.equal(body.operation, 'request');
+      assert.equal(body.endpointKey, 'video-seedance-2-text-turbo');
+      assert.match(
+        String(body.operationId),
+        /^postplus-cli:media:media-generation:request:/u,
+      );
+      assert.deepEqual(body.input, {
+        prompt: 'a blue sticky note slides across a white desk',
+        resolution: '720p',
+        duration: 5,
+        aspect_ratio: '9:16',
+      });
+      const dimensions = body.requestDimensions as Record<string, unknown>;
+      assert.equal(dimensions.operationKey, 'video-seedance-2-text-turbo');
+      assert.equal(dimensions.duration, 5);
+      assert.equal(dimensions.resolution, '720p');
+      assert.equal(dimensions.referenceVideoCount, 0);
+      assert.equal(dimensions.referenceVideoMode, 'without_reference_videos');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects a runner-managed field in the seedance request-json body before any hosted call', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    await writeFile(
+      requestPath,
+      JSON.stringify({
+        prompt: 'a blue sticky note slides across a white desk',
+        requestDimensions: { duration: 99 },
+      }),
+    );
+
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'video-seedance-2-text-turbo',
+            '--request',
+            requestPath,
+          ]),
+        /must not include runner-managed field "requestDimensions"/u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('preserves the structured product error envelope and exits non-zero', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);
