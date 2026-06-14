@@ -106,6 +106,24 @@ class HostedQuoteConfirmationRequiredError extends Error {
   }
 }
 
+// Structured hosted product error as returned by the Web boundary. The CLI is a
+// pass-through: it must report the stable code, owning layer, and operation id
+// verbatim instead of collapsing the failure to a generic message.
+type HostedProductError = {
+  message: string;
+  code: string | null;
+  layer: string | null;
+  operationId: string | null;
+  userMessageRule: string | null;
+};
+
+class HostedProductRequestError extends Error {
+  constructor(readonly productError: HostedProductError) {
+    super(formatHostedProductErrorMessage(productError));
+    this.name = 'HostedProductRequestError';
+  }
+}
+
 const HOSTED_DOMAIN_CAPABILITIES: Record<HostedDomain, Set<string>> = {
   media: new Set(['media-file', 'media-generation', 'video-analysis']),
   mobile: new Set(['mobile-automation']),
@@ -229,19 +247,17 @@ async function runMediaVerb(verb: string, args: string[]): Promise<number> {
     requestDimensions: buildMediaGenerationRequestDimensions(endpointKey, input),
   };
 
-  const payload = await postHostedJson({
-    body,
-    pathName: '/api/postplus-cli/hosted/capability',
-    skillName,
-  }).catch((error: unknown) =>
-    buildHostedCommandError(error, {
-      inputPath: `media-${verb}-${endpointKey}`,
-      outputPath,
-    }),
-  );
-
-  await writeResult(payload, outputPath, flags.booleans.has('json'));
-  return 0;
+  return runHostedCommand({
+    request: () =>
+      postHostedJson({
+        body,
+        pathName: '/api/postplus-cli/hosted/capability',
+        skillName,
+      }),
+    errorInputLabel: `media-${verb}-${endpointKey}`,
+    json: flags.booleans.has('json'),
+    outputPath,
+  });
 }
 
 function buildMediaVerbInput(input: {
@@ -307,13 +323,17 @@ async function runResearchCollect(args: string[]): Promise<number> {
   const outputPath = flags.values.get('output') ?? null;
 
   if (runHandle) {
-    const payload = await postHostedJson({
-      body: { runHandle },
-      pathName: '/api/postplus-cli/hosted/collection',
-      skillName: null,
+    return runHostedCommand({
+      request: () =>
+        postHostedJson({
+          body: { runHandle },
+          pathName: '/api/postplus-cli/hosted/collection',
+          skillName: null,
+        }),
+      errorInputLabel: 'research-collect-run-handle',
+      json: flags.booleans.has('json'),
+      outputPath,
     });
-    await writeResult(payload, outputPath, flags.booleans.has('json'));
-    return 0;
   }
 
   const skillName = requireFlag(flags, 'skill');
@@ -340,26 +360,24 @@ async function runResearchCollect(args: string[]): Promise<number> {
     maxTotalChargeUsd = parsed;
   }
 
-  const payload = await postHostedJson({
-    body: {
-      collectionKey,
-      input: envelope.input,
-      operationId,
-      quoteConfirmationToken: quoteConfirmationToken ?? undefined,
-      skillName,
-      maxTotalChargeUsd,
-    },
-    pathName: '/api/postplus-cli/hosted/collection',
-    skillName,
-  }).catch((error: unknown) =>
-    buildHostedCommandError(error, {
-      inputPath,
-      outputPath,
-    }),
-  );
-
-  await writeResult(payload, outputPath, flags.booleans.has('json'));
-  return 0;
+  return runHostedCommand({
+    request: () =>
+      postHostedJson({
+        body: {
+          collectionKey,
+          input: envelope.input,
+          operationId,
+          quoteConfirmationToken: quoteConfirmationToken ?? undefined,
+          skillName,
+          maxTotalChargeUsd,
+        },
+        pathName: '/api/postplus-cli/hosted/collection',
+        skillName,
+      }),
+    errorInputLabel: inputPath,
+    json: flags.booleans.has('json'),
+    outputPath,
+  });
 }
 
 async function runHostedSchema(
@@ -433,19 +451,17 @@ async function runHostedCapability(
   };
   const skillName =
     flags.values.get('skill') ?? normalizeString(record.skillName);
-  const payload = await postHostedJson({
-    body,
-    pathName: '/api/postplus-cli/hosted/capability',
-    skillName,
-  }).catch((error: unknown) =>
-    buildHostedCommandError(error, {
-      inputPath: requestPath,
-      outputPath,
-    }),
-  );
-
-  await writeResult(payload, outputPath, flags.booleans.has('json'));
-  return 0;
+  return runHostedCommand({
+    request: () =>
+      postHostedJson({
+        body,
+        pathName: '/api/postplus-cli/hosted/capability',
+        skillName,
+      }),
+    errorInputLabel: requestPath,
+    json: flags.booleans.has('json'),
+    outputPath,
+  });
 }
 
 function buildDerivedHostedCapabilityFields(input: {
@@ -506,10 +522,11 @@ async function postHostedJson(input: {
 
   const payload = await readJsonResponse(response);
   if (!response.ok) {
+    const productError = readHostedProductError(payload);
     const challenge = readLargeCreditQuoteConfirmationChallenge(payload);
     if (challenge) {
       throw new HostedQuoteConfirmationRequiredError(
-        readProductError(payload),
+        productError.message,
         challenge,
       );
     }
@@ -518,27 +535,66 @@ async function postHostedJson(input: {
     if (compatibilityError) {
       throw new Error(compatibilityError);
     }
-    throw new Error(readProductError(payload));
+    throw new HostedProductRequestError(productError);
   }
 
   return payload;
 }
 
-async function buildHostedCommandError(
-  error: unknown,
-  input: {
-    inputPath: string;
-    outputPath: string | null;
-  },
-): Promise<never> {
-  if (!(error instanceof HostedQuoteConfirmationRequiredError)) {
+// Single exit path for every hosted command: success writes the result and
+// returns 0; a quote challenge writes the challenge file and rethrows actionable
+// guidance; a structured product error writes the full error envelope to the
+// result JSON and surfaces code/layer/operationId on the terminal, exiting 1.
+async function runHostedCommand(input: {
+  request: () => Promise<unknown>;
+  errorInputLabel: string;
+  json: boolean;
+  outputPath: string | null;
+}): Promise<number> {
+  let payload: unknown;
+  try {
+    payload = await input.request();
+  } catch (error) {
+    if (error instanceof HostedQuoteConfirmationRequiredError) {
+      const challengePath = await writeQuoteConfirmationChallenge(error, {
+        errorInputLabel: input.errorInputLabel,
+        outputPath: input.outputPath,
+      });
+      throw new Error(
+        [
+          error.message,
+          `Quote confirmation challenge: ${challengePath}`,
+          `Confirm: postplus quote confirm --json --challenge-file "${challengePath}"`,
+          'Then rerun the hosted command with --quote-confirmation-token <token>.',
+        ].join('\n'),
+      );
+    }
+
+    if (error instanceof HostedProductRequestError) {
+      await writeResult(
+        { error: error.productError },
+        input.outputPath,
+        input.json,
+      );
+      process.stderr.write(`${error.message}\n`);
+      return 1;
+    }
+
     throw error;
   }
 
+  await writeResult(payload, input.outputPath, input.json);
+  return 0;
+}
+
+async function writeQuoteConfirmationChallenge(
+  error: HostedQuoteConfirmationRequiredError,
+  input: { errorInputLabel: string; outputPath: string | null },
+): Promise<string> {
   const challengePath = path.resolve(
     input.outputPath
       ? `${input.outputPath}.quote-confirmation.json`
-      : `${input.inputPath}.quote-confirmation.json`,
+      : `${input.errorInputLabel}.quote-confirmation.json`,
   );
   await mkdir(path.dirname(challengePath), { recursive: true });
   await writeFile(
@@ -550,14 +606,7 @@ async function buildHostedCommandError(
     },
   );
 
-  throw new Error(
-    [
-      error.message,
-      `Quote confirmation challenge: ${challengePath}`,
-      `Confirm: postplus quote confirm --json --challenge-file "${challengePath}"`,
-      'Then rerun the hosted command with --quote-confirmation-token <token>.',
-    ].join('\n'),
-  );
+  return challengePath;
 }
 
 async function postJson(input: {
@@ -596,17 +645,39 @@ async function readJsonResponse(response: Response): Promise<unknown> {
   }
 }
 
-function readProductError(payload: unknown): string {
-  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    const record = payload as Record<string, unknown>;
-    if (typeof record.error === 'string' && record.error.trim()) {
-      return record.error.trim();
-    }
-    if (typeof record.message === 'string' && record.message.trim()) {
-      return record.message.trim();
-    }
-  }
-  return 'PostPlus hosted capability request failed.';
+function readHostedProductError(payload: unknown): HostedProductError {
+  const record =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : {};
+
+  return {
+    message:
+      normalizeString(record.error) ??
+      normalizeString(record.message) ??
+      'PostPlus hosted capability request failed.',
+    code:
+      normalizeString(record.code) ?? normalizeString(record.productErrorCode),
+    layer: normalizeString(record.layer),
+    operationId: normalizeString(record.operationId),
+    userMessageRule: normalizeString(record.userMessageRule),
+  };
+}
+
+// Terminal message that keeps the stable code, owning layer, and operation id
+// visible next to the human-readable message so a failed run is locatable.
+function formatHostedProductErrorMessage(
+  productError: HostedProductError,
+): string {
+  const locator = [
+    productError.code ? `code=${productError.code}` : null,
+    productError.layer ? `layer=${productError.layer}` : null,
+    productError.operationId ? `operationId=${productError.operationId}` : null,
+  ].filter((part): part is string => part !== null);
+
+  return locator.length > 0
+    ? `${productError.message} (${locator.join(' ')})`
+    : productError.message;
 }
 
 async function readJsonFile(filePath: string): Promise<unknown> {

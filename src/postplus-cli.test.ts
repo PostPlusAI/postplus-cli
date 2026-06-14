@@ -4279,6 +4279,65 @@ describe('hosted domain commands', () => {
     );
   });
 
+  it('preserves the structured product error envelope and exits non-zero', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'result.json');
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          code: 'postplus_cli_hosted_provider_timeout',
+          error: 'Media generation timed out while calling the provider.',
+          layer: 'hosted-capability',
+          message: 'Media generation timed out while calling the provider.',
+          operationId: 'op-from-web-123',
+          status: 504,
+          userMessageRule: 'retry_later',
+        }),
+        {
+          status: 504,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'transcribe',
+        'transcription-whisper',
+        '--audio',
+        'https://example.com/a.mp3',
+        '--duration-seconds',
+        '30',
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 1);
+      const written = JSON.parse(await readFile(outputPath, 'utf8')) as {
+        error: Record<string, unknown>;
+      };
+      assert.deepEqual(written.error, {
+        code: 'postplus_cli_hosted_provider_timeout',
+        layer: 'hosted-capability',
+        message: 'Media generation timed out while calling the provider.',
+        operationId: 'op-from-web-123',
+        userMessageRule: 'retry_later',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('writes quote confirmation challenges beside hosted command outputs', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);
