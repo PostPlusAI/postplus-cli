@@ -182,6 +182,33 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       }
     ]
   },
+  "facebook-research": {
+    "skill": "facebook-research",
+    "mode": "cli-runner",
+    "surface": "request-json",
+    "verb": "scrape",
+    "domain": "research",
+    "capability": "public-content-collection",
+    "sourceKeys": [
+      "facebook-group-posts",
+      "facebook-post-by-url",
+      "facebook-profile-posts"
+    ],
+    "sources": [
+      {
+        "sourceKey": "facebook-group-posts",
+        "datasetId": "gd_lz11l67o2cb3r0lkj3"
+      },
+      {
+        "sourceKey": "facebook-post-by-url",
+        "datasetId": "gd_lyclm1571iy3mv57zw"
+      },
+      {
+        "sourceKey": "facebook-profile-posts",
+        "datasetId": "gd_lkaxegm826bjpoo9m5"
+      }
+    ]
+  },
   "google-trends-research": {
     "skill": "google-trends-research",
     "mode": "cli-runner",

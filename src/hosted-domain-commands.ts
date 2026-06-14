@@ -51,6 +51,11 @@ type ManifestCollection = {
   actorId: string;
 };
 
+type ManifestSource = {
+  sourceKey: string;
+  datasetId: string;
+};
+
 type ManifestEntry = {
   skill: string;
   surface: string;
@@ -58,17 +63,19 @@ type ManifestEntry = {
   domain: string;
   capability: string;
   // media-generation entries carry `endpoints`; video-analysis entries carry
-  // `models`; hosted-collection entries carry `collections`. Each is optional so
-  // the union serializes/reads cleanly.
+  // `models`; hosted-collection entries carry `collections`;
+  // public-content-collection entries carry `sources`. Each is optional so the
+  // union serializes/reads cleanly.
   endpoints?: readonly ManifestEndpoint[];
   models?: readonly ManifestModel[];
   collections?: readonly ManifestCollection[];
+  sources?: readonly ManifestSource[];
 };
 
 // A resolved (verb, target) entry. media-generation resolves to an `endpoint`;
 // video-analysis resolves to a `model`; hosted-collection resolves to a
-// `collection`. capability discriminates them so the dispatcher routes to the
-// right input surface.
+// `collection`; public-content-collection resolves to a `source`. capability
+// discriminates them so the dispatcher routes to the right input surface.
 type ResolvedVerbEndpoint = {
   skill: string;
   capability: string;
@@ -76,6 +83,7 @@ type ResolvedVerbEndpoint = {
   endpoint?: ManifestEndpoint;
   model?: ManifestModel;
   collection?: ManifestCollection;
+  source?: ManifestSource;
 };
 
 const MEDIA_VERB_ENDPOINTS = buildMediaVerbIndex();
@@ -121,12 +129,15 @@ function buildMediaVerbIndex(): Map<string, Map<string, ResolvedVerbEndpoint>> {
   return index;
 }
 
-const RESEARCH_VERB_COLLECTIONS = buildResearchVerbIndex();
+const RESEARCH_VERB_TARGETS = buildResearchVerbIndex();
 
-// Manifest-driven research verb grammar: `postplus research <verb> <collectionKey>`.
-// Built from HOSTED_EXECUTION_MANIFESTS entries in the research domain with the
-// hosted-collection capability, mapping verb -> collectionKey -> resolved entry
-// (with the actorId resolved by reference in the generated manifest).
+// Manifest-driven research verb grammar: `postplus research <verb> <targetKey>`.
+// Built from HOSTED_EXECUTION_MANIFESTS entries in the research domain, mapping
+// verb -> targetKey -> resolved entry. The hosted-collection capability binds the
+// `collect` verb to collectionKeys (actorId resolved by reference); the
+// public-content-collection capability binds the `scrape` verb to sourceKeys
+// (datasetId resolved by reference). The verb token itself comes from the
+// manifest, so a verb collision would surface in generation, not here.
 function buildResearchVerbIndex(): Map<
   string,
   Map<string, ResolvedVerbEndpoint>
@@ -136,7 +147,7 @@ function buildResearchVerbIndex(): Map<
   for (const entry of Object.values(
     HOSTED_EXECUTION_MANIFESTS,
   ) as unknown as ManifestEntry[]) {
-    if (entry.domain !== 'research' || entry.capability !== 'hosted-collection') {
+    if (entry.domain !== 'research') {
       continue;
     }
 
@@ -146,13 +157,27 @@ function buildResearchVerbIndex(): Map<
       index.set(entry.verb, targets);
     }
 
-    for (const collection of entry.collections ?? []) {
-      targets.set(collection.collectionKey, {
-        skill: entry.skill,
-        capability: entry.capability,
-        surface: entry.surface,
-        collection,
-      });
+    if (entry.capability === 'hosted-collection') {
+      for (const collection of entry.collections ?? []) {
+        targets.set(collection.collectionKey, {
+          skill: entry.skill,
+          capability: entry.capability,
+          surface: entry.surface,
+          collection,
+        });
+      }
+      continue;
+    }
+
+    if (entry.capability === 'public-content-collection') {
+      for (const source of entry.sources ?? []) {
+        targets.set(source.sourceKey, {
+          skill: entry.skill,
+          capability: entry.capability,
+          surface: entry.surface,
+          source,
+        });
+      }
     }
   }
 
@@ -211,6 +236,9 @@ export async function runHostedDomainCommand(
     }
     if (subcommand === 'collect') {
       return runResearchCollect(rest);
+    }
+    if (subcommand === 'scrape') {
+      return runResearchScrape(rest);
     }
     if (subcommand === 'capability') {
       return runHostedCapability(domain, rest);
@@ -640,7 +668,7 @@ async function runResearchCollect(args: string[]): Promise<number> {
 
   const verb = 'collect';
   const collectionKey = first;
-  const targets = RESEARCH_VERB_COLLECTIONS.get(verb);
+  const targets = RESEARCH_VERB_TARGETS.get(verb);
   const resolved = targets?.get(collectionKey);
   if (!resolved) {
     const valid = targets ? [...targets.keys()].join(', ') : '';
@@ -704,6 +732,101 @@ async function runResearchCollect(args: string[]): Promise<number> {
           maxTotalChargeUsd,
         },
         pathName: '/api/postplus-cli/hosted/collection',
+        skillName,
+      }),
+    errorInputLabel: requestPath,
+    json: flags.booleans.has('json'),
+    outputPath,
+  });
+}
+
+// Manifest-driven public-content-collection verb (request-json surface). Resolves
+// the positional `<sourceKey>` against the research verb index for verb `scrape`,
+// reads the scrape input directly from `--request <file>` as a JSON ARRAY of input
+// records (one per public URL/query), and posts to /hosted/capability with
+// capability `public-content-collection` / operation `scrape`. The resolved entry
+// gives the default skillName (overridable by `--skill`); the datasetId stays
+// internal and is never placed on the public body.
+async function runResearchScrape(args: string[]): Promise<number> {
+  const [first, ...rest] = args;
+
+  const verb = 'scrape';
+  const targets = RESEARCH_VERB_TARGETS.get(verb);
+
+  if (!first || first.startsWith('--')) {
+    const valid = targets ? [...targets.keys()].join(', ') : '';
+    throw new Error(
+      `postplus research ${verb} requires a source key. Valid: ${valid}.`,
+    );
+  }
+
+  const sourceKey = first;
+  const resolved = targets?.get(sourceKey);
+  if (!resolved) {
+    const valid = targets ? [...targets.keys()].join(', ') : '';
+    throw new Error(
+      `Unknown research scrape source ${sourceKey}. Valid: ${valid}.`,
+    );
+  }
+
+  const flags = parseFlags(rest, new Set(['json']));
+  const allowedKeys = new Set([
+    'hosted-operation-id',
+    'json',
+    'max-charge-usd',
+    'output',
+    'quote-confirmation-token',
+    'request',
+    'skill',
+  ]);
+  for (const key of [...flags.values.keys(), ...flags.booleans]) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`Unknown option for research ${verb}: --${key}.`);
+    }
+  }
+
+  const requestPath = requireFlag(flags, 'request');
+  const outputPath = flags.values.get('output') ?? null;
+  const raw = await readJsonFile(requestPath);
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error(
+      `research ${verb} ${sourceKey} --request must be a non-empty JSON array of scrape input records.`,
+    );
+  }
+  const input = raw as unknown[];
+
+  const skillName = flags.values.get('skill') ?? resolved.skill;
+  const operationId =
+    flags.values.get('hosted-operation-id') ??
+    `postplus-cli:research:scrape:${sourceKey}:${randomUUID()}`;
+  const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
+
+  // Optional per-request cost ceiling (USD) overriding the hosted default.
+  const maxChargeFlag = flags.values.get('max-charge-usd');
+  let maxTotalChargeUsd: number | undefined;
+  if (maxChargeFlag !== undefined) {
+    const parsed = Number(maxChargeFlag);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error('--max-charge-usd must be a positive number of USD.');
+    }
+    maxTotalChargeUsd = parsed;
+  }
+
+  // The Web /hosted/capability scrape contract is a strict object: skillName is
+  // carried as the compatibility header (postHostedJson), never on the public body.
+  return runHostedCommand({
+    request: () =>
+      postHostedJson({
+        body: {
+          capability: 'public-content-collection',
+          operation: 'scrape',
+          sourceKey,
+          input,
+          operationId,
+          quoteConfirmationToken: quoteConfirmationToken ?? undefined,
+          maxTotalChargeUsd,
+        },
+        pathName: '/api/postplus-cli/hosted/capability',
         skillName,
       }),
     errorInputLabel: requestPath,
@@ -1140,6 +1263,7 @@ Usage:
   postplus research schema [--collection-key <key>] [--json]
   postplus research collect <collection-key> --request <input.json> [--skill <skill-id>] [--max-charge-usd <usd>] [--output <result.json>]
   postplus research collect --run-handle <runHandle> [--output <result.json>]
+  postplus research scrape <source-key> --request <input-array.json> [--skill <skill-id>] [--max-charge-usd <usd>] [--output <result.json>]
   postplus research capability --request <hosted-capability-request.json> [--output <result.json>]
 `);
 }

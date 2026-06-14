@@ -4162,6 +4162,97 @@ describe('hosted domain commands', () => {
     );
   });
 
+  it('posts the manifest-driven research scrape verb to /hosted/capability with an array input', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    const outputPath = resolve(requestDir, 'result.json');
+    await writeFile(
+      requestPath,
+      JSON.stringify([
+        {
+          url: 'https://www.facebook.com/openai',
+          num_of_posts: 5,
+        },
+      ]),
+    );
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedUrl: string | null = null;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      postedUrl = String(input);
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({ charged: true, output: [{ post_id: 'p1' }] }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    };
+
+    try {
+      const result = await runHostedDomainCommand('research', [
+        'scrape',
+        'facebook-profile-posts',
+        '--request',
+        requestPath,
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 0);
+      assert.equal(
+        postedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.capability, 'public-content-collection');
+      assert.equal(body.operation, 'scrape');
+      assert.equal(body.sourceKey, 'facebook-profile-posts');
+      assert.deepEqual(body.input, [
+        {
+          url: 'https://www.facebook.com/openai',
+          num_of_posts: 5,
+        },
+      ]);
+      // skillName is the compatibility header, never on the public capability body.
+      assert.equal('skillName' in body, false);
+      assert.match(
+        String(body.operationId),
+        /^postplus-cli:research:scrape:facebook-profile-posts:/u,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects an unknown research scrape source key', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    await writeFile(requestPath, JSON.stringify([{ url: 'https://x.test' }]));
+
+    await assert.rejects(
+      runHostedDomainCommand('research', [
+        'scrape',
+        'not-a-source',
+        '--request',
+        requestPath,
+      ]),
+      /Unknown research scrape source not-a-source/u,
+    );
+  });
+
   it('derives media-generation billing dimensions from the public request', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);
