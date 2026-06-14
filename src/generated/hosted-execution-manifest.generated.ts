@@ -1446,6 +1446,581 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       }
     ]
   },
+  "video-batch-runner": {
+    "skill": "video-batch-runner",
+    "mode": "cli-runner",
+    "surface": "request-json",
+    "verb": "create",
+    "domain": "media",
+    "capability": "media-generation",
+    "endpointKeys": [
+      "video-kling-v3-0-pro-text",
+      "video-kling-v3-0-pro-image",
+      "video-kling-v3-0-std-text",
+      "video-kling-v3-0-std-image",
+      "video-wanx2-1-t2v-turbo",
+      "video-wanx2-1-i2v-turbo",
+      "video-infinitetalk",
+      "video-kling-v2-6-pro-motion-control"
+    ],
+    "endpoints": [
+      {
+        "endpointKey": "video-kling-v3-0-pro-text",
+        "provider": "wavespeed",
+        "providerModelPath": "kwaivgi/kling-v3.0-pro/text-to-video",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "enumValues": [
+              "16:9",
+              "9:16",
+              "1:1"
+            ],
+            "required": false
+          },
+          {
+            "name": "duration",
+            "class": "default",
+            "flag": null,
+            "type": "number",
+            "default": 5,
+            "required": false,
+            "min": 3,
+            "max": 15
+          },
+          {
+            "name": "sound",
+            "class": "default",
+            "flag": null,
+            "type": "boolean",
+            "default": false,
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "requestDimensions",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "duration",
+          "audioMode"
+        ]
+      },
+      {
+        "endpointKey": "video-kling-v3-0-pro-image",
+        "provider": "wavespeed",
+        "providerModelPath": "kwaivgi/kling-v3.0-pro/image-to-video",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "image",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "required": true
+          },
+          {
+            "name": "duration",
+            "class": "default",
+            "flag": null,
+            "type": "number",
+            "default": 5,
+            "required": false,
+            "min": 3,
+            "max": 15
+          },
+          {
+            "name": "sound",
+            "class": "default",
+            "flag": null,
+            "type": "boolean",
+            "default": false,
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "requestDimensions",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "duration",
+          "audioMode"
+        ]
+      },
+      {
+        "endpointKey": "video-kling-v3-0-std-text",
+        "provider": "wavespeed",
+        "providerModelPath": "kwaivgi/kling-v3.0-std/text-to-video",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "enumValues": [
+              "16:9",
+              "9:16",
+              "1:1"
+            ],
+            "required": false
+          },
+          {
+            "name": "duration",
+            "class": "default",
+            "flag": null,
+            "type": "number",
+            "default": 5,
+            "required": false,
+            "min": 3,
+            "max": 15
+          },
+          {
+            "name": "sound",
+            "class": "default",
+            "flag": null,
+            "type": "boolean",
+            "default": false,
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "requestDimensions",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "duration",
+          "audioMode"
+        ]
+      },
+      {
+        "endpointKey": "video-kling-v3-0-std-image",
+        "provider": "wavespeed",
+        "providerModelPath": "kwaivgi/kling-v3.0-std/image-to-video",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "image",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "required": true
+          },
+          {
+            "name": "duration",
+            "class": "default",
+            "flag": null,
+            "type": "number",
+            "default": 5,
+            "required": false,
+            "min": 3,
+            "max": 15
+          },
+          {
+            "name": "sound",
+            "class": "default",
+            "flag": null,
+            "type": "boolean",
+            "default": false,
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "requestDimensions",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "duration",
+          "audioMode"
+        ]
+      },
+      {
+        "endpointKey": "video-wanx2-1-t2v-turbo",
+        "provider": "dashscope",
+        "providerModelPath": "wanx2.1-t2v-turbo",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "enumValues": [
+              "9:16",
+              "16:9"
+            ],
+            "required": false
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": null,
+            "type": "string",
+            "enumValues": [
+              "480p",
+              "720p"
+            ],
+            "default": "720p",
+            "required": false
+          },
+          {
+            "name": "duration",
+            "class": "default",
+            "flag": null,
+            "type": "number",
+            "enumValues": [
+              "5"
+            ],
+            "default": 5,
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "requestDimensions",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "resolution",
+          "duration"
+        ]
+      },
+      {
+        "endpointKey": "video-wanx2-1-i2v-turbo",
+        "provider": "dashscope",
+        "providerModelPath": "wanx2.1-i2v-turbo",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "image",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "required": true
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": null,
+            "type": "string",
+            "enumValues": [
+              "480p",
+              "720p"
+            ],
+            "default": "720p",
+            "required": false
+          },
+          {
+            "name": "duration",
+            "class": "default",
+            "flag": null,
+            "type": "number",
+            "enumValues": [
+              "5"
+            ],
+            "default": 5,
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "requestDimensions",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "resolution",
+          "duration"
+        ]
+      },
+      {
+        "endpointKey": "video-infinitetalk",
+        "provider": "wavespeed",
+        "providerModelPath": "wavespeed-ai/infinitetalk",
+        "fields": [
+          {
+            "name": "image",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "required": true
+          },
+          {
+            "name": "audio",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "required": true
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": null,
+            "type": "string",
+            "default": "720p",
+            "required": false
+          },
+          {
+            "name": "seed",
+            "class": "intent",
+            "flag": null,
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "mask_image",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "requestDimensions",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "duration"
+        ]
+      },
+      {
+        "endpointKey": "video-kling-v2-6-pro-motion-control",
+        "provider": "wavespeed",
+        "providerModelPath": "kwaivgi/kling-v2.6-pro/motion-control",
+        "fields": [
+          {
+            "name": "image",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "required": true
+          },
+          {
+            "name": "video",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "required": true
+          },
+          {
+            "name": "character_orientation",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "negative_prompt",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "keep_original_sound",
+            "class": "intent",
+            "flag": null,
+            "type": "boolean",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "requestDimensions",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "duration"
+        ]
+      }
+    ]
+  },
   "video-transcription": {
     "skill": "video-transcription",
     "mode": "cli-runner",
