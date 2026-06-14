@@ -28,6 +28,7 @@ import {
 import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import { POSTPLUS_CLIENT_COMPATIBILITY_HEADERS } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
+import { HOSTED_EXECUTION_MANIFESTS } from './generated/hosted-execution-manifest.generated.js';
 import { runHostedDomainCommand } from './hosted-domain-commands.js';
 import { generateLocalDependencyReport } from './local-dependencies.js';
 import {
@@ -4345,6 +4346,85 @@ describe('hosted domain commands', () => {
       assert.equal(dimensions.resolution, '720p');
       assert.equal(dimensions.referenceVideoCount, 0);
       assert.equal(dimensions.referenceVideoMode, 'without_reference_videos');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('derives seedance billing defaults from the manifest when the agent omits them', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    // Agent supplies only the prompt — no resolution/duration.
+    await writeFile(
+      requestPath,
+      JSON.stringify({
+        prompt: 'a blue sticky note slides across a white desk',
+      }),
+    );
+
+    // The manifest is the single source for these platform defaults; the runner
+    // reads them instead of the CLI duplicating literal 720p / 5s.
+    const seedanceFields = (
+      HOSTED_EXECUTION_MANIFESTS['seedance-submitter'] as unknown as {
+        endpoints: ReadonlyArray<{
+          endpointKey: string;
+          fields: ReadonlyArray<{ name: string; default?: unknown }>;
+        }>;
+      }
+    ).endpoints.find((e) => e.endpointKey === 'video-seedance-2-text-turbo')!
+      .fields;
+    const manifestDuration = seedanceFields.find(
+      (f) => f.name === 'duration',
+    )!.default;
+    const manifestResolution = seedanceFields.find(
+      (f) => f.name === 'resolution',
+    )!.default;
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(
+        String(input),
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'video-seedance-2-text-turbo',
+        '--request',
+        requestPath,
+      ]);
+      assert.equal(result, 0);
+      const body = postedBody as Record<string, unknown>;
+      // request-json passes the body through, so omitted fields are not filled
+      // into input...
+      assert.deepEqual(body.input, {
+        prompt: 'a blue sticky note slides across a white desk',
+      });
+      // ...but the runner derives billing dimensions from the manifest default.
+      const dimensions = body.requestDimensions as Record<string, unknown>;
+      assert.equal(dimensions.duration, manifestDuration);
+      assert.equal(dimensions.resolution, manifestResolution);
+      assert.equal(dimensions.duration, 5);
+      assert.equal(dimensions.resolution, '720p');
     } finally {
       globalThis.fetch = originalFetch;
     }

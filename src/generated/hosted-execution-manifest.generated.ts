@@ -1305,6 +1305,22 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             "max": 15
           },
           {
+            "name": "reference_images",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "repeatable": true,
+            "required": false
+          },
+          {
+            "name": "reference_videos",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "repeatable": true,
+            "required": false
+          },
+          {
             "name": "operationId",
             "class": "runner-managed",
             "flag": null,
@@ -1382,6 +1398,22 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             "required": false,
             "min": 4,
             "max": 15
+          },
+          {
+            "name": "reference_images",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "repeatable": true,
+            "required": false
+          },
+          {
+            "name": "reference_videos",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "repeatable": true,
+            "required": false
           },
           {
             "name": "operationId",

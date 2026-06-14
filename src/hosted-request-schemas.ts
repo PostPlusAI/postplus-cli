@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer';
 
+import { HOSTED_EXECUTION_MANIFESTS } from './generated/hosted-execution-manifest.generated.js';
 import {
   MEDIA_ENDPOINT_HINTS,
   PUBLIC_CONTENT_DISCOVERY_TOOL_HINTS,
@@ -392,6 +393,48 @@ function buildMediaSchemaReport(
   };
 }
 
+// Per-endpoint field defaults projected from the generated execution manifest
+// (the SSOT). The runner reads a platform default from here when deriving a billing
+// dimension for an omitted field, so a default like seedance 720p / 5s is declared
+// once in the manifest instead of being duplicated as a CLI literal. Endpoints not
+// yet modelled into the manifest fall back to the generic video literal below.
+type ManifestDefaultValue = string | number | boolean;
+
+const MANIFEST_FIELD_DEFAULTS = buildManifestFieldDefaults();
+
+function buildManifestFieldDefaults(): Map<
+  string,
+  Map<string, ManifestDefaultValue>
+> {
+  const index = new Map<string, Map<string, ManifestDefaultValue>>();
+
+  for (const entry of Object.values(HOSTED_EXECUTION_MANIFESTS) as Array<{
+    endpoints: ReadonlyArray<{
+      endpointKey: string;
+      fields: ReadonlyArray<{ name: string; default?: ManifestDefaultValue }>;
+    }>;
+  }>) {
+    for (const endpoint of entry.endpoints) {
+      const byField = new Map<string, ManifestDefaultValue>();
+      for (const field of endpoint.fields) {
+        if (field.default !== undefined) {
+          byField.set(field.name, field.default);
+        }
+      }
+      index.set(endpoint.endpointKey, byField);
+    }
+  }
+
+  return index;
+}
+
+function manifestFieldDefault(
+  endpointKey: string,
+  fieldName: string,
+): ManifestDefaultValue | undefined {
+  return MANIFEST_FIELD_DEFAULTS.get(endpointKey)?.get(fieldName);
+}
+
 export function buildMediaGenerationRequestDimensions(
   endpointKey: string,
   input: Record<string, unknown>,
@@ -402,11 +445,17 @@ export function buildMediaGenerationRequestDimensions(
   };
 
   if (endpointKey.startsWith('video-')) {
-    const duration = readPositiveNumber(input.duration) ?? 5;
+    const manifestResolution = manifestFieldDefault(endpointKey, 'resolution');
+    const duration =
+      readPositiveNumber(input.duration) ??
+      readPositiveNumber(manifestFieldDefault(endpointKey, 'duration')) ??
+      5;
     const resolution =
       typeof input.resolution === 'string' && input.resolution.trim()
         ? input.resolution.trim()
-        : '720p';
+        : typeof manifestResolution === 'string'
+          ? manifestResolution
+          : '720p';
 
     dimensions.audioMode =
       endpointKey.startsWith('video-kling-v3-0-') && input.sound !== true
