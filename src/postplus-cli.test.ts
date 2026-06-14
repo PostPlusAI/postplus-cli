@@ -4469,6 +4469,73 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('submits a manifest-driven video-analysis request (request-json) posting the opaque Gemini payload verbatim', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    const payload = {
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: 'Analyze this video for hook, pacing, and CTA.' }],
+        },
+      ],
+      generationConfig: { temperature: 0.2 },
+    };
+    await writeFile(requestPath, JSON.stringify(payload));
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(
+        String(input),
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'analyze',
+        'gemini-video-analysis',
+        '--request',
+        requestPath,
+      ]);
+      assert.equal(result, 0);
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.capability, 'video-analysis');
+      assert.equal(body.operation, 'analyze');
+      assert.equal(body.modelKey, 'gemini-video-analysis');
+      assert.deepEqual(body.payload, payload);
+      assert.match(
+        String(body.operationId),
+        /^postplus-cli:media:video-analysis:analyze:/u,
+      );
+      // The locked Web contract is strict — the body carries no media-generation
+      // envelope keys (no requestDimensions, endpointKey, input, estimatedUsage).
+      assert.equal(Object.hasOwn(body, 'requestDimensions'), false);
+      assert.equal(Object.hasOwn(body, 'endpointKey'), false);
+      assert.equal(Object.hasOwn(body, 'input'), false);
+      assert.equal(Object.hasOwn(body, 'estimatedUsage'), false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('submits a manifest-driven image create request (flags) and fills the platform defaults', async () => {
     await setLocalSession({
       accountId: 'account_1',

@@ -407,12 +407,14 @@ function buildManifestFieldDefaults(): Map<
   const index = new Map<string, Map<string, ManifestDefaultValue>>();
 
   for (const entry of Object.values(HOSTED_EXECUTION_MANIFESTS) as Array<{
-    endpoints: ReadonlyArray<{
+    endpoints?: ReadonlyArray<{
       endpointKey: string;
       fields: ReadonlyArray<{ name: string; default?: ManifestDefaultValue }>;
     }>;
   }>) {
-    for (const endpoint of entry.endpoints) {
+    // Only media-generation entries carry per-endpoint billing field defaults;
+    // video-analysis projects `models` and has no endpoint defaults to index.
+    for (const endpoint of entry.endpoints ?? []) {
       const byField = new Map<string, ManifestDefaultValue>();
       for (const field of endpoint.fields) {
         if (field.default !== undefined) {

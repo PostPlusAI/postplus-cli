@@ -41,20 +41,32 @@ type ManifestEndpoint = {
   fields: readonly ManifestField[];
 };
 
+type ManifestModel = {
+  modelKey: string;
+  providerModelPath: string;
+};
+
 type ManifestEntry = {
   skill: string;
   surface: string;
   verb: string;
   domain: string;
   capability: string;
-  endpoints: readonly ManifestEndpoint[];
+  // media-generation entries carry `endpoints`; video-analysis entries carry
+  // `models`. Each is optional so the union serializes/reads cleanly.
+  endpoints?: readonly ManifestEndpoint[];
+  models?: readonly ManifestModel[];
 };
 
+// A resolved (verb, target) entry. media-generation resolves to an `endpoint`;
+// video-analysis resolves to a `model`. capability discriminates the two so the
+// dispatcher routes to the right input surface.
 type ResolvedVerbEndpoint = {
   skill: string;
   capability: string;
   surface: string;
-  endpoint: ManifestEndpoint;
+  endpoint?: ManifestEndpoint;
+  model?: ManifestModel;
 };
 
 const MEDIA_VERB_ENDPOINTS = buildMediaVerbIndex();
@@ -69,14 +81,26 @@ function buildMediaVerbIndex(): Map<string, Map<string, ResolvedVerbEndpoint>> {
       continue;
     }
 
-    let endpoints = index.get(entry.verb);
-    if (!endpoints) {
-      endpoints = new Map<string, ResolvedVerbEndpoint>();
-      index.set(entry.verb, endpoints);
+    let targets = index.get(entry.verb);
+    if (!targets) {
+      targets = new Map<string, ResolvedVerbEndpoint>();
+      index.set(entry.verb, targets);
     }
 
-    for (const endpoint of entry.endpoints) {
-      endpoints.set(endpoint.endpointKey, {
+    if (entry.capability === 'video-analysis') {
+      for (const model of entry.models ?? []) {
+        targets.set(model.modelKey, {
+          skill: entry.skill,
+          capability: entry.capability,
+          surface: entry.surface,
+          model,
+        });
+      }
+      continue;
+    }
+
+    for (const endpoint of entry.endpoints ?? []) {
+      targets.set(endpoint.endpointKey, {
         skill: entry.skill,
         capability: entry.capability,
         surface: entry.surface,
@@ -178,30 +202,49 @@ export async function runHostedDomainCommand(
 // envelope from `--request <file>`. Either way runner-managed fields (billing
 // dimensions, ids, tokens) are derived/minted by the runner, never agent-supplied.
 async function runMediaVerb(verb: string, args: string[]): Promise<number> {
-  const endpoints = MEDIA_VERB_ENDPOINTS.get(verb);
-  if (!endpoints) {
+  const targets = MEDIA_VERB_ENDPOINTS.get(verb);
+  if (!targets) {
     throw new Error(`Unknown media verb ${verb}.`);
   }
 
-  const [endpointKey, ...rest] = args;
-  if (!endpointKey || endpointKey.startsWith('--')) {
+  const [targetKey, ...rest] = args;
+  if (!targetKey || targetKey.startsWith('--')) {
     throw new Error(
-      `postplus media ${verb} requires an endpoint key. Run \`postplus media schema --json\` to list endpoints.`,
+      `postplus media ${verb} requires a target key. Run \`postplus media schema --json\` to list targets.`,
     );
   }
 
-  const resolved = endpoints.get(endpointKey);
+  const resolved = targets.get(targetKey);
   if (!resolved) {
     throw new Error(
-      `Unknown ${verb} endpoint ${endpointKey}. Valid: ${[...endpoints.keys()].join(', ')}.`,
+      `Unknown ${verb} target ${targetKey}. Valid: ${[...targets.keys()].join(', ')}.`,
     );
+  }
+
+  if (resolved.capability === 'video-analysis') {
+    return runVideoAnalysisVerb({
+      args: rest,
+      modelKey: targetKey,
+      resolved,
+      verb,
+    });
   }
 
   if (resolved.surface === 'request-json') {
-    return runMediaVerbRequestJson({ args: rest, endpointKey, resolved, verb });
+    return runMediaVerbRequestJson({
+      args: rest,
+      endpointKey: targetKey,
+      resolved,
+      verb,
+    });
   }
 
-  return runMediaVerbFlags({ args: rest, endpointKey, resolved, verb });
+  return runMediaVerbFlags({
+    args: rest,
+    endpointKey: targetKey,
+    resolved,
+    verb,
+  });
 }
 
 // Flags surface (e.g. audio-transcription): scalar intent/default fields map to
@@ -213,7 +256,8 @@ async function runMediaVerbFlags(args: {
   verb: string;
 }): Promise<number> {
   const { endpointKey, resolved, verb } = args;
-  const fields = resolved.endpoint.fields;
+  const endpoint = requireResolvedEndpoint(resolved, verb, endpointKey);
+  const fields = endpoint.fields;
   const flagToField = new Map<string, ManifestField>();
   const booleanKeys = new Set<string>(['json']);
   const arrayKeys = new Set<string>();
@@ -287,6 +331,7 @@ async function runMediaVerbRequestJson(args: {
   verb: string;
 }): Promise<number> {
   const { endpointKey, resolved, verb } = args;
+  const endpoint = requireResolvedEndpoint(resolved, verb, endpointKey);
   const flags = parseFlags(args.args, new Set(['json']));
   const allowedKeys = new Set([
     'hosted-operation-id',
@@ -314,7 +359,7 @@ async function runMediaVerbRequestJson(args: {
 
   // Runner-managed fields are minted/derived by the CLI; reject them in the body so
   // the agent cannot smuggle in ids, tokens, or billing dimensions.
-  for (const field of resolved.endpoint.fields) {
+  for (const field of endpoint.fields) {
     if (
       field.class === 'runner-managed' &&
       Object.hasOwn(input, field.name)
@@ -337,6 +382,81 @@ async function runMediaVerbRequestJson(args: {
     outputPath,
     quoteConfirmationToken: flags.values.get('quote-confirmation-token'),
     skillName: flags.values.get('skill') ?? resolved.skill,
+  });
+}
+
+function requireResolvedEndpoint(
+  resolved: ResolvedVerbEndpoint,
+  verb: string,
+  endpointKey: string,
+): ManifestEndpoint {
+  if (!resolved.endpoint) {
+    throw new Error(
+      `media ${verb} ${endpointKey} resolved to a non-endpoint target; this verb requires a media-generation endpoint.`,
+    );
+  }
+  return resolved.endpoint;
+}
+
+// video-analysis verb (request-json surface). The agent authors an opaque Gemini
+// request object (contents + generationConfig) in `--request <file>`; capability,
+// operation, and modelKey come from the verb + positional, so the body posts
+// EXACTLY the locked Web contract. There is no field classification and no
+// estimatedUsage — the payload is forwarded verbatim as the Gemini request.
+async function runVideoAnalysisVerb(args: {
+  args: string[];
+  modelKey: string;
+  resolved: ResolvedVerbEndpoint;
+  verb: string;
+}): Promise<number> {
+  const { modelKey, resolved, verb } = args;
+  const flags = parseFlags(args.args, new Set(['json']));
+  const allowedKeys = new Set([
+    'hosted-operation-id',
+    'json',
+    'output',
+    'quote-confirmation-token',
+    'request',
+    'skill',
+  ]);
+  for (const key of [...flags.values.keys(), ...flags.booleans]) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`Unknown option for media ${verb}: --${key}.`);
+    }
+  }
+
+  const requestPath = requireFlag(flags, 'request');
+  const outputPath = flags.values.get('output') ?? null;
+  const raw = await readJsonFile(requestPath);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(
+      `media ${verb} ${modelKey} --request must be a JSON object of Gemini request payload.`,
+    );
+  }
+  const payload = raw as Record<string, unknown>;
+
+  const body = {
+    capability: 'video-analysis',
+    operation: 'analyze',
+    modelKey,
+    payload,
+    operationId:
+      flags.values.get('hosted-operation-id') ??
+      `postplus-cli:media:video-analysis:analyze:${randomUUID()}`,
+    quoteConfirmationToken:
+      flags.values.get('quote-confirmation-token') ?? undefined,
+  };
+
+  return runHostedCommand({
+    request: () =>
+      postHostedJson({
+        body,
+        pathName: '/api/postplus-cli/hosted/capability',
+        skillName: flags.values.get('skill') ?? resolved.skill,
+      }),
+    errorInputLabel: requestPath,
+    json: flags.booleans.has('json'),
+    outputPath,
   });
 }
 

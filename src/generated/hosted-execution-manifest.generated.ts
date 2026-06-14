@@ -1446,6 +1446,23 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       }
     ]
   },
+  "video-analysis": {
+    "skill": "video-analysis",
+    "mode": "cli-runner",
+    "surface": "request-json",
+    "verb": "analyze",
+    "domain": "media",
+    "capability": "video-analysis",
+    "modelKeys": [
+      "gemini-video-analysis"
+    ],
+    "models": [
+      {
+        "modelKey": "gemini-video-analysis",
+        "providerModelPath": "gemini-3.5-flash"
+      }
+    ]
+  },
   "video-batch-runner": {
     "skill": "video-batch-runner",
     "mode": "cli-runner",
