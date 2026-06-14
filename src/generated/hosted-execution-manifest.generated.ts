@@ -1539,5 +1539,132 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         ]
       }
     ]
+  },
+  "voice-batch-runner": {
+    "skill": "voice-batch-runner",
+    "mode": "cli-runner",
+    "surface": "request-json",
+    "verb": "create",
+    "domain": "media",
+    "capability": "media-generation",
+    "endpointKeys": [
+      "voice-qwen3-design",
+      "voice-qwen3-clone"
+    ],
+    "endpoints": [
+      {
+        "endpointKey": "voice-qwen3-design",
+        "provider": "wavespeed",
+        "providerModelPath": "wavespeed-ai/qwen3-tts/voice-design",
+        "fields": [
+          {
+            "name": "text",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "voice_description",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "language",
+            "class": "default",
+            "flag": null,
+            "type": "string",
+            "default": "auto",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "requestDimensions",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "billableUnitCount"
+        ]
+      },
+      {
+        "endpointKey": "voice-qwen3-clone",
+        "provider": "wavespeed",
+        "providerModelPath": "wavespeed-ai/qwen3-tts/voice-clone",
+        "fields": [
+          {
+            "name": "text",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "audio",
+            "class": "intent",
+            "flag": null,
+            "type": "media-url",
+            "required": true
+          },
+          {
+            "name": "reference_text",
+            "class": "intent",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "language",
+            "class": "default",
+            "flag": null,
+            "type": "string",
+            "default": "auto",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "requestDimensions",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "billableUnitCount"
+        ]
+      }
+    ]
   }
 } as const;
