@@ -1445,5 +1445,99 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         ]
       }
     ]
+  },
+  "video-transcription": {
+    "skill": "video-transcription",
+    "mode": "cli-runner",
+    "surface": "flags",
+    "verb": "transcribe",
+    "domain": "media",
+    "capability": "media-generation",
+    "endpointKeys": [
+      "transcription-whisper-with-video"
+    ],
+    "endpoints": [
+      {
+        "endpointKey": "transcription-whisper-with-video",
+        "provider": "wavespeed",
+        "providerModelPath": "wavespeed-ai/openai-whisper-with-video",
+        "fields": [
+          {
+            "name": "video",
+            "class": "intent",
+            "flag": "--video",
+            "type": "media-url",
+            "required": true
+          },
+          {
+            "name": "duration_seconds",
+            "class": "intent",
+            "flag": "--duration-seconds",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "task",
+            "class": "default",
+            "flag": "--task",
+            "type": "string",
+            "enumValues": [
+              "transcribe",
+              "translate"
+            ],
+            "default": "transcribe",
+            "required": false
+          },
+          {
+            "name": "language",
+            "class": "default",
+            "flag": "--language",
+            "type": "string",
+            "default": "auto",
+            "required": false
+          },
+          {
+            "name": "enable_timestamps",
+            "class": "default",
+            "flag": "--enable-timestamps",
+            "type": "boolean",
+            "default": false,
+            "required": false
+          },
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "mediaSeconds",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "number",
+            "required": false,
+            "derivedFrom": "duration_seconds"
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "mediaSeconds"
+        ]
+      }
+    ]
   }
 } as const;
