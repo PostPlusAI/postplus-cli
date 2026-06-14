@@ -27,6 +27,7 @@ type ManifestField = {
   class: 'intent' | 'default' | 'runner-managed';
   flag: string | null;
   type: 'string' | 'number' | 'boolean' | 'media-url';
+  repeatable?: boolean;
   enumValues?: readonly string[];
   min?: number;
   max?: number;
@@ -90,6 +91,7 @@ function buildMediaVerbIndex(): Map<string, Map<string, ResolvedVerbEndpoint>> {
 type ParsedFlags = {
   values: Map<string, string>;
   booleans: Set<string>;
+  arrays: Map<string, string[]>;
 };
 
 type HostedEnvelope = {
@@ -215,6 +217,7 @@ async function runMediaVerbFlags(args: {
   const fields = resolved.endpoint.fields;
   const flagToField = new Map<string, ManifestField>();
   const booleanKeys = new Set<string>(['json']);
+  const arrayKeys = new Set<string>();
 
   for (const field of fields) {
     if (!field.flag) {
@@ -225,9 +228,12 @@ async function runMediaVerbFlags(args: {
     if (field.type === 'boolean') {
       booleanKeys.add(key);
     }
+    if (field.repeatable) {
+      arrayKeys.add(key);
+    }
   }
 
-  const flags = parseFlags(args.args, booleanKeys);
+  const flags = parseFlags(args.args, booleanKeys, arrayKeys);
   const outputPath = flags.values.get('output') ?? null;
   const controlKeys = new Set([
     'hosted-operation-id',
@@ -239,7 +245,11 @@ async function runMediaVerbFlags(args: {
 
   // Reject unknown flags. This is how runner-managed fields (no flag) and typos
   // are caught locally before any hosted call.
-  for (const key of [...flags.values.keys(), ...flags.booleans]) {
+  for (const key of [
+    ...flags.values.keys(),
+    ...flags.booleans,
+    ...flags.arrays.keys(),
+  ]) {
     if (!flagToField.has(key) && !controlKeys.has(key)) {
       throw new Error(`Unknown option for media ${verb}: --${key}.`);
     }
@@ -384,6 +394,20 @@ function buildMediaVerbInput(input: {
     }
 
     const key = field.flag.replace(/^--/u, '');
+
+    if (field.repeatable) {
+      const list = input.flags.arrays.get(key) ?? [];
+      if (list.length === 0) {
+        if (field.required) {
+          throw new Error(
+            `Missing required option --${key} for media ${input.verb} ${input.endpointKey}.`,
+          );
+        }
+        continue;
+      }
+      record[field.name] = list;
+      continue;
+    }
 
     if (field.type === 'boolean') {
       if (input.flags.booleans.has(key)) {
@@ -828,9 +852,14 @@ async function writeResult(
   }
 }
 
-function parseFlags(args: string[], booleanFlags: Set<string>): ParsedFlags {
+function parseFlags(
+  args: string[],
+  booleanFlags: Set<string>,
+  arrayFlags: Set<string> = new Set(),
+): ParsedFlags {
   const values = new Map<string, string>();
   const booleans = new Set<string>();
+  const arrays = new Map<string, string[]>();
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -846,11 +875,17 @@ function parseFlags(args: string[], booleanFlags: Set<string>): ParsedFlags {
     if (!value || value.startsWith('--')) {
       throw new Error(`Missing value for --${key}.`);
     }
-    values.set(key, value);
+    if (arrayFlags.has(key)) {
+      const list = arrays.get(key) ?? [];
+      list.push(value);
+      arrays.set(key, list);
+    } else {
+      values.set(key, value);
+    }
     index += 1;
   }
 
-  return { booleans, values };
+  return { arrays, booleans, values };
 }
 
 function requireFlag(flags: ParsedFlags, key: string): string {

@@ -4389,6 +4389,141 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('submits a manifest-driven image create request (flags) and fills the platform defaults', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(
+        String(input),
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'image-gpt-image-2-text',
+        '--prompt',
+        'a calm vertical product hero shot',
+        '--aspect-ratio',
+        '3:4',
+      ]);
+      assert.equal(result, 0);
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.capability, 'media-generation');
+      assert.equal(body.operation, 'request');
+      assert.equal(body.endpointKey, 'image-gpt-image-2-text');
+      // intent prompt + agent override aspect, with platform defaults filled in;
+      // no asset-state field (assetId/runId/localAssetDir) reaches the request.
+      assert.deepEqual(body.input, {
+        aspect_ratio: '3:4',
+        prompt: 'a calm vertical product hero shot',
+        quality: 'medium',
+        resolution: '1k',
+      });
+      assert.deepEqual(body.requestDimensions, {
+        billableUnitCount: 1,
+        operationKey: 'image-gpt-image-2-text',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('collects repeated --reference-image flags into the edit images array', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'image-gpt-image-2-edit',
+        '--prompt',
+        'recolor the jacket to navy',
+        '--reference-image',
+        'https://example.com/ref-a.png',
+        '--reference-image',
+        'https://example.com/ref-b.png',
+      ]);
+      assert.equal(result, 0);
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.endpointKey, 'image-gpt-image-2-edit');
+      assert.deepEqual((body.input as Record<string, unknown>).images, [
+        'https://example.com/ref-a.png',
+        'https://example.com/ref-b.png',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects runner-managed asset-state flags on the image create verb', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      for (const assetFlag of ['--asset-id', '--run-id', '--local-asset-dir']) {
+        await assert.rejects(
+          () =>
+            runHostedDomainCommand('media', [
+              'create',
+              'image-gpt-image-2-text',
+              '--prompt',
+              'a hero shot',
+              assetFlag,
+              'agent-supplied',
+            ]),
+          new RegExp(
+            `Unknown option for media create: ${assetFlag.replace(/[-]/gu, '[-]')}`,
+            'u',
+          ),
+        );
+      }
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('preserves the structured product error envelope and exits non-zero', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);

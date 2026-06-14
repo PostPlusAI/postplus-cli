@@ -182,6 +182,890 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       }
     ]
   },
+  "image-batch-runner": {
+    "skill": "image-batch-runner",
+    "mode": "cli-runner",
+    "surface": "flags",
+    "verb": "create",
+    "domain": "media",
+    "capability": "media-generation",
+    "endpointKeys": [
+      "image-gpt-image-2-text",
+      "image-gpt-image-2-edit",
+      "image-nano-banana-2-text",
+      "image-nano-banana-2-edit",
+      "image-nano-banana-pro-text-1k",
+      "image-nano-banana-pro-text-2k",
+      "image-nano-banana-pro-text-4k",
+      "image-nano-banana-pro-edit-1k",
+      "image-nano-banana-pro-edit-2k",
+      "image-nano-banana-pro-edit-4k",
+      "image-seedream-v5-lite-text",
+      "image-seedream-v5-lite-sequential",
+      "image-seedream-v5-lite-edit",
+      "image-seedream-v5-lite-edit-sequential"
+    ],
+    "endpoints": [
+      {
+        "endpointKey": "image-gpt-image-2-text",
+        "provider": "wavespeed",
+        "providerModelPath": "openai/gpt-image-2/text-to-image",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "default",
+            "flag": "--aspect-ratio",
+            "type": "string",
+            "default": "9:16",
+            "required": false
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": "--resolution",
+            "type": "string",
+            "default": "1k",
+            "required": false
+          },
+          {
+            "name": "quality",
+            "class": "default",
+            "flag": "--quality",
+            "type": "string",
+            "default": "medium",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "imageSize",
+          "quality"
+        ]
+      },
+      {
+        "endpointKey": "image-gpt-image-2-edit",
+        "provider": "wavespeed",
+        "providerModelPath": "openai/gpt-image-2/edit",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "images",
+            "class": "intent",
+            "flag": "--reference-image",
+            "type": "media-url",
+            "repeatable": true,
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "default",
+            "flag": "--aspect-ratio",
+            "type": "string",
+            "default": "9:16",
+            "required": false
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": "--resolution",
+            "type": "string",
+            "default": "1k",
+            "required": false
+          },
+          {
+            "name": "quality",
+            "class": "default",
+            "flag": "--quality",
+            "type": "string",
+            "default": "medium",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "imageSize",
+          "quality"
+        ]
+      },
+      {
+        "endpointKey": "image-nano-banana-2-text",
+        "provider": "wavespeed",
+        "providerModelPath": "google/nano-banana-2/text-to-image",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "default",
+            "flag": "--aspect-ratio",
+            "type": "string",
+            "default": "9:16",
+            "required": false
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": "--resolution",
+            "type": "string",
+            "default": "1k",
+            "required": false
+          },
+          {
+            "name": "enable_web_search",
+            "class": "default",
+            "flag": "--enable-web-search",
+            "type": "boolean",
+            "default": false,
+            "required": false
+          },
+          {
+            "name": "output_format",
+            "class": "default",
+            "flag": "--output-format",
+            "type": "string",
+            "default": "png",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "imageSize"
+        ]
+      },
+      {
+        "endpointKey": "image-nano-banana-2-edit",
+        "provider": "wavespeed",
+        "providerModelPath": "google/nano-banana-2/edit",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "images",
+            "class": "intent",
+            "flag": "--reference-image",
+            "type": "media-url",
+            "repeatable": true,
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "default",
+            "flag": "--aspect-ratio",
+            "type": "string",
+            "default": "9:16",
+            "required": false
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": "--resolution",
+            "type": "string",
+            "default": "1k",
+            "required": false
+          },
+          {
+            "name": "enable_web_search",
+            "class": "default",
+            "flag": "--enable-web-search",
+            "type": "boolean",
+            "default": false,
+            "required": false
+          },
+          {
+            "name": "output_format",
+            "class": "default",
+            "flag": "--output-format",
+            "type": "string",
+            "default": "png",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "imageSize"
+        ]
+      },
+      {
+        "endpointKey": "image-nano-banana-pro-text-1k",
+        "provider": "wavespeed",
+        "providerModelPath": "google/nano-banana-pro/text-to-image",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "default",
+            "flag": "--aspect-ratio",
+            "type": "string",
+            "default": "9:16",
+            "required": false
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": "--resolution",
+            "type": "string",
+            "enumValues": [
+              "1k"
+            ],
+            "default": "1k",
+            "required": false
+          },
+          {
+            "name": "output_format",
+            "class": "default",
+            "flag": "--output-format",
+            "type": "string",
+            "default": "png",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "imageSize"
+        ]
+      },
+      {
+        "endpointKey": "image-nano-banana-pro-text-2k",
+        "provider": "wavespeed",
+        "providerModelPath": "google/nano-banana-pro/text-to-image",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "default",
+            "flag": "--aspect-ratio",
+            "type": "string",
+            "default": "9:16",
+            "required": false
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": "--resolution",
+            "type": "string",
+            "enumValues": [
+              "2k"
+            ],
+            "default": "2k",
+            "required": false
+          },
+          {
+            "name": "output_format",
+            "class": "default",
+            "flag": "--output-format",
+            "type": "string",
+            "default": "png",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "imageSize"
+        ]
+      },
+      {
+        "endpointKey": "image-nano-banana-pro-text-4k",
+        "provider": "wavespeed",
+        "providerModelPath": "google/nano-banana-pro/text-to-image",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "default",
+            "flag": "--aspect-ratio",
+            "type": "string",
+            "default": "9:16",
+            "required": false
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": "--resolution",
+            "type": "string",
+            "enumValues": [
+              "4k"
+            ],
+            "default": "4k",
+            "required": false
+          },
+          {
+            "name": "output_format",
+            "class": "default",
+            "flag": "--output-format",
+            "type": "string",
+            "default": "png",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "imageSize"
+        ]
+      },
+      {
+        "endpointKey": "image-nano-banana-pro-edit-1k",
+        "provider": "wavespeed",
+        "providerModelPath": "google/nano-banana-pro/edit",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "images",
+            "class": "intent",
+            "flag": "--reference-image",
+            "type": "media-url",
+            "repeatable": true,
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "default",
+            "flag": "--aspect-ratio",
+            "type": "string",
+            "default": "9:16",
+            "required": false
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": "--resolution",
+            "type": "string",
+            "enumValues": [
+              "1k"
+            ],
+            "default": "1k",
+            "required": false
+          },
+          {
+            "name": "output_format",
+            "class": "default",
+            "flag": "--output-format",
+            "type": "string",
+            "default": "png",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "imageSize"
+        ]
+      },
+      {
+        "endpointKey": "image-nano-banana-pro-edit-2k",
+        "provider": "wavespeed",
+        "providerModelPath": "google/nano-banana-pro/edit",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "images",
+            "class": "intent",
+            "flag": "--reference-image",
+            "type": "media-url",
+            "repeatable": true,
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "default",
+            "flag": "--aspect-ratio",
+            "type": "string",
+            "default": "9:16",
+            "required": false
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": "--resolution",
+            "type": "string",
+            "enumValues": [
+              "2k"
+            ],
+            "default": "2k",
+            "required": false
+          },
+          {
+            "name": "output_format",
+            "class": "default",
+            "flag": "--output-format",
+            "type": "string",
+            "default": "png",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "imageSize"
+        ]
+      },
+      {
+        "endpointKey": "image-nano-banana-pro-edit-4k",
+        "provider": "wavespeed",
+        "providerModelPath": "google/nano-banana-pro/edit",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "images",
+            "class": "intent",
+            "flag": "--reference-image",
+            "type": "media-url",
+            "repeatable": true,
+            "required": true
+          },
+          {
+            "name": "aspect_ratio",
+            "class": "default",
+            "flag": "--aspect-ratio",
+            "type": "string",
+            "default": "9:16",
+            "required": false
+          },
+          {
+            "name": "resolution",
+            "class": "default",
+            "flag": "--resolution",
+            "type": "string",
+            "enumValues": [
+              "4k"
+            ],
+            "default": "4k",
+            "required": false
+          },
+          {
+            "name": "output_format",
+            "class": "default",
+            "flag": "--output-format",
+            "type": "string",
+            "default": "png",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "imageSize"
+        ]
+      },
+      {
+        "endpointKey": "image-seedream-v5-lite-text",
+        "provider": "wavespeed",
+        "providerModelPath": "bytedance/seedream-v5.0-lite",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "size",
+            "class": "default",
+            "flag": "--size",
+            "type": "string",
+            "default": "1440*2560",
+            "required": false
+          },
+          {
+            "name": "output_format",
+            "class": "default",
+            "flag": "--output-format",
+            "type": "string",
+            "default": "png",
+            "required": false
+          },
+          {
+            "name": "max_images",
+            "class": "intent",
+            "flag": "--max-images",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "billableUnitCount"
+        ]
+      },
+      {
+        "endpointKey": "image-seedream-v5-lite-sequential",
+        "provider": "wavespeed",
+        "providerModelPath": "bytedance/seedream-v5.0-lite/sequential",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "size",
+            "class": "default",
+            "flag": "--size",
+            "type": "string",
+            "default": "1440*2560",
+            "required": false
+          },
+          {
+            "name": "output_format",
+            "class": "default",
+            "flag": "--output-format",
+            "type": "string",
+            "default": "png",
+            "required": false
+          },
+          {
+            "name": "max_images",
+            "class": "intent",
+            "flag": "--max-images",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "billableUnitCount"
+        ]
+      },
+      {
+        "endpointKey": "image-seedream-v5-lite-edit",
+        "provider": "wavespeed",
+        "providerModelPath": "bytedance/seedream-v5.0-lite/edit",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "images",
+            "class": "intent",
+            "flag": "--reference-image",
+            "type": "media-url",
+            "repeatable": true,
+            "required": true
+          },
+          {
+            "name": "size",
+            "class": "default",
+            "flag": "--size",
+            "type": "string",
+            "default": "1440*2560",
+            "required": false
+          },
+          {
+            "name": "output_format",
+            "class": "default",
+            "flag": "--output-format",
+            "type": "string",
+            "default": "png",
+            "required": false
+          },
+          {
+            "name": "max_images",
+            "class": "intent",
+            "flag": "--max-images",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "billableUnitCount"
+        ]
+      },
+      {
+        "endpointKey": "image-seedream-v5-lite-edit-sequential",
+        "provider": "wavespeed",
+        "providerModelPath": "bytedance/seedream-v5.0-lite/edit-sequential",
+        "fields": [
+          {
+            "name": "prompt",
+            "class": "intent",
+            "flag": "--prompt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "images",
+            "class": "intent",
+            "flag": "--reference-image",
+            "type": "media-url",
+            "repeatable": true,
+            "required": true
+          },
+          {
+            "name": "size",
+            "class": "default",
+            "flag": "--size",
+            "type": "string",
+            "default": "1440*2560",
+            "required": false
+          },
+          {
+            "name": "output_format",
+            "class": "default",
+            "flag": "--output-format",
+            "type": "string",
+            "default": "png",
+            "required": false
+          },
+          {
+            "name": "max_images",
+            "class": "intent",
+            "flag": "--max-images",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "operationId",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quoteConfirmationToken",
+            "class": "runner-managed",
+            "flag": null,
+            "type": "string",
+            "required": false
+          }
+        ],
+        "billingDimensions": [
+          "billableUnitCount"
+        ]
+      }
+    ]
+  },
   "seedance-submitter": {
     "skill": "seedance-submitter",
     "mode": "cli-runner",
