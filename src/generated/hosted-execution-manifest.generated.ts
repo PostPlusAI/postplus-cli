@@ -1490,6 +1490,60 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       }
     ]
   },
+  "tiktok-ad-research": {
+    "skill": "tiktok-ad-research",
+    "mode": "cli-runner",
+    "surface": "request-json",
+    "verb": "collect",
+    "domain": "research",
+    "capability": "hosted-collection",
+    "collectionKeys": [
+      "tiktok-ads-top"
+    ],
+    "collections": [
+      {
+        "collectionKey": "tiktok-ads-top",
+        "actorId": "tiktok-creative-center-top-ads"
+      }
+    ]
+  },
+  "tiktok-research": {
+    "skill": "tiktok-research",
+    "mode": "cli-runner",
+    "surface": "request-json",
+    "verb": "collect",
+    "domain": "research",
+    "capability": "hosted-collection",
+    "collectionKeys": [
+      "tiktok-comments",
+      "tiktok-profiles",
+      "tiktok-related-videos",
+      "tiktok-users",
+      "tiktok-videos"
+    ],
+    "collections": [
+      {
+        "collectionKey": "tiktok-comments",
+        "actorId": "clockworks/tiktok-comments-scraper"
+      },
+      {
+        "collectionKey": "tiktok-profiles",
+        "actorId": "clockworks/tiktok-profile-scraper"
+      },
+      {
+        "collectionKey": "tiktok-related-videos",
+        "actorId": "clockworks/tiktok-scraper"
+      },
+      {
+        "collectionKey": "tiktok-users",
+        "actorId": "clockworks/tiktok-user-search-scraper"
+      },
+      {
+        "collectionKey": "tiktok-videos",
+        "actorId": "clockworks/tiktok-scraper"
+      }
+    ]
+  },
   "video-analysis": {
     "skill": "video-analysis",
     "mode": "cli-runner",
