@@ -9,7 +9,7 @@ import {
   VIDEO_ANALYSIS_MODEL_HINTS,
 } from './hosted-schema-catalog.js';
 
-type HostedSchemaDomain = 'media' | 'mobile' | 'publish' | 'research';
+type HostedSchemaDomain = 'media' | 'publish' | 'research';
 
 type HostedRequestSchemaReport = {
   schemaVersion: 1;
@@ -56,8 +56,6 @@ export function buildHostedRequestSchemaReport(input: {
       return buildMediaSchemaReport(input.endpointKey ?? null);
     case 'publish':
       return buildPublishSchemaReport();
-    case 'mobile':
-      return buildMobileSchemaReport();
   }
 }
 
@@ -562,71 +560,6 @@ function buildPublishSchemaReport(): HostedRequestSchemaReport {
             posts: [],
           },
         },
-      },
-    },
-  };
-}
-
-function buildMobileSchemaReport(): HostedRequestSchemaReport {
-  return {
-    schemaVersion: 1,
-    domain: 'mobile',
-    command:
-      'postplus mobile capability --request <hosted-capability-request.json> --output <result.json>',
-    description:
-      'Schema for files passed to postplus mobile capability --request.',
-    notes: [
-      'Use mobile-automation operations only through PostPlus Cloud.',
-      'Put the operation-specific mobile automation payload under input.',
-    ],
-    schemas: [
-      {
-        id: 'mobile-automation.request',
-        description: 'Run a hosted mobile automation operation.',
-        required: ['capability', 'operation', 'input'],
-        jsonSchema: {
-          additionalProperties: false,
-          properties: {
-            capability: { const: 'mobile-automation' },
-            input: JSON_OBJECT_SCHEMA,
-            operation: {
-              enum: [
-                'cancel-tasks',
-                'create-cloud-phones',
-                'install-app',
-                'list-cloud-phones',
-                'list-installed-apps',
-                'list-installable-apps',
-                'query-phone-status',
-                'query-tasks',
-                'start-app',
-                'start-cloud-phones',
-                'stop-cloud-phones',
-                'task-detail',
-                'tiktok-login',
-                'tiktok-publish-image-set',
-                'tiktok-publish-video',
-                'tiktok-warmup',
-                'uninstall-app',
-              ],
-              type: 'string',
-            },
-            operationId: OPERATION_ID_SCHEMA,
-            quoteConfirmationToken: {
-              minLength: 1,
-              type: 'string',
-            },
-          },
-          required: ['capability', 'operation', 'input'],
-          type: 'object',
-        },
-      },
-    ],
-    examples: {
-      'mobile-automation.list-cloud-phones': {
-        capability: 'mobile-automation',
-        operation: 'list-cloud-phones',
-        input: {},
       },
     },
   };

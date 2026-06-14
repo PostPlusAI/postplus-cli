@@ -3737,7 +3737,7 @@ describe('hosted domain commands', () => {
     assert.match(researchHelp, /postplus research capability/u);
     assert.match(researchHelp, /postplus research schema/u);
 
-    for (const domain of ['media', 'publish', 'mobile']) {
+    for (const domain of ['media', 'publish']) {
       const { stdout } = await execFileAsync(process.execPath, [
         '--import',
         'tsx',

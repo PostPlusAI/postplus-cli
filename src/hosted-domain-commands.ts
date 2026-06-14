@@ -17,7 +17,7 @@ import {
   readLargeCreditQuoteConfirmationChallenge,
 } from './quote-confirmation.js';
 
-type HostedDomain = 'media' | 'mobile' | 'publish' | 'research';
+type HostedDomain = 'media' | 'publish' | 'research';
 
 // Generated execution manifest (SSOT projected from apps/web + public-skill-metadata).
 // The verb/flag grammar, runner-managed set, and enum sets all come from here so
@@ -132,7 +132,6 @@ class HostedProductRequestError extends Error {
 
 const HOSTED_DOMAIN_CAPABILITIES: Record<HostedDomain, Set<string>> = {
   media: new Set(['media-file', 'media-generation', 'video-analysis']),
-  mobile: new Set(['mobile-automation']),
   publish: new Set(['social-publishing']),
   research: new Set(['public-content-collection', 'public-content-discovery']),
 };

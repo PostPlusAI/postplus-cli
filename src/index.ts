@@ -84,8 +84,6 @@ Usage:
   postplus media capability --request <hosted-capability-request.json> [--output <result.json>]
   postplus publish schema [--json]
   postplus publish capability --request <hosted-capability-request.json> [--output <result.json>]
-  postplus mobile schema [--json]
-  postplus mobile capability --request <hosted-capability-request.json> [--output <result.json>]
   postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <millicredits>]
   postplus skills verify [--json]
   postplus studio init|open|status   Open bundled Local Studio
@@ -550,9 +548,6 @@ async function main(): Promise<void> {
       return;
     case 'publish':
       process.exitCode = await runHostedDomainCommand('publish', rest);
-      return;
-    case 'mobile':
-      process.exitCode = await runHostedDomainCommand('mobile', rest);
       return;
     case 'quote':
       process.exitCode = await runQuoteCommand(rest);
