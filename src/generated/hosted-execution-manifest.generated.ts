@@ -940,14 +940,11 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": "--output-format",
               "type": "string",
+              "enumValues": [
+                "jpeg",
+                "png"
+              ],
               "default": "png",
-              "required": false
-            },
-            {
-              "name": "max_images",
-              "class": "intent",
-              "flag": "--max-images",
-              "type": "number",
               "required": false
             },
             {
@@ -994,6 +991,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": "--output-format",
               "type": "string",
+              "enumValues": [
+                "jpeg",
+                "png"
+              ],
               "default": "png",
               "required": false
             },
@@ -1002,6 +1003,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--max-images",
               "type": "number",
+              "min": 1,
+              "max": 15,
               "required": false
             },
             {
@@ -1056,14 +1059,11 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": "--output-format",
               "type": "string",
+              "enumValues": [
+                "jpeg",
+                "png"
+              ],
               "default": "png",
-              "required": false
-            },
-            {
-              "name": "max_images",
-              "class": "intent",
-              "flag": "--max-images",
-              "type": "number",
               "required": false
             },
             {
@@ -1118,6 +1118,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": "--output-format",
               "type": "string",
+              "enumValues": [
+                "jpeg",
+                "png"
+              ],
               "default": "png",
               "required": false
             },
@@ -1126,6 +1130,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--max-images",
               "type": "number",
+              "min": 1,
+              "max": 15,
               "required": false
             },
             {
