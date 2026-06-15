@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -451,7 +452,6 @@ async function runMediaFileUpload(args: string[]): Promise<number> {
   if (!fileStat.isFile()) {
     throw new Error(`media-file upload source is not a file: ${absolutePath}`);
   }
-  const fileBuffer = await readFile(absolutePath);
   const mimeType = flags.values.get('mime') ?? inferUploadMimeType(absolutePath);
   const outputPath = flags.values.get('output') ?? null;
 
@@ -461,7 +461,7 @@ async function runMediaFileUpload(args: string[]): Promise<number> {
     file: {
       mimeType,
       name: path.basename(absolutePath),
-      sizeBytes: fileBuffer.length,
+      sizeBytes: fileStat.size,
     },
     operationId:
       flags.values.get('hosted-operation-id') ??
@@ -479,7 +479,7 @@ async function runMediaFileUpload(args: string[]): Promise<number> {
       });
       const output = readHostedUploadOutput(payload);
       const signedUpload = readSignedUpload(output);
-      await putHostedMediaBytes(signedUpload, fileBuffer);
+      await putHostedMediaBytes(signedUpload, absolutePath);
       return { storageReference: readStorageReferenceValue(output) };
     },
     errorInputLabel: inputFile,
@@ -556,14 +556,15 @@ function readStorageReferenceValue(output: Record<string, unknown>): unknown {
 
 async function putHostedMediaBytes(
   signedUpload: SignedUpload,
-  body: Buffer,
+  absolutePath: string,
 ): Promise<void> {
   const response = await fetch(signedUpload.url, {
-    body,
+    body: createReadStream(absolutePath),
+    duplex: 'half',
     headers: signedUpload.requiredHeaders,
     method: 'PUT',
     signal: AbortSignal.timeout(120000),
-  });
+  } as RequestInit & { duplex: 'half' });
   if (!response.ok) {
     throw new Error(
       `Hosted media signed upload failed with status ${response.status}.`,

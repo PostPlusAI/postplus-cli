@@ -26,7 +26,10 @@ export type ManifestField = {
 
 export type ManifestEndpoint = {
   endpointKey: string;
+  provider: string;
+  providerModelPath: string;
   fields: readonly ManifestField[];
+  billingDimensions?: readonly string[];
 };
 
 export type ManifestModel = {
@@ -54,16 +57,25 @@ export type ManifestOperation = {
 // social-publishing entries carry `operations`.
 export type ManifestEntry = {
   skill: string;
+  mode?: 'cli-runner';
   surface: 'flags' | 'request-json';
   verb: string;
   domain: HostedDomain;
   capability: string;
+  endpointKeys?: readonly string[];
+  modelKeys?: readonly string[];
+  collectionKeys?: readonly string[];
+  sourceKeys?: readonly string[];
   endpoints?: readonly ManifestEndpoint[];
   models?: readonly ManifestModel[];
   collections?: readonly ManifestCollection[];
   sources?: readonly ManifestSource[];
   operations?: readonly ManifestOperation[];
 };
+
+const HOSTED_EXECUTION_MANIFEST_INDEX: Readonly<
+  Record<string, readonly ManifestEntry[]>
+> = HOSTED_EXECUTION_MANIFESTS;
 
 // A resolved (verb, target) entry. media-generation resolves to an `endpoint`;
 // video-analysis resolves to a `model`; hosted-collection resolves to a
@@ -82,7 +94,7 @@ export type ResolvedVerbTarget = {
 };
 
 export function allManifestEntries(): ManifestEntry[] {
-  return Object.values(HOSTED_EXECUTION_MANIFESTS).flat() as unknown as ManifestEntry[];
+  return Object.values(HOSTED_EXECUTION_MANIFEST_INDEX).flat();
 }
 
 // Verb -> targetKey -> resolved target for one domain. media indexes endpoints

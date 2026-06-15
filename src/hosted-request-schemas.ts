@@ -390,6 +390,23 @@ export function buildMediaGenerationRequestDimensions(
     }
   }
 
+  if (endpointKey.startsWith('image-')) {
+    const resolution =
+      typeof input.resolution === 'string' && input.resolution.trim()
+        ? input.resolution.trim()
+        : manifestFieldDefault(endpointKey, 'resolution');
+    const quality =
+      typeof input.quality === 'string' && input.quality.trim()
+        ? input.quality.trim()
+        : manifestFieldDefault(endpointKey, 'quality');
+    if (typeof resolution === 'string') {
+      dimensions.imageSize = resolution;
+    }
+    if (typeof quality === 'string') {
+      dimensions.quality = quality;
+    }
+  }
+
   if (endpointKey.startsWith('video-')) {
     const manifestResolution = manifestFieldDefault(endpointKey, 'resolution');
     const duration =

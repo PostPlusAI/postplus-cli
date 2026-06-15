@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, type ReadStream } from 'node:fs';
 import {
   mkdir,
   mkdtemp,
@@ -4786,7 +4786,10 @@ describe('hosted domain commands', () => {
       }
       if (url === 'https://upload.test/signed-target') {
         assert.equal(init?.method, 'PUT');
-        putBytes = Buffer.from(init?.body as ArrayBuffer);
+        const bodyStream = init?.body as ReadStream;
+        putBytes = Buffer.concat(
+          await Array.fromAsync(bodyStream, (chunk) => Buffer.from(chunk)),
+        );
         putContentType =
           (init?.headers as Record<string, string>)['content-type'] ?? null;
         return new Response('{}', {
@@ -4934,7 +4937,9 @@ describe('hosted domain commands', () => {
       });
       assert.deepEqual(body.requestDimensions, {
         billableUnitCount: 1,
+        imageSize: '1k',
         operationKey: 'image-gpt-image-2-text',
+        quality: 'medium',
       });
     } finally {
       globalThis.fetch = originalFetch;

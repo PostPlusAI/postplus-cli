@@ -110,12 +110,15 @@ function createDegraded(
   label: string,
   detail: string,
   fix?: string,
+  input: {
+    severity?: DoctorCheck['severity'];
+  } = {},
 ): DoctorCheck {
   return {
     id,
     label,
     status: 'degraded',
-    severity: 'required',
+    severity: input.severity ?? 'required',
     detail,
     fix,
   };
@@ -454,6 +457,9 @@ async function checkHostedCapabilities(
         skillId ? `Hosted capabilities for ${skillId}` : 'Hosted capabilities',
         `Ready with field-level coverage gaps: ${degradedLabels.join(', ')}; subscription ${subscription}`,
         'These hosted routes are released but have a known field-level contract gap. Track the readiness convergence plan before relying on field-level validation for these endpoints.',
+        {
+          severity: skillId ? 'required' : 'task_specific',
+        },
       );
     }
 
@@ -546,6 +552,9 @@ function readCapabilityDegradedLabel(
   skillScope: SkillScope | null,
 ): string | null {
   if (!value || typeof value !== 'object') {
+    return null;
+  }
+  if (value.required === false) {
     return null;
   }
 
