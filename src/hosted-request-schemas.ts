@@ -1,28 +1,54 @@
 import { Buffer } from 'node:buffer';
 
-import { HOSTED_EXECUTION_MANIFESTS } from './generated/hosted-execution-manifest.generated.js';
 import {
-  MEDIA_ENDPOINT_HINTS,
-  PUBLIC_CONTENT_DISCOVERY_TOOL_HINTS,
-  PUBLIC_CONTENT_SOURCE_HINTS,
-  RESEARCH_COLLECTION_HINTS,
-  VIDEO_ANALYSIS_MODEL_HINTS,
-} from './hosted-schema-catalog.js';
+  type HostedDomain,
+  type ManifestEndpoint,
+  type ManifestField,
+  findMediaEndpoint,
+  manifestTargetKeys,
+} from './hosted-manifest-index.js';
 
-type HostedSchemaDomain = 'media' | 'publish' | 'research';
+type HostedSchemaDomain = HostedDomain;
+
+// A single field's discovery contract, projected from the generated execution
+// manifest (the SSOT). `kind` is the three-way envelope classification; the agent
+// only writes intent/default. `enumValues` / `min` / `max` / `default` are the
+// manifest's resolved-by-reference contract, never a hand-maintained mirror.
+type FieldContract = {
+  name: string;
+  kind: 'intent' | 'default' | 'runner-managed';
+  flag: string | null;
+  type: 'string' | 'number' | 'boolean' | 'media-url';
+  required: boolean;
+  repeatable?: boolean;
+  enumValues?: readonly string[];
+  min?: number;
+  max?: number;
+  default?: string | number | boolean;
+  derivedFrom?: string;
+};
+
+// A selectable endpoint's full field contract. The schema report carries this for
+// every modelled media-generation endpoint so the agent reads the authoritative
+// enum sets / defaults / classification instead of a single illustrative example.
+type EndpointContract = {
+  endpointKey: string;
+  fields: FieldContract[];
+};
 
 type HostedRequestSchemaReport = {
   schemaVersion: 1;
   domain: HostedSchemaDomain;
-  collectionKeys?: string[];
   command: string;
   description: string;
+  // Full enum sets of selectable targets for this domain.
+  collectionKeys?: string[];
   endpointKeys?: string[];
   modelKeys?: string[];
+  sourceKeys?: string[];
+  operations?: string[];
   selectedCollectionKey?: string;
   selectedEndpointKey?: string;
-  sourceKeys?: string[];
-  toolKeys?: string[];
   notes: string[];
   schemas: Array<{
     id: string;
@@ -30,7 +56,11 @@ type HostedRequestSchemaReport = {
     required: string[];
     jsonSchema: Record<string, unknown>;
   }>;
-  examples: Record<string, unknown>;
+  // Per-endpoint field contracts (media domain), or per-target field contract for
+  // the selected endpoint. Empty for capabilities whose request body is an opaque
+  // JSON object the agent authors verbatim (research collection, video analysis,
+  // social publishing).
+  endpoints?: EndpointContract[];
 };
 
 const JSON_OBJECT_SCHEMA = {
@@ -43,6 +73,42 @@ const OPERATION_ID_SCHEMA = {
   minLength: 1,
   type: 'string',
 } as const;
+
+function toFieldContract(field: ManifestField): FieldContract {
+  const contract: FieldContract = {
+    name: field.name,
+    kind: field.class,
+    flag: field.flag,
+    type: field.type,
+    required: field.required,
+  };
+  if (field.repeatable) {
+    contract.repeatable = true;
+  }
+  if (field.enumValues) {
+    contract.enumValues = field.enumValues;
+  }
+  if (field.min !== undefined) {
+    contract.min = field.min;
+  }
+  if (field.max !== undefined) {
+    contract.max = field.max;
+  }
+  if (field.default !== undefined) {
+    contract.default = field.default;
+  }
+  if (field.derivedFrom) {
+    contract.derivedFrom = field.derivedFrom;
+  }
+  return contract;
+}
+
+function toEndpointContract(endpoint: ManifestEndpoint): EndpointContract {
+  return {
+    endpointKey: endpoint.endpointKey,
+    fields: endpoint.fields.map(toFieldContract),
+  };
+}
 
 export function buildHostedRequestSchemaReport(input: {
   collectionKey?: string | null;
@@ -62,211 +128,101 @@ export function buildHostedRequestSchemaReport(input: {
 function buildResearchSchemaReport(
   collectionKey: string | null,
 ): HostedRequestSchemaReport {
-  if (collectionKey && !RESEARCH_COLLECTION_HINTS[collectionKey]) {
+  const collectionKeys = manifestTargetKeys('research', 'hosted-collection');
+  const sourceKeys = manifestTargetKeys(
+    'research',
+    'public-content-collection',
+  );
+
+  if (collectionKey && !collectionKeys.includes(collectionKey)) {
     throw new Error(
-      `Unknown research collection ${collectionKey}. Known collections: ${Object.keys(
-        RESEARCH_COLLECTION_HINTS,
-      ).join(', ')}`,
+      `Unknown research collection ${collectionKey}. Known collections: ${collectionKeys.join(', ')}`,
     );
   }
-
-  const collectionInput = collectionKey
-    ? RESEARCH_COLLECTION_HINTS[collectionKey]
-    : {
-        maxItems: 20,
-        query: 'electric toothbrush morning routine',
-      };
 
   return {
     schemaVersion: 1,
     domain: 'research',
     command:
       'postplus research collect <collection-key> --request <input.json> --output <result.json>; postplus research scrape <source-key> --request <input-array.json> --output <result.json>',
-    description:
-      'Schemas for files passed to hosted research commands.',
-    collectionKeys: Object.keys(RESEARCH_COLLECTION_HINTS).sort(),
+    description: 'Schemas for files passed to hosted research commands.',
+    collectionKeys,
     selectedCollectionKey: collectionKey ?? undefined,
-    sourceKeys: Object.keys(PUBLIC_CONTENT_SOURCE_HINTS).sort(),
-    toolKeys: Object.keys(PUBLIC_CONTENT_DISCOVERY_TOOL_HINTS).sort(),
+    sourceKeys,
     notes: [
-      'The collection key stays in the CLI flag, not inside the JSON file.',
-      'Put the skill-specific provider input under input.',
-      'Use --run-handle for polling instead of this envelope.',
-      'Use research scrape <source-key> for public-content sourceKey requests.',
+      'collect / scrape input is an opaque provider-shaped JSON object the agent authors; the collection/source key stays on the CLI flag, not inside the file.',
+      'Use --run-handle with research collect for polling instead of a new launch.',
+      'Use research scrape <source-key> with a JSON array of records for public-content sources.',
       'The CLI derives operationId before sending requests to PostPlus Cloud.',
     ],
     schemas: [
       {
-        id: 'research.collection-envelope',
-        description: 'Hosted research collection input envelope.',
-        required: ['schemaVersion', 'input'],
-        jsonSchema: {
-          additionalProperties: false,
-          properties: {
-            hostedOperationId: OPERATION_ID_SCHEMA,
-            input: JSON_OBJECT_SCHEMA,
-            operationId: OPERATION_ID_SCHEMA,
-            quoteConfirmationToken: {
-              minLength: 1,
-              type: 'string',
-            },
-            schemaVersion: {
-              const: 1,
-            },
-          },
-          required: ['schemaVersion', 'input'],
-          type: 'object',
-        },
+        id: 'research.collection-input',
+        description:
+          'Hosted research collection input: the provider-shaped JSON object placed in --request <file>.',
+        required: [],
+        jsonSchema: JSON_OBJECT_SCHEMA,
       },
       {
-        id: 'public-content-collection.scrape',
-        description: 'Collect public content from a released sourceKey.',
-        required: ['capability', 'operation', 'sourceKey', 'input'],
+        id: 'public-content-collection.scrape-input',
+        description:
+          'Public-content scrape input: a non-empty JSON array of provider-shaped records placed in --request <file>.',
+        required: [],
         jsonSchema: {
-          additionalProperties: false,
-          properties: {
-            capability: { const: 'public-content-collection' },
-            input: {
-              items: JSON_OBJECT_SCHEMA,
-              minItems: 1,
-              type: 'array',
-            },
-            operation: { const: 'scrape' },
-            operationId: OPERATION_ID_SCHEMA,
-            quoteConfirmationToken: {
-              minLength: 1,
-              type: 'string',
-            },
-            sourceKey: {
-              enum: Object.keys(PUBLIC_CONTENT_SOURCE_HINTS).sort(),
-              type: 'string',
-            },
-          },
-          required: ['capability', 'operation', 'sourceKey', 'input'],
-          type: 'object',
-        },
-      },
-      {
-        id: 'public-content-collection.status',
-        description: 'Poll a public-content collection job.',
-        required: ['capability', 'operation', 'handle'],
-        jsonSchema: {
-          additionalProperties: false,
-          properties: {
-            capability: { const: 'public-content-collection' },
-            handle: {
-              minLength: 1,
-              type: 'string',
-            },
-            operation: { const: 'status' },
-            operationId: OPERATION_ID_SCHEMA,
-          },
-          required: ['capability', 'operation', 'handle'],
-          type: 'object',
-        },
-      },
-      {
-        id: 'public-content-discovery.tool-call',
-        description: 'Run a hosted public-content discovery tool.',
-        required: ['capability', 'operation', 'toolKey', 'args'],
-        jsonSchema: {
-          additionalProperties: false,
-          properties: {
-            args: JSON_OBJECT_SCHEMA,
-            capability: { const: 'public-content-discovery' },
-            operation: { const: 'tool-call' },
-            operationId: OPERATION_ID_SCHEMA,
-            quoteConfirmationToken: {
-              minLength: 1,
-              type: 'string',
-            },
-            toolKey: {
-              enum: Object.keys(PUBLIC_CONTENT_DISCOVERY_TOOL_HINTS).sort(),
-              type: 'string',
-            },
-          },
-          required: ['capability', 'operation', 'toolKey', 'args'],
-          type: 'object',
+          items: JSON_OBJECT_SCHEMA,
+          minItems: 1,
+          type: 'array',
         },
       },
     ],
-    examples: {
-      'research.collection-envelope': {
-        schemaVersion: 1,
-        input: collectionInput,
-      },
-      'public-content-collection.scrape': {
-        capability: 'public-content-collection',
-        operation: 'scrape',
-        sourceKey: 'youtube-videos',
-        input: PUBLIC_CONTENT_SOURCE_HINTS['youtube-videos'],
-      },
-      'public-content-collection.status': {
-        capability: 'public-content-collection',
-        operation: 'status',
-        handle: '<output.data.id>',
-      },
-      'public-content-discovery.tool-call': {
-        capability: 'public-content-discovery',
-        operation: 'tool-call',
-        toolKey: 'web-search',
-        args: PUBLIC_CONTENT_DISCOVERY_TOOL_HINTS['web-search'],
-      },
-    },
   };
 }
 
 function buildMediaSchemaReport(
   endpointKey: string | null,
 ): HostedRequestSchemaReport {
-  if (endpointKey && !MEDIA_ENDPOINT_HINTS[endpointKey]) {
+  const endpointKeys = manifestTargetKeys('media', 'media-generation');
+  const modelKeys = manifestTargetKeys('media', 'video-analysis');
+
+  if (endpointKey && !endpointKeys.includes(endpointKey)) {
     throw new Error(
-      `Unknown media endpoint ${endpointKey}. Known endpoints: ${Object.keys(
-        MEDIA_ENDPOINT_HINTS,
-      ).join(', ')}`,
+      `Unknown media endpoint ${endpointKey}. Known endpoints: ${endpointKeys.join(', ')}`,
     );
   }
 
-  const endpointInput = endpointKey
-    ? MEDIA_ENDPOINT_HINTS[endpointKey]
-    : {
-        prompt: 'A realistic vertical short-form product reveal.',
-      };
-  const selectedEndpoint = endpointKey ?? '<endpoint-key>';
+  // When an endpoint is selected, narrow to that one field contract; otherwise
+  // publish every modelled endpoint's field contract.
+  const endpoints = endpointKey
+    ? [toEndpointContract(requireMediaEndpoint(endpointKey))]
+    : endpointKeys.map((key) => toEndpointContract(requireMediaEndpoint(key)));
+
   return {
     schemaVersion: 1,
     domain: 'media',
     command:
-      'postplus media <verb> <endpoint-key> --request <input.json> --output <result.json>',
-    description:
-      'Schemas for files passed to hosted media commands.',
-    endpointKeys: Object.keys(MEDIA_ENDPOINT_HINTS).sort(),
-    modelKeys: Object.keys(VIDEO_ANALYSIS_MODEL_HINTS).sort(),
+      'postplus media <verb> <endpoint-key> --request <input.json> | --<flags> --output <result.json>',
+    description: 'Schemas for files passed to hosted media commands.',
+    endpointKeys,
+    modelKeys,
     selectedEndpointKey: endpointKey ?? undefined,
     notes: [
-      'Use media-generation request for async generation, transcription, and voice jobs.',
-      'Use media-generation status with the output.data.id handle returned by a pending request.',
-      'Use media-file operations for upload/download setup when a workflow needs hosted media storage.',
-      'Use video-analysis analyze for Gemini video understanding payloads.',
+      'Each media-generation endpoint declares its fields as intent (you write it), default (manifest-defaulted; write only to deviate), or runner-managed (minted by the CLI; no flag, never in the body).',
+      'Endpoint-specific input belongs under input; capability / endpointKey come from the verb + positional, not the body.',
+      'video-analysis analyze takes an opaque Gemini request object the agent authors verbatim under payload.',
       'The CLI derives operationId and billing dimensions before sending requests to PostPlus Cloud.',
-      'Endpoint-specific input belongs under input; top-level provider or billing fields are not public contract fields.',
+      'Run `postplus media <verb> <endpoint-key> --help` for a single endpoint flag/enum/default breakdown.',
     ],
     schemas: [
       {
         id: 'media-generation.request',
         description: 'Submit an async media generation/transcription job.',
-        required: [
-          'capability',
-          'operation',
-          'endpointKey',
-          'input',
-        ],
+        required: ['capability', 'operation', 'endpointKey', 'input'],
         jsonSchema: {
           additionalProperties: false,
           properties: {
             capability: { const: 'media-generation' },
             endpointKey: {
-              minLength: 1,
+              enum: endpointKeys,
               type: 'string',
             },
             input: JSON_OBJECT_SCHEMA,
@@ -277,37 +233,38 @@ function buildMediaSchemaReport(
               type: 'string',
             },
           },
-          required: [
-            'capability',
-            'operation',
-            'endpointKey',
-            'input',
-          ],
+          required: ['capability', 'operation', 'endpointKey', 'input'],
           type: 'object',
         },
       },
       {
-        id: 'media-generation.status',
-        description: 'Poll an async media generation/transcription job.',
-        required: ['capability', 'operation', 'handle'],
+        id: 'video-analysis.analyze',
+        description: 'Run hosted Gemini video analysis.',
+        required: ['capability', 'operation', 'modelKey', 'payload'],
         jsonSchema: {
           additionalProperties: false,
           properties: {
-            capability: { const: 'media-generation' },
-            handle: {
+            capability: { const: 'video-analysis' },
+            modelKey: {
+              enum: modelKeys,
+              type: 'string',
+            },
+            operation: { const: 'analyze' },
+            operationId: OPERATION_ID_SCHEMA,
+            payload: JSON_OBJECT_SCHEMA,
+            quoteConfirmationToken: {
               minLength: 1,
               type: 'string',
             },
-            operation: { const: 'status' },
-            operationId: OPERATION_ID_SCHEMA,
           },
-          required: ['capability', 'operation', 'handle'],
+          required: ['capability', 'operation', 'modelKey', 'payload'],
           type: 'object',
         },
       },
       {
         id: 'media-file.create-upload-url',
-        description: 'Create a hosted media upload target.',
+        description:
+          'Create a hosted media upload target via `postplus media-file upload`.',
         required: ['capability', 'operation', 'file'],
         jsonSchema: {
           additionalProperties: false,
@@ -334,68 +291,25 @@ function buildMediaSchemaReport(
           type: 'object',
         },
       },
-      {
-        id: 'video-analysis.analyze',
-        description: 'Run hosted Gemini video analysis.',
-        required: ['capability', 'operation', 'modelKey', 'payload'],
-        jsonSchema: {
-          additionalProperties: false,
-          properties: {
-            capability: { const: 'video-analysis' },
-            estimatedUsage: JSON_OBJECT_SCHEMA,
-            modelKey: {
-              enum: Object.keys(VIDEO_ANALYSIS_MODEL_HINTS).sort(),
-              type: 'string',
-            },
-            operation: { const: 'analyze' },
-            operationId: OPERATION_ID_SCHEMA,
-            payload: JSON_OBJECT_SCHEMA,
-            quoteConfirmationToken: {
-              minLength: 1,
-              type: 'string',
-            },
-          },
-          required: ['capability', 'operation', 'modelKey', 'payload'],
-          type: 'object',
-        },
-      },
     ],
-    examples: {
-      'media-generation.request': {
-        capability: 'media-generation',
-        operation: 'request',
-        endpointKey: selectedEndpoint,
-        input: endpointInput,
-      },
-      'media-generation.status': {
-        capability: 'media-generation',
-        operation: 'status',
-        handle: '<output.data.id>',
-      },
-      'media-file.create-upload-url': {
-        capability: 'media-file',
-        operation: 'create-upload-url',
-        file: {
-          mimeType: 'video/mp4',
-          name: 'input.mp4',
-          sizeBytes: 1048576,
-        },
-      },
-      'video-analysis.analyze': {
-        capability: 'video-analysis',
-        operation: 'analyze',
-        modelKey: 'video-analysis',
-        payload: VIDEO_ANALYSIS_MODEL_HINTS['video-analysis'],
-      },
-    },
+    endpoints,
   };
+}
+
+function requireMediaEndpoint(endpointKey: string): ManifestEndpoint {
+  const endpoint = findMediaEndpoint(endpointKey);
+  if (!endpoint) {
+    throw new Error(
+      `hosted-request-schemas: ${endpointKey} is not a modelled media-generation endpoint.`,
+    );
+  }
+  return endpoint;
 }
 
 // Per-endpoint field defaults projected from the generated execution manifest
 // (the SSOT). The runner reads a platform default from here when deriving a billing
 // dimension for an omitted field, so a default like seedance 720p / 5s is declared
-// once in the manifest instead of being duplicated as a CLI literal. Endpoints not
-// yet modelled into the manifest fall back to the generic video literal below.
+// once in the manifest instead of being duplicated as a CLI literal.
 type ManifestDefaultValue = string | number | boolean;
 
 const MANIFEST_FIELD_DEFAULTS = buildManifestFieldDefaults();
@@ -406,23 +320,18 @@ function buildManifestFieldDefaults(): Map<
 > {
   const index = new Map<string, Map<string, ManifestDefaultValue>>();
 
-  for (const entry of Object.values(HOSTED_EXECUTION_MANIFESTS).flat() as Array<{
-    endpoints?: ReadonlyArray<{
-      endpointKey: string;
-      fields: ReadonlyArray<{ name: string; default?: ManifestDefaultValue }>;
-    }>;
-  }>) {
-    // Only media-generation entries carry per-endpoint billing field defaults;
-    // video-analysis projects `models` and has no endpoint defaults to index.
-    for (const endpoint of entry.endpoints ?? []) {
-      const byField = new Map<string, ManifestDefaultValue>();
-      for (const field of endpoint.fields) {
-        if (field.default !== undefined) {
-          byField.set(field.name, field.default);
-        }
-      }
-      index.set(endpoint.endpointKey, byField);
+  for (const key of manifestTargetKeys('media', 'media-generation')) {
+    const endpoint = findMediaEndpoint(key);
+    if (!endpoint) {
+      continue;
     }
+    const byField = new Map<string, ManifestDefaultValue>();
+    for (const field of endpoint.fields) {
+      if (field.default !== undefined) {
+        byField.set(field.name, field.default);
+      }
+    }
+    index.set(key, byField);
   }
 
   return index;
@@ -497,16 +406,18 @@ function readPositiveNumber(value: unknown): number | null {
 }
 
 function buildPublishSchemaReport(): HostedRequestSchemaReport {
+  const operations = manifestTargetKeys('publish', 'social-publishing');
+
   return {
     schemaVersion: 1,
     domain: 'publish',
     command:
       'postplus publish <operation> --request <input.json> --output <result.json>',
-    description:
-      'Schema for files passed to hosted publish commands.',
+    description: 'Schema for files passed to hosted publish commands.',
+    operations,
     notes: [
-      'Use social-publishing operations only through PostPlus Cloud.',
-      'Put the operation-specific publishing payload under input.',
+      'The operation is BOTH the CLI subcommand and the target; the operation-specific publishing payload goes under input in --request <file>.',
+      'Side-effecting operations may surface a quote-confirmation challenge; replay the fixed confirm/retry commands.',
     ],
     schemas: [
       {
@@ -519,22 +430,7 @@ function buildPublishSchemaReport(): HostedRequestSchemaReport {
             capability: { const: 'social-publishing' },
             input: JSON_OBJECT_SCHEMA,
             operation: {
-              enum: [
-                'analytics',
-                'channel-settings',
-                'create-post',
-                'delete-post',
-                'delete-post-group',
-                'list-channels',
-                'list-posts',
-                'missing-content',
-                'notifications',
-                'set-release-id',
-                'trigger-channel-tool',
-                'update-post-status',
-                'upload-file',
-                'upload-from-url',
-              ],
+              enum: operations,
               type: 'string',
             },
             operationId: OPERATION_ID_SCHEMA,
@@ -548,21 +444,5 @@ function buildPublishSchemaReport(): HostedRequestSchemaReport {
         },
       },
     ],
-    examples: {
-      'social-publishing.list-channels': {
-        capability: 'social-publishing',
-        operation: 'list-channels',
-        input: {},
-      },
-      'social-publishing.create-post': {
-        capability: 'social-publishing',
-        operation: 'create-post',
-        input: {
-          body: {
-            posts: [],
-          },
-        },
-      },
-    },
   };
 }

@@ -11,213 +11,35 @@ import {
   buildHostedRequestSchemaReport,
   buildMediaGenerationRequestDimensions,
 } from './hosted-request-schemas.js';
-import { HOSTED_EXECUTION_MANIFESTS } from './generated/hosted-execution-manifest.generated.js';
+import {
+  type HostedDomain,
+  type ManifestEndpoint,
+  type ManifestField,
+  type ResolvedVerbTarget,
+  buildVerbTargetIndex,
+} from './hosted-manifest-index.js';
 import {
   type LargeCreditQuoteConfirmationChallenge,
   readLargeCreditQuoteConfirmationChallenge,
 } from './quote-confirmation.js';
 
-type HostedDomain = 'media' | 'publish' | 'research';
-
-// Generated execution manifest (SSOT projected from apps/web + public-skill-metadata).
-// The verb/flag grammar, runner-managed set, and enum sets all come from here so
-// the CLI never hand-maintains a mirror of the Web hosted catalog.
-type ManifestField = {
-  name: string;
-  class: 'intent' | 'default' | 'runner-managed';
-  flag: string | null;
-  type: 'string' | 'number' | 'boolean' | 'media-url';
-  repeatable?: boolean;
-  enumValues?: readonly string[];
-  min?: number;
-  max?: number;
-  default?: string | number | boolean;
-  required: boolean;
-  derivedFrom?: string;
-};
-
-type ManifestEndpoint = {
-  endpointKey: string;
-  fields: readonly ManifestField[];
-};
-
-type ManifestModel = {
-  modelKey: string;
-  providerModelPath: string;
-};
-
-type ManifestCollection = {
-  collectionKey: string;
-  actorId: string;
-};
-
-type ManifestSource = {
-  sourceKey: string;
-  datasetId: string;
-};
-
-type ManifestOperation = {
-  operation: string;
-};
-
-type ManifestEntry = {
-  skill: string;
-  surface: string;
-  verb: string;
-  domain: string;
-  capability: string;
-  // media-generation entries carry `endpoints`; video-analysis entries carry
-  // `models`; hosted-collection entries carry `collections`;
-  // public-content-collection entries carry `sources`; social-publishing
-  // entries carry `operations`. Each is optional so the union serializes/reads
-  // cleanly.
-  endpoints?: readonly ManifestEndpoint[];
-  models?: readonly ManifestModel[];
-  collections?: readonly ManifestCollection[];
-  sources?: readonly ManifestSource[];
-  operations?: readonly ManifestOperation[];
-};
-
-// A resolved (verb, target) entry. media-generation resolves to an `endpoint`;
-// video-analysis resolves to a `model`; hosted-collection resolves to a
-// `collection`; public-content-collection resolves to a `source`. capability
-// discriminates them so the dispatcher routes to the right input surface.
-type ResolvedVerbEndpoint = {
-  skill: string;
-  capability: string;
-  surface: string;
-  endpoint?: ManifestEndpoint;
-  model?: ManifestModel;
-  collection?: ManifestCollection;
-  source?: ManifestSource;
-  operation?: string;
-};
-
-const MEDIA_VERB_ENDPOINTS = buildMediaVerbIndex();
-
-function buildMediaVerbIndex(): Map<string, Map<string, ResolvedVerbEndpoint>> {
-  const index = new Map<string, Map<string, ResolvedVerbEndpoint>>();
-
-  for (const entry of Object.values(
-    HOSTED_EXECUTION_MANIFESTS,
-  ).flat() as unknown as ManifestEntry[]) {
-    if (entry.domain !== 'media') {
-      continue;
-    }
-
-    let targets = index.get(entry.verb);
-    if (!targets) {
-      targets = new Map<string, ResolvedVerbEndpoint>();
-      index.set(entry.verb, targets);
-    }
-
-    if (entry.capability === 'video-analysis') {
-      for (const model of entry.models ?? []) {
-        targets.set(model.modelKey, {
-          skill: entry.skill,
-          capability: entry.capability,
-          surface: entry.surface,
-          model,
-        });
-      }
-      continue;
-    }
-
-    for (const endpoint of entry.endpoints ?? []) {
-      targets.set(endpoint.endpointKey, {
-        skill: entry.skill,
-        capability: entry.capability,
-        surface: entry.surface,
-        endpoint,
-      });
-    }
-  }
-
-  return index;
-}
-
-const RESEARCH_VERB_TARGETS = buildResearchVerbIndex();
-
-// Manifest-driven research verb grammar: `postplus research <verb> <targetKey>`.
-// Built from HOSTED_EXECUTION_MANIFESTS entries in the research domain, mapping
-// verb -> targetKey -> resolved entry. The hosted-collection capability binds the
-// `collect` verb to collectionKeys (actorId resolved by reference); the
-// public-content-collection capability binds the `scrape` verb to sourceKeys
-// (datasetId resolved by reference). The verb token itself comes from the
-// manifest, so a verb collision would surface in generation, not here.
-function buildResearchVerbIndex(): Map<
-  string,
-  Map<string, ResolvedVerbEndpoint>
-> {
-  const index = new Map<string, Map<string, ResolvedVerbEndpoint>>();
-
-  for (const entry of Object.values(
-    HOSTED_EXECUTION_MANIFESTS,
-  ).flat() as unknown as ManifestEntry[]) {
-    if (entry.domain !== 'research') {
-      continue;
-    }
-
-    let targets = index.get(entry.verb);
-    if (!targets) {
-      targets = new Map<string, ResolvedVerbEndpoint>();
-      index.set(entry.verb, targets);
-    }
-
-    if (entry.capability === 'hosted-collection') {
-      for (const collection of entry.collections ?? []) {
-        targets.set(collection.collectionKey, {
-          skill: entry.skill,
-          capability: entry.capability,
-          surface: entry.surface,
-          collection,
-        });
-      }
-      continue;
-    }
-
-    if (entry.capability === 'public-content-collection') {
-      for (const source of entry.sources ?? []) {
-        targets.set(source.sourceKey, {
-          skill: entry.skill,
-          capability: entry.capability,
-          surface: entry.surface,
-          source,
-        });
-      }
-    }
-  }
-
-  return index;
-}
-
+// Manifest-driven verb grammar indexes (SSOT projected from apps/web +
+// public-skill-metadata via the generated manifest). The verb/flag grammar,
+// runner-managed set, and enum sets all come from the manifest so the CLI never
+// hand-maintains a mirror of the Web hosted catalog.
+const MEDIA_VERB_ENDPOINTS = buildVerbTargetIndex('media');
+const RESEARCH_VERB_TARGETS = buildVerbTargetIndex('research');
 const PUBLISH_VERB_OPERATIONS = buildPublishVerbIndex();
 
-// Manifest-driven publish grammar: `postplus publish <operation> --request <file>`.
-// Unlike media/research (a fixed verb + a positional target), the publish OPERATION
-// IS the subcommand — there is no separate target positional. The index is a flat
-// map keyed by operation, since the operation is both the subcommand and the
-// target. Built from HOSTED_EXECUTION_MANIFESTS entries in the publish domain.
-function buildPublishVerbIndex(): Map<string, ResolvedVerbEndpoint> {
-  const index = new Map<string, ResolvedVerbEndpoint>();
-
-  for (const entry of Object.values(
-    HOSTED_EXECUTION_MANIFESTS,
-  ).flat() as unknown as ManifestEntry[]) {
-    if (entry.domain !== 'publish' || entry.capability !== 'social-publishing') {
-      continue;
-    }
-
-    for (const { operation } of entry.operations ?? []) {
-      index.set(operation, {
-        skill: entry.skill,
-        capability: entry.capability,
-        surface: entry.surface,
-        operation,
-      });
+// Publish flattens to operation -> resolved target: the publish OPERATION is both
+// the subcommand and the target (no separate positional), unlike media/research.
+function buildPublishVerbIndex(): Map<string, ResolvedVerbTarget> {
+  const index = new Map<string, ResolvedVerbTarget>();
+  for (const targets of buildVerbTargetIndex('publish').values()) {
+    for (const [operation, resolved] of targets) {
+      index.set(operation, resolved);
     }
   }
-
   return index;
 }
 
@@ -321,6 +143,13 @@ async function runMediaVerb(verb: string, args: string[]): Promise<number> {
     );
   }
 
+  // `postplus media <verb> <endpoint> --help`: render the endpoint's field-level
+  // contract (intent / default / runner-managed) instead of dispatching a request.
+  if (rest.some(isHelp)) {
+    printMediaEndpointHelp('media', verb, targetKey, resolved);
+    return 0;
+  }
+
   if (resolved.capability === 'video-analysis') {
     return runVideoAnalysisVerb({
       args: rest,
@@ -352,7 +181,7 @@ async function runMediaVerb(verb: string, args: string[]): Promise<number> {
 async function runMediaVerbFlags(args: {
   args: string[];
   endpointKey: string;
-  resolved: ResolvedVerbEndpoint;
+  resolved: ResolvedVerbTarget;
   verb: string;
 }): Promise<number> {
   const { endpointKey, resolved, verb } = args;
@@ -427,7 +256,7 @@ async function runMediaVerbFlags(args: {
 async function runMediaVerbRequestJson(args: {
   args: string[];
   endpointKey: string;
-  resolved: ResolvedVerbEndpoint;
+  resolved: ResolvedVerbTarget;
   verb: string;
 }): Promise<number> {
   const { endpointKey, resolved, verb } = args;
@@ -486,7 +315,7 @@ async function runMediaVerbRequestJson(args: {
 }
 
 function requireResolvedEndpoint(
-  resolved: ResolvedVerbEndpoint,
+  resolved: ResolvedVerbTarget,
   verb: string,
   endpointKey: string,
 ): ManifestEndpoint {
@@ -506,7 +335,7 @@ function requireResolvedEndpoint(
 async function runVideoAnalysisVerb(args: {
   args: string[];
   modelKey: string;
-  resolved: ResolvedVerbEndpoint;
+  resolved: ResolvedVerbTarget;
   verb: string;
 }): Promise<number> {
   const { modelKey, resolved, verb } = args;
@@ -900,6 +729,12 @@ async function runResearchCollect(args: string[]): Promise<number> {
     );
   }
 
+  // `postplus research collect <collection-key> --help`: opaque-input contract.
+  if (rest.some(isHelp)) {
+    printOpaqueTargetHelp('research', verb, collectionKey, resolved);
+    return 0;
+  }
+
   const flags = parseFlags(rest, new Set(['json']));
   const allowedKeys = new Set([
     'hosted-operation-id',
@@ -992,6 +827,12 @@ async function runResearchScrape(args: string[]): Promise<number> {
     );
   }
 
+  // `postplus research scrape <source-key> --help`: opaque-array-input contract.
+  if (rest.some(isHelp)) {
+    printOpaqueTargetHelp('research', verb, sourceKey, resolved);
+    return 0;
+  }
+
   const flags = parseFlags(rest, new Set(['json']));
   const allowedKeys = new Set([
     'hosted-operation-id',
@@ -1074,6 +915,12 @@ async function runPublishOperation(
     throw new Error(
       `Unknown publish operation ${operation}. Valid: ${[...PUBLISH_VERB_OPERATIONS.keys()].join(', ')}.`,
     );
+  }
+
+  // `postplus publish <operation> --help`: opaque-input contract.
+  if (args.some(isHelp)) {
+    printOpaqueTargetHelp('publish', operation, operation, resolved);
+    return 0;
   }
 
   const flags = parseFlags(args, new Set(['json']));
@@ -1444,6 +1291,158 @@ function printDomainVerbHelp(domain: Exclude<HostedDomain, 'research'>): void {
 
 Usage:
 ${verbUsage}  postplus ${domain} schema${domain === 'media' ? ' [--endpoint <endpoint-key>]' : ''} [--json]
+`);
+}
+
+// Per-endpoint `--help` for a media-generation endpoint (and the video-analysis
+// model). Renders the endpoint's field-level contract grouped into the envelope's
+// three classes — intent (you write it), default (manifest-defaulted; write only
+// to deviate), runner-managed (minted by the CLI; never an input) — using the
+// manifest as the SSOT for flags, enum sets, ranges, and defaults.
+function printMediaEndpointHelp(
+  domain: 'media',
+  verb: string,
+  targetKey: string,
+  resolved: ResolvedVerbTarget,
+): void {
+  // video-analysis: opaque Gemini payload, no field classification to render.
+  if (resolved.capability === 'video-analysis') {
+    process.stdout.write(`PostPlus CLI - ${domain} ${verb} ${targetKey}
+
+  Surface: request-json (opaque Gemini request payload)
+  Usage:
+    postplus ${domain} ${verb} ${targetKey} --request <input.json> [--json] [--output <result.json>]
+
+  --request <file>  A JSON object authored verbatim as the Gemini request
+                    (contents + optional generationConfig) under "payload".
+  Runner-managed (minted by the CLI; never in the body): operationId, quoteConfirmationToken
+`);
+    return;
+  }
+
+  if (!resolved.endpoint) {
+    throw new Error(
+      `media ${verb} ${targetKey} resolved to a non-endpoint target.`,
+    );
+  }
+
+  const fields = resolved.endpoint.fields;
+  const isFlagsSurface = resolved.surface === 'flags';
+  const intent = fields.filter((field) => field.class === 'intent');
+  const defaulted = fields.filter((field) => field.class === 'default');
+  const managed = fields.filter((field) => field.class === 'runner-managed');
+
+  const lines: string[] = [
+    `PostPlus CLI - ${domain} ${verb} ${targetKey}`,
+    '',
+    `  Surface: ${resolved.surface}`,
+    '  Usage:',
+    isFlagsSurface
+      ? `    postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} [--json] [--output <result.json>]`
+      : `    postplus ${domain} ${verb} ${targetKey} --request <input.json> [--json] [--output <result.json>]`,
+    '',
+  ];
+
+  appendFieldGroup(lines, 'Intent (you must / may write):', intent, isFlagsSurface);
+  appendFieldGroup(
+    lines,
+    'Default (manifest-defaulted; write only to deviate):',
+    defaulted,
+    isFlagsSurface,
+  );
+
+  if (managed.length > 0) {
+    lines.push('  Runner-managed (minted by the CLI; never an input):');
+    for (const field of managed) {
+      const derived = field.derivedFrom
+        ? ` (derived from ${field.derivedFrom})`
+        : '';
+      lines.push(`    ${field.name}${derived}`);
+    }
+  }
+
+  process.stdout.write(`${lines.join('\n')}\n`);
+}
+
+function formatFlagsUsage(fields: readonly ManifestField[]): string {
+  const parts: string[] = [];
+  for (const field of fields) {
+    if (field.class === 'runner-managed' || !field.flag) {
+      continue;
+    }
+    const token = `${field.flag} <${field.name}>`;
+    parts.push(field.required ? token : `[${token}]`);
+  }
+  return parts.join(' ');
+}
+
+function appendFieldGroup(
+  lines: string[],
+  title: string,
+  fields: readonly ManifestField[],
+  isFlagsSurface: boolean,
+): void {
+  if (fields.length === 0) {
+    return;
+  }
+  lines.push(`  ${title}`);
+  for (const field of fields) {
+    const label =
+      isFlagsSurface && field.flag ? field.flag : `(json) ${field.name}`;
+    lines.push(`    ${label}${formatFieldDetail(field)}`);
+  }
+  lines.push('');
+}
+
+// Field detail: type, required/optional, enum set or numeric range, default, and
+// repeatable arity — all read from the manifest contract.
+function formatFieldDetail(field: ManifestField): string {
+  const detail: string[] = [
+    field.repeatable ? `${field.type}[]` : field.type,
+    field.required ? 'required' : 'optional',
+  ];
+  if (field.enumValues && field.enumValues.length > 0) {
+    detail.push(`one of {${field.enumValues.join(', ')}}`);
+  } else if (field.min !== undefined || field.max !== undefined) {
+    detail.push(`range ${field.min ?? '-'}..${field.max ?? '-'}`);
+  }
+  if (field.default !== undefined) {
+    detail.push(`default ${String(field.default)}`);
+  }
+  return `  [${detail.join('; ')}]`;
+}
+
+// Per-target `--help` for capabilities whose request body is an opaque JSON object
+// (research collect/scrape, publish): there is no field classification to render,
+// so the help states the input shape and the runner-managed protocol fields.
+function printOpaqueTargetHelp(
+  domain: 'research' | 'publish',
+  verb: string,
+  targetKey: string,
+  resolved: ResolvedVerbTarget,
+): void {
+  const inputShape =
+    resolved.capability === 'public-content-collection'
+      ? 'a non-empty JSON array of provider-shaped scrape records'
+      : 'a provider-shaped JSON object of input';
+  // publish's operation is both the verb and the target, so the header/usage show
+  // it once; research shows `<verb> <target>`.
+  const header =
+    domain === 'publish' ? `publish ${targetKey}` : `research ${verb} ${targetKey}`;
+  const usage =
+    domain === 'publish'
+      ? `    postplus publish ${targetKey} --request <input.json> [--json] [--output <result.json>]`
+      : `    postplus research ${verb} ${targetKey} --request <input.json> [--skill <skill-id>] [--max-charge-usd <usd>] [--json] [--output <result.json>]`;
+
+  process.stdout.write(`PostPlus CLI - ${header}
+
+  Surface: request-json (opaque input authored by the agent)
+  Capability: ${resolved.capability}
+  Usage:
+${usage}
+
+  --request <file>  ${inputShape}.
+  Runner-managed (minted by the CLI; never in the body): operationId, quoteConfirmationToken
 `);
 }
 

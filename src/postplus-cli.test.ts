@@ -3758,7 +3758,7 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('prints public hosted request schemas without requiring auth', async () => {
+  it('prints manifest-driven public hosted request schemas without requiring auth', async () => {
     const { stdout: researchStdout } = await execFileAsync(process.execPath, [
       '--import',
       'tsx',
@@ -3774,6 +3774,8 @@ describe('hosted domain commands', () => {
       unknown
     >;
     assert.equal(researchReport.selectedCollectionKey, 'youtube-channel-summary');
+    // The full enum sets of selectable targets come from the manifest, not a
+    // hand-maintained catalog of example payloads.
     assert.ok(
       (researchReport.collectionKeys as string[]).includes(
         'youtube-channel-summary',
@@ -3782,30 +3784,15 @@ describe('hosted domain commands', () => {
     assert.ok(
       (researchReport.sourceKeys as string[]).includes('youtube-videos'),
     );
-    assert.deepEqual(
-      (
-        (
-          researchReport.examples as Record<string, unknown>
-        )['public-content-collection.scrape'] as Record<string, unknown>
-      ).input,
-      [
-        {
-          url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-        },
-      ],
-    );
-    assert.deepEqual(
-      (
-        (
-          researchReport.examples as Record<string, unknown>
-        )['research.collection-envelope'] as Record<string, unknown>
-      ).input,
-      {
-        channels: ['@Google'],
-        includeChannelInfo: true,
-        includeVideos: false,
-        maxVideosPerChannel: 0,
-      },
+    // Research collection/scrape input is opaque JSON the agent authors, so the
+    // report describes input shapes rather than fabricated example payloads.
+    assert.equal(Object.hasOwn(researchReport, 'examples'), false);
+    const researchSchemaIds = (
+      researchReport.schemas as Array<{ id: string }>
+    ).map((schema) => schema.id);
+    assert.ok(researchSchemaIds.includes('research.collection-input'));
+    assert.ok(
+      researchSchemaIds.includes('public-content-collection.scrape-input'),
     );
 
     const { stdout } = await execFileAsync(process.execPath, [
@@ -3827,16 +3814,53 @@ describe('hosted domain commands', () => {
       (report.endpointKeys as string[]).includes('video-seedance-2-text-turbo'),
     );
 
-    const examples = report.examples as Record<string, unknown>;
-    const request = examples[
-      'media-generation.request'
-    ] as Record<string, unknown>;
-    assert.equal(request.capability, 'media-generation');
-    assert.equal(request.operation, 'request');
-    assert.equal(request.endpointKey, 'video-seedance-2-text-turbo');
-    assert.equal(Object.hasOwn(request, 'skillName'), false);
-    assert.equal(Object.hasOwn(request, 'operationId'), false);
-    assert.equal(Object.hasOwn(request, 'requestDimensions'), false);
+    // endpointKey is a real enum projected from the manifest, not a bare string.
+    const requestSchema = (
+      report.schemas as Array<{
+        id: string;
+        jsonSchema: { properties: Record<string, { enum?: string[] }> };
+      }>
+    ).find((schema) => schema.id === 'media-generation.request');
+    assert.ok(requestSchema);
+    assert.ok(
+      requestSchema.jsonSchema.properties.endpointKey.enum?.includes(
+        'video-seedance-2-text-turbo',
+      ),
+    );
+    assert.ok(
+      (requestSchema.jsonSchema.properties.endpointKey.enum?.length ?? 0) > 1,
+    );
+
+    // The selected endpoint's full field contract (enum sets / defaults / class)
+    // is published instead of a single example payload.
+    const endpoints = report.endpoints as Array<{
+      endpointKey: string;
+      fields: Array<{
+        name: string;
+        kind: string;
+        enumValues?: string[];
+        default?: unknown;
+        min?: number;
+        max?: number;
+      }>;
+    }>;
+    assert.equal(endpoints.length, 1);
+    assert.equal(endpoints[0].endpointKey, 'video-seedance-2-text-turbo');
+    const resolutionField = endpoints[0].fields.find(
+      (field) => field.name === 'resolution',
+    );
+    assert.deepEqual(resolutionField?.enumValues, ['480p', '720p', '1080p']);
+    assert.equal(resolutionField?.kind, 'default');
+    assert.equal(resolutionField?.default, '720p');
+    const durationField = endpoints[0].fields.find(
+      (field) => field.name === 'duration',
+    );
+    assert.equal(durationField?.min, 4);
+    assert.equal(durationField?.max, 15);
+    const operationIdField = endpoints[0].fields.find(
+      (field) => field.name === 'operationId',
+    );
+    assert.equal(operationIdField?.kind, 'runner-managed');
 
     const { stdout: publishStdout } = await execFileAsync(process.execPath, [
       '--import',
@@ -3847,19 +3871,23 @@ describe('hosted domain commands', () => {
       '--json',
     ]);
     const publishReport = JSON.parse(publishStdout) as Record<string, unknown>;
-    const publishExamples = publishReport.examples as Record<string, unknown>;
-    assert.deepEqual(publishExamples['social-publishing.create-post'], {
-      capability: 'social-publishing',
-      operation: 'create-post',
-      input: {
-        body: {
-          posts: [],
-        },
-      },
-    });
+    assert.ok(
+      (publishReport.operations as string[]).includes('create-post'),
+    );
+    const publishOperationSchema = (
+      publishReport.schemas as Array<{
+        id: string;
+        jsonSchema: { properties: Record<string, { enum?: string[] }> };
+      }>
+    ).find((schema) => schema.id === 'social-publishing.request');
+    assert.ok(
+      publishOperationSchema?.jsonSchema.properties.operation.enum?.includes(
+        'create-post',
+      ),
+    );
   });
 
-  it('prints WaveSpeed transcription media schema examples with current provider fields', async () => {
+  it('prints manifest-driven transcription media field contract without example payloads', async () => {
     const { stdout } = await execFileAsync(process.execPath, [
       '--import',
       'tsx',
@@ -3871,18 +3899,38 @@ describe('hosted domain commands', () => {
       '--json',
     ]);
     const report = JSON.parse(stdout) as Record<string, unknown>;
-    const examples = report.examples as Record<string, unknown>;
-    const request = examples[
-      'media-generation.request'
-    ] as Record<string, unknown>;
-    const input = request.input as Record<string, unknown>;
+    assert.equal(report.selectedEndpointKey, 'transcription');
+    assert.equal(Object.hasOwn(report, 'examples'), false);
 
-    assert.equal(request.endpointKey, 'transcription');
-    assert.equal(input.audio, 'https://example.com/input-audio.mp3');
-    assert.equal(input.enable_timestamps, true);
-    assert.equal(input.task, 'transcribe');
-    assert.equal(Object.hasOwn(input, 'response_format'), false);
-    assert.equal(Object.hasOwn(input, 'timestamp_granularities'), false);
+    const endpoints = report.endpoints as Array<{
+      endpointKey: string;
+      fields: Array<{
+        name: string;
+        kind: string;
+        type: string;
+        flag: string | null;
+        default?: unknown;
+        enumValues?: string[];
+      }>;
+    }>;
+    assert.equal(endpoints.length, 1);
+    assert.equal(endpoints[0].endpointKey, 'transcription');
+    const byName = new Map(
+      endpoints[0].fields.map((field) => [field.name, field]),
+    );
+    assert.equal(byName.get('audio')?.kind, 'intent');
+    assert.equal(byName.get('audio')?.flag, '--audio');
+    assert.equal(byName.get('task')?.kind, 'default');
+    assert.deepEqual(byName.get('task')?.enumValues, [
+      'transcribe',
+      'translate',
+    ]);
+    assert.equal(byName.get('task')?.default, 'transcribe');
+    assert.equal(byName.get('mediaSeconds')?.kind, 'runner-managed');
+    assert.equal(byName.get('mediaSeconds')?.flag, null);
+    // The retired catalog's example-only fields are gone from the contract.
+    assert.equal(byName.has('response_format'), false);
+    assert.equal(byName.has('timestamp_granularities'), false);
   });
 
   it('rejects unknown hosted media schema endpoints', async () => {
@@ -3937,6 +3985,109 @@ describe('hosted domain commands', () => {
         return true;
       },
     );
+  });
+
+  it('prints a per-endpoint flags-surface --help with the three-class field breakdown', async () => {
+    const { stdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'media',
+      'transcribe',
+      'transcription',
+      '--help',
+    ]);
+
+    assert.match(stdout, /media transcribe transcription/u);
+    assert.match(stdout, /Surface: flags/u);
+    assert.match(stdout, /Intent \(you must \/ may write\):/u);
+    assert.match(stdout, /--audio {2}\[media-url; required\]/u);
+    assert.match(
+      stdout,
+      /--task {2}\[string; optional; one of \{transcribe, translate\}; default transcribe\]/u,
+    );
+    assert.match(stdout, /Runner-managed \(minted by the CLI; never an input\):/u);
+    assert.match(stdout, /mediaSeconds \(derived from duration_seconds\)/u);
+    // runner-managed fields are never exposed as flags in the help.
+    assert.doesNotMatch(stdout, /--operationId/u);
+  });
+
+  it('prints a per-endpoint request-json --help with enum sets, ranges, and defaults', async () => {
+    const { stdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'media',
+      'create',
+      'video-seedance-2-text',
+      '--help',
+    ]);
+
+    assert.match(stdout, /media create video-seedance-2-text/u);
+    assert.match(stdout, /Surface: request-json/u);
+    assert.match(
+      stdout,
+      /\(json\) aspect_ratio {2}\[string; optional; one of \{21:9, 16:9, 4:3, 1:1, 3:4, 9:16\}\]/u,
+    );
+    assert.match(
+      stdout,
+      /\(json\) resolution {2}\[string; optional; one of \{480p, 720p, 1080p\}; default 720p\]/u,
+    );
+    assert.match(
+      stdout,
+      /\(json\) duration {2}\[number; optional; range 4\.\.15; default 5\]/u,
+    );
+    assert.match(stdout, /Runner-managed \(minted by the CLI; never an input\):/u);
+    assert.match(stdout, /\n {4}requestDimensions\n/u);
+  });
+
+  it('prints per-target --help for opaque research, video-analysis, and publish surfaces', async () => {
+    const { stdout: collectHelp } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'research',
+      'collect',
+      'tiktok-videos',
+      '--help',
+    ]);
+    assert.match(collectHelp, /research collect tiktok-videos/u);
+    assert.match(collectHelp, /Capability: hosted-collection/u);
+    assert.match(collectHelp, /a provider-shaped JSON object of input/u);
+
+    const { stdout: scrapeHelp } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'research',
+      'scrape',
+      'facebook-profile-posts',
+      '--help',
+    ]);
+    assert.match(scrapeHelp, /Capability: public-content-collection/u);
+    assert.match(scrapeHelp, /a non-empty JSON array of provider-shaped scrape records/u);
+
+    const { stdout: analyzeHelp } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'media',
+      'analyze',
+      'video-analysis',
+      '--help',
+    ]);
+    assert.match(analyzeHelp, /opaque Gemini request payload/u);
+
+    const { stdout: publishHelp } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'publish',
+      'create-post',
+      '--help',
+    ]);
+    assert.match(publishHelp, /PostPlus CLI - publish create-post\n/u);
+    assert.match(publishHelp, /Capability: social-publishing/u);
   });
 
   it('posts the manifest-driven research collect verb to /hosted/collection', async () => {
