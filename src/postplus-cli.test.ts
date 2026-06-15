@@ -2907,7 +2907,7 @@ describe('skill management commands', () => {
   it('builds current-directory update and uninstall commands', () => {
     assert.equal(
       POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND,
-      "for agent in claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent; do npx -y skills add PostPlusAI/postplus-skills --full-depth --skill '*' --agent \"$agent\" --yes; done",
+      'for agent in claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent; do npx -y skills add PostPlusAI/postplus-skills --full-depth --skill \'*\' --agent "$agent" --yes; done',
     );
     assert.deepEqual(
       buildPostPlusSkillUpdateArgs(['a', 'b'], 'current-directory'),
@@ -3267,10 +3267,7 @@ describe('skill management commands', () => {
           'claude-code',
         ),
       );
-      assert.doesNotMatch(
-        calls.flat().join(' '),
-        /local-user-skill/,
-      );
+      assert.doesNotMatch(calls.flat().join(' '), /local-user-skill/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -3867,7 +3864,10 @@ describe('hosted domain commands', () => {
       string,
       unknown
     >;
-    assert.equal(researchReport.selectedCollectionKey, 'youtube-channel-summary');
+    assert.equal(
+      researchReport.selectedCollectionKey,
+      'youtube-channel-summary',
+    );
     // The full enum sets of selectable targets come from the manifest, not a
     // hand-maintained catalog of example payloads.
     assert.ok(
@@ -3903,7 +3903,10 @@ describe('hosted domain commands', () => {
 
     assert.equal(report.schemaVersion, 1);
     assert.equal(report.domain, 'media');
-    assert.match(String(report.command), /postplus media <verb> <endpoint-key>/u);
+    assert.match(
+      String(report.command),
+      /postplus media <verb> <endpoint-key>/u,
+    );
     assert.ok(
       (report.endpointKeys as string[]).includes('video-seedance-2-text-turbo'),
     );
@@ -3965,9 +3968,7 @@ describe('hosted domain commands', () => {
       '--json',
     ]);
     const publishReport = JSON.parse(publishStdout) as Record<string, unknown>;
-    assert.ok(
-      (publishReport.operations as string[]).includes('create-post'),
-    );
+    assert.ok((publishReport.operations as string[]).includes('create-post'));
     const publishOperationSchema = (
       publishReport.schemas as Array<{
         id: string;
@@ -4100,7 +4101,10 @@ describe('hosted domain commands', () => {
       stdout,
       /--task {2}\[string; optional; one of \{transcribe, translate\}; default transcribe\]/u,
     );
-    assert.match(stdout, /Runner-managed \(minted by the CLI; never an input\):/u);
+    assert.match(
+      stdout,
+      /Runner-managed \(minted by the CLI; never an input\):/u,
+    );
     assert.match(stdout, /mediaSeconds \(derived from duration_seconds\)/u);
     // runner-managed fields are never exposed as flags in the help.
     assert.doesNotMatch(stdout, /--operationId/u);
@@ -4131,7 +4135,10 @@ describe('hosted domain commands', () => {
       stdout,
       /\(json\) duration {2}\[number; optional; range 4\.\.15; default 5\]/u,
     );
-    assert.match(stdout, /Runner-managed \(minted by the CLI; never an input\):/u);
+    assert.match(
+      stdout,
+      /Runner-managed \(minted by the CLI; never an input\):/u,
+    );
     assert.match(stdout, /\n {4}requestDimensions\n/u);
   });
 
@@ -4159,7 +4166,10 @@ describe('hosted domain commands', () => {
       '--help',
     ]);
     assert.match(scrapeHelp, /Capability: public-content-collection/u);
-    assert.match(scrapeHelp, /a non-empty JSON array of provider-shaped scrape records/u);
+    assert.match(
+      scrapeHelp,
+      /a non-empty JSON array of provider-shaped scrape records/u,
+    );
 
     const { stdout: analyzeHelp } = await execFileAsync(process.execPath, [
       '--import',
@@ -4415,6 +4425,7 @@ describe('hosted domain commands', () => {
       });
       assert.deepEqual(body.requestDimensions, {
         billableUnitCount: 1,
+        mediaSeconds: 30,
         operationKey: 'transcription',
       });
     } finally {
@@ -4569,8 +4580,9 @@ describe('hosted domain commands', () => {
           fields: ReadonlyArray<{ name: string; default?: unknown }>;
         }>;
       }
-    ).endpoints.find((e) => e.endpointKey === 'video-seedance-2-text-turbo')!
-      .fields;
+    ).endpoints.find(
+      (e) => e.endpointKey === 'video-seedance-2-text-turbo',
+    )!.fields;
     const manifestDuration = seedanceFields.find(
       (f) => f.name === 'duration',
     )!.default;
@@ -5139,7 +5151,8 @@ describe('hosted domain commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          error: 'This request may reserve 100 credits and requires confirmation.',
+          error:
+            'This request may reserve 100 credits and requires confirmation.',
           productErrorCode: 'postplus_cli_quote_confirmation_required',
           quoteConfirmation: challenge,
         }),
@@ -5173,7 +5186,9 @@ describe('hosted domain commands', () => {
         },
       );
       assert.deepEqual(
-        JSON.parse(await readFile(`${outputPath}.quote-confirmation.json`, 'utf8')),
+        JSON.parse(
+          await readFile(`${outputPath}.quote-confirmation.json`, 'utf8'),
+        ),
         challenge,
       );
     } finally {

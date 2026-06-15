@@ -313,6 +313,7 @@ function requireMediaEndpoint(endpointKey: string): ManifestEndpoint {
 type ManifestDefaultValue = string | number | boolean;
 
 const MANIFEST_FIELD_DEFAULTS = buildManifestFieldDefaults();
+const MANIFEST_DERIVED_DIMENSIONS = buildManifestDerivedDimensions();
 
 function buildManifestFieldDefaults(): Map<
   string,
@@ -344,6 +345,33 @@ function manifestFieldDefault(
   return MANIFEST_FIELD_DEFAULTS.get(endpointKey)?.get(fieldName);
 }
 
+function buildManifestDerivedDimensions(): Map<
+  string,
+  Array<{ fieldName: string; sourceName: string }>
+> {
+  const index = new Map<
+    string,
+    Array<{ fieldName: string; sourceName: string }>
+  >();
+
+  for (const key of manifestTargetKeys('media', 'media-generation')) {
+    const endpoint = findMediaEndpoint(key);
+    if (!endpoint) {
+      continue;
+    }
+    const derived = endpoint.fields.flatMap((field) =>
+      field.class === 'runner-managed' && field.derivedFrom
+        ? [{ fieldName: field.name, sourceName: field.derivedFrom }]
+        : [],
+    );
+    if (derived.length > 0) {
+      index.set(key, derived);
+    }
+  }
+
+  return index;
+}
+
 export function buildMediaGenerationRequestDimensions(
   endpointKey: string,
   input: Record<string, unknown>,
@@ -352,6 +380,15 @@ export function buildMediaGenerationRequestDimensions(
     billableUnitCount: 1,
     operationKey: endpointKey,
   };
+
+  for (const derived of MANIFEST_DERIVED_DIMENSIONS.get(endpointKey) ?? []) {
+    const value =
+      input[derived.sourceName] ??
+      manifestFieldDefault(endpointKey, derived.sourceName);
+    if (value !== undefined) {
+      dimensions[derived.fieldName] = value;
+    }
+  }
 
   if (endpointKey.startsWith('video-')) {
     const manifestResolution = manifestFieldDefault(endpointKey, 'resolution');
