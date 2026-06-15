@@ -28,7 +28,10 @@ export type DoctorCheck = {
     | 'remote_auth'
     | 'skill_catalog';
   label: string;
-  status: 'pass' | 'fail';
+  // `degraded`: the check's hosted route/key exists and is released, but a
+  // field-level contract dimension reported by hosted readiness is a known
+  // coverage gap. It does not fail required readiness; it is surfaced distinctly.
+  status: 'degraded' | 'fail' | 'pass';
   severity: 'required' | 'task_specific';
   detail: string;
   fix?: string;
@@ -45,7 +48,9 @@ export type DoctorCheckMetadata = {
 };
 
 export type DoctorReport = {
-  schemaVersion: 1;
+  // Bumped to 2 when the `degraded` check status was added so agents/automation
+  // can distinguish a known field-level coverage gap from pass/fail.
+  schemaVersion: 2;
   ok: boolean;
   requiredOk: boolean;
   checks: DoctorCheck[];
@@ -94,6 +99,25 @@ function createFail(
     detail,
     fix,
     metadata: input.metadata,
+  };
+}
+
+// A check whose hosted route/key is released but has a known field-level coverage
+// gap. It is not a required failure (does not break `requiredOk`); it is surfaced
+// so the gap is visible instead of a blanket pass.
+function createDegraded(
+  id: DoctorCheck['id'],
+  label: string,
+  detail: string,
+  fix?: string,
+): DoctorCheck {
+  return {
+    id,
+    label,
+    status: 'degraded',
+    severity: 'required',
+    detail,
+    fix,
   };
 }
 
@@ -247,12 +271,15 @@ function buildDoctorReport(
   checks: DoctorCheck[],
   skillId?: string,
 ): DoctorReport {
+  // A degraded required check is a known coverage gap, not a failure: it keeps
+  // `requiredOk` true but `ok` false (doctor is not a clean pass while a gap
+  // exists), mirroring how task-specific warnings surface without failing.
   const requiredOk = checks.every(
-    (check) => check.severity !== 'required' || check.status === 'pass',
+    (check) => check.severity !== 'required' || check.status !== 'fail',
   );
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     ok: checks.every((check) => check.status === 'pass'),
     requiredOk,
     checks,
@@ -416,6 +443,20 @@ async function checkHostedCapabilities(
 
     const subscription = readSubscriptionStatusField(payload).label;
 
+    const degradedLabels = relevantCapabilities
+      .map((value) => readCapabilityDegradedLabel(value, skillScope))
+      .filter((value): value is string => value !== null);
+
+    if (degradedLabels.length > 0) {
+      const skillId = skillScope?.skill.skillId;
+      return createDegraded(
+        'hosted_capabilities',
+        skillId ? `Hosted capabilities for ${skillId}` : 'Hosted capabilities',
+        `Ready with field-level coverage gaps: ${degradedLabels.join(', ')}; subscription ${subscription}`,
+        'These hosted routes are released but have a known field-level contract gap. Track the readiness convergence plan before relying on field-level validation for these endpoints.',
+      );
+    }
+
     return createPass(
       'hosted_capabilities',
       skillScope
@@ -487,6 +528,57 @@ function readReadinessCheckFailureLabel(value: unknown): string | null {
 
   const record = value as Record<string, unknown>;
   if (record.ok === true || record.required === false) {
+    return null;
+  }
+
+  return typeof record.label === 'string'
+    ? record.label
+    : typeof record.id === 'string'
+      ? record.id
+      : 'unknown check';
+}
+
+// Surfaces a capability whose checks include a `degraded` field-level dimension.
+// Degraded checks keep `ok` true (they do not fail the capability), so the
+// failure reader skips them; this reader reports the gap separately.
+function readCapabilityDegradedLabel(
+  value: Record<string, unknown>,
+  skillScope: SkillScope | null,
+): string | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const degradedChecks = Array.isArray(value.checks)
+    ? value.checks
+        .map(readReadinessCheckDegradedLabel)
+        .filter((check): check is string => check !== null)
+    : [];
+
+  if (degradedChecks.length === 0) {
+    return null;
+  }
+
+  const label =
+    typeof value.label === 'string'
+      ? value.label
+      : typeof value.id === 'string'
+        ? value.id
+        : 'unknown capability';
+  const labelWithChecks = `${label} (${degradedChecks.join(', ')})`;
+
+  return skillScope
+    ? `${labelWithChecks} for ${skillScope.skill.skillId}`
+    : labelWithChecks;
+}
+
+function readReadinessCheckDegradedLabel(value: unknown): string | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.status !== 'degraded') {
     return null;
   }
 
@@ -743,21 +835,29 @@ export function formatDoctorReport(report: DoctorReport): string {
     const marker =
       check.status === 'pass'
         ? '[PASS]'
-        : check.severity === 'task_specific'
-          ? '[WARN]'
-          : '[FAIL]';
+        : check.status === 'degraded'
+          ? '[DEGRADED]'
+          : check.severity === 'task_specific'
+            ? '[WARN]'
+            : '[FAIL]';
     lines.push(`${marker} ${check.label}: ${check.detail}`);
     if (check.fix) {
       lines.push(`  Fix: ${check.fix}`);
     }
   }
 
+  const hasDegraded = report.checks.some(
+    (check) => check.status === 'degraded',
+  );
+
   lines.push(
     '',
     report.ok
       ? 'Doctor passed.'
       : report.requiredOk
-        ? 'Doctor incomplete: task-specific checks need attention.'
+        ? hasDegraded
+          ? 'Doctor incomplete: hosted readiness has known field-level coverage gaps.'
+          : 'Doctor incomplete: task-specific checks need attention.'
         : 'Doctor failed.',
   );
 

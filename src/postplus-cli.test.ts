@@ -580,7 +580,7 @@ describe('doctor and status', () => {
       assert.equal(status.schemaVersion, 1);
       assert.equal((await readLocalConfig())?.cliVersion, CURRENT_CLI_VERSION);
       assert.equal(status.ok, true);
-      assert.equal(status.doctor.schemaVersion, 1);
+      assert.equal(status.doctor.schemaVersion, 2);
       assert.equal(status.auth.ok, true);
       assert.equal(status.doctor.ok, true);
       assert.equal(status.skills.ok, true);
@@ -1349,12 +1349,106 @@ process.exit(1);
       const report = await generateDoctorReport();
       const formatted = formatDoctorReport(report);
 
-      assert.equal(report.schemaVersion, 1);
+      assert.equal(report.schemaVersion, 2);
       assert.equal(report.ok, false);
       assert.match(
         formatted,
         /Media generation: image-nano-banana-2-text \(Provider configuration\)/,
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('surfaces degraded field-level readiness without failing required checks', async () => {
+    await setLocalSession({
+      cliSessionToken: 'cli-session-token-value',
+      accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
+      apiBaseUrl: 'https://postplus.example.com',
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (isPublicCatalogUrl(url)) {
+        return createPublicCatalogResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return new Response(
+          JSON.stringify({
+            accountId: 'account-1',
+            accountName: 'Team Workspace',
+            accountSlug: 'team-workspace',
+            accountType: 'team',
+            subscriptionStatus: 'active',
+            userEmail: 'user@example.com',
+            userId: 'user-1',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+
+      if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            degraded: true,
+            schemaVersion: 2,
+            subscriptionActive: true,
+            subscriptionStatus: 'active',
+            capabilities: [
+              {
+                checks: [
+                  {
+                    id: 'released_surface',
+                    label: 'Released surface',
+                    ok: true,
+                    status: 'degraded',
+                    required: true,
+                  },
+                ],
+                degraded: true,
+                id: 'media-generation:image-nano-banana-2-text',
+                label: 'Media generation: image-nano-banana-2-text',
+                ok: true,
+                required: true,
+              },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const report = await generateDoctorReport();
+      const formatted = formatDoctorReport(report);
+
+      const hostedCheck = report.checks.find(
+        (check) => check.id === 'hosted_capabilities',
+      );
+      assert.ok(hostedCheck);
+      // Degraded surfaces distinctly but does not fail the required gate.
+      assert.equal(hostedCheck.status, 'degraded');
+      assert.equal(report.requiredOk, true);
+      assert.equal(report.ok, false);
+      assert.match(
+        formatted,
+        /\[DEGRADED\] Hosted capabilities: Ready with field-level coverage gaps: Media generation: image-nano-banana-2-text \(Released surface\)/,
+      );
+      assert.match(formatted, /known field-level coverage gaps/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1590,7 +1684,7 @@ process.exit(1);
       const report = await generateDoctorReport();
       const formatted = formatDoctorReport(report);
 
-      assert.equal(report.schemaVersion, 1);
+      assert.equal(report.schemaVersion, 2);
       assert.equal(report.ok, false);
       assert.match(formatted, /PostPlus Cloud/);
       assert.match(formatted, /postplus auth login/);
