@@ -19,7 +19,10 @@ import {
 } from './auth.js';
 import { readCurrentCliVersion } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
-import { runHostedDomainCommand } from './hosted-domain-commands.js';
+import {
+  runHostedDomainCommand,
+  runMediaFileCommand,
+} from './hosted-domain-commands.js';
 import { assertConfigFilePermissions } from './local-state.js';
 import {
   QUOTE_AUTO_CONFIRM_UNDER_ENV,
@@ -83,6 +86,7 @@ Usage:
   postplus research scrape <source-key> --request <input-array.json> [--skill <skill-id>] [--output <result.json>]
   postplus media schema [--endpoint <endpoint-key>] [--json]
   postplus media <verb> <endpoint-key> --request <input.json> | --<flags> [--output <result.json>]
+  postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--output <result.json>]
   postplus publish schema [--json]
   postplus publish <operation> --request <input.json> [--output <result.json>]
   postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <millicredits>]
@@ -546,6 +550,9 @@ async function main(): Promise<void> {
       return;
     case 'media':
       process.exitCode = await runHostedDomainCommand('media', rest);
+      return;
+    case 'media-file':
+      process.exitCode = await runMediaFileCommand(rest);
       return;
     case 'publish':
       process.exitCode = await runHostedDomainCommand('publish', rest);

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { resolveFreshRemoteAuth } from './auth-session.js';
@@ -558,6 +558,196 @@ async function runVideoAnalysisVerb(args: {
     json: flags.booleans.has('json'),
     outputPath,
   });
+}
+
+// `media-file upload`: the generic local-file -> hosted storageReference verb.
+// Released skills ship no scripts, so any skill that must place a local file
+// behind a hosted reference before a hosted request (e.g. video-analysis before
+// `media analyze`) drives it through this verb. It is capability-generic: it has
+// no knowledge of any one skill's request payload, it only mints an opaque
+// storageReference the agent then embeds in its own hosted request. The runner
+// holds no provider keys — it asks the Web boundary for a signed upload target,
+// PUTs the bytes, and returns the storageReference the Web boundary issued.
+const MEDIA_FILE_MIME_BY_EXTENSION: Record<string, string> = {
+  '.gif': 'image/gif',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.m4a': 'audio/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+  '.png': 'image/png',
+  '.wav': 'audio/wav',
+  '.webm': 'video/webm',
+  '.webp': 'image/webp',
+};
+
+function inferUploadMimeType(filePath: string): string {
+  return (
+    MEDIA_FILE_MIME_BY_EXTENSION[path.extname(filePath).toLowerCase()] ??
+    'application/octet-stream'
+  );
+}
+
+export async function runMediaFileCommand(args: string[]): Promise<number> {
+  const [subcommand, ...rest] = args;
+  if (subcommand === 'upload') {
+    return runMediaFileUpload(rest);
+  }
+  printMediaFileHelp();
+  return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+}
+
+async function runMediaFileUpload(args: string[]): Promise<number> {
+  const flags = parseFlags(args, new Set(['json']));
+  const allowedKeys = new Set([
+    'hosted-operation-id',
+    'input-file',
+    'json',
+    'mime',
+    'output',
+    'quote-confirmation-token',
+    'skill',
+  ]);
+  for (const key of [...flags.values.keys(), ...flags.booleans]) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`Unknown option for media-file upload: --${key}.`);
+    }
+  }
+
+  const inputFile = requireFlag(flags, 'input-file');
+  const absolutePath = path.resolve(inputFile);
+  const fileStat = await stat(absolutePath);
+  if (!fileStat.isFile()) {
+    throw new Error(`media-file upload source is not a file: ${absolutePath}`);
+  }
+  const fileBuffer = await readFile(absolutePath);
+  const mimeType = flags.values.get('mime') ?? inferUploadMimeType(absolutePath);
+  const outputPath = flags.values.get('output') ?? null;
+
+  const body = {
+    capability: 'media-file',
+    operation: 'create-upload-url',
+    file: {
+      mimeType,
+      name: path.basename(absolutePath),
+      sizeBytes: fileBuffer.length,
+    },
+    operationId:
+      flags.values.get('hosted-operation-id') ??
+      `postplus-cli:media-file:create-upload-url:${randomUUID()}`,
+    quoteConfirmationToken:
+      flags.values.get('quote-confirmation-token') ?? undefined,
+  };
+
+  return runHostedCommand({
+    request: async () => {
+      const payload = await postHostedJson({
+        body,
+        pathName: '/api/postplus-cli/hosted/capability',
+        skillName: flags.values.get('skill') ?? null,
+      });
+      const output = readHostedUploadOutput(payload);
+      const signedUpload = readSignedUpload(output);
+      await putHostedMediaBytes(signedUpload, fileBuffer);
+      return { storageReference: readStorageReferenceValue(output) };
+    },
+    errorInputLabel: inputFile,
+    json: flags.booleans.has('json'),
+    outputPath,
+  });
+}
+
+type SignedUpload = {
+  method: string;
+  requiredHeaders: Record<string, string>;
+  url: string;
+};
+
+function readHostedUploadOutput(payload: unknown): Record<string, unknown> {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const output = (payload as Record<string, unknown>).output;
+    if (output && typeof output === 'object' && !Array.isArray(output)) {
+      return output as Record<string, unknown>;
+    }
+  }
+  throw new Error('Hosted media upload response is missing output.');
+}
+
+function readSignedUpload(output: Record<string, unknown>): SignedUpload {
+  const signedUpload = output.signedUpload;
+  if (
+    !signedUpload ||
+    typeof signedUpload !== 'object' ||
+    Array.isArray(signedUpload)
+  ) {
+    throw new Error('Hosted media upload response is missing signedUpload.');
+  }
+  const record = signedUpload as Record<string, unknown>;
+  if (typeof record.url !== 'string' || !record.url.trim()) {
+    throw new Error('Hosted media upload signedUpload.url must be a string.');
+  }
+  if (record.method !== 'PUT') {
+    throw new Error(
+      `Unsupported hosted media signed upload method: ${String(record.method)}.`,
+    );
+  }
+  const requiredHeaders: Record<string, string> = {};
+  if (
+    record.requiredHeaders &&
+    typeof record.requiredHeaders === 'object' &&
+    !Array.isArray(record.requiredHeaders)
+  ) {
+    for (const [key, value] of Object.entries(
+      record.requiredHeaders as Record<string, unknown>,
+    )) {
+      if (typeof value !== 'string') {
+        throw new Error(
+          `Hosted media upload signedUpload.requiredHeaders.${key} must be a string.`,
+        );
+      }
+      requiredHeaders[key] = value;
+    }
+  }
+  return { method: record.method, requiredHeaders, url: record.url.trim() };
+}
+
+function readStorageReferenceValue(output: Record<string, unknown>): unknown {
+  const storageReference = output.storageReference;
+  if (
+    !storageReference ||
+    typeof storageReference !== 'object' ||
+    Array.isArray(storageReference)
+  ) {
+    throw new Error('Hosted media upload response is missing storageReference.');
+  }
+  return storageReference;
+}
+
+async function putHostedMediaBytes(
+  signedUpload: SignedUpload,
+  body: Buffer,
+): Promise<void> {
+  const response = await fetch(signedUpload.url, {
+    body,
+    headers: signedUpload.requiredHeaders,
+    method: 'PUT',
+    signal: AbortSignal.timeout(120000),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Hosted media signed upload failed with status ${response.status}.`,
+    );
+  }
+}
+
+function printMediaFileHelp(): void {
+  process.stdout.write(`PostPlus CLI - media-file commands
+
+Usage:
+  postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
+`);
 }
 
 // Shared submit path for both surfaces: wrap the media input, derive billing

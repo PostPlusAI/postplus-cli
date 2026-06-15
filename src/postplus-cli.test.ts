@@ -29,7 +29,10 @@ import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import { POSTPLUS_CLIENT_COMPATIBILITY_HEADERS } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import { HOSTED_EXECUTION_MANIFESTS } from './generated/hosted-execution-manifest.generated.js';
-import { runHostedDomainCommand } from './hosted-domain-commands.js';
+import {
+  runHostedDomainCommand,
+  runMediaFileCommand,
+} from './hosted-domain-commands.js';
 import { generateLocalDependencyReport } from './local-dependencies.js';
 import {
   readLocalConfig,
@@ -4470,6 +4473,156 @@ describe('hosted domain commands', () => {
       assert.equal(Object.hasOwn(body, 'endpointKey'), false);
       assert.equal(Object.hasOwn(body, 'input'), false);
       assert.equal(Object.hasOwn(body, 'estimatedUsage'), false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('media-file upload mints a storageReference: create-upload-url then PUT the bytes', async () => {
+    const uploadDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-upload-'));
+    tempDirs.push(uploadDir);
+    const videoPath = resolve(uploadDir, 'clip.mp4');
+    const outputPath = resolve(uploadDir, 'result.json');
+    const fileBytes = Buffer.from('fake-mp4-bytes-0123456789');
+    await writeFile(videoPath, fileBytes);
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const storageReference = {
+      bucket: 'uploads',
+      mimeType: 'video/mp4',
+      name: 'clip.mp4',
+      sizeBytes: fileBytes.length,
+      storagePath: 'users/user-1/hosted-media/inputs/clip.mp4',
+    };
+    const originalFetch = globalThis.fetch;
+    let createUploadBody: unknown = null;
+    let putBytes: Buffer | null = null;
+    let putContentType: string | null = null;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url === 'https://postplus.test/api/postplus-cli/hosted/capability') {
+        createUploadBody = JSON.parse(String(init?.body));
+        return new Response(
+          JSON.stringify({
+            output: {
+              signedUpload: {
+                expiresInSeconds: 600,
+                method: 'PUT',
+                requiredHeaders: { 'content-type': 'video/mp4' },
+                token: 'signed-token',
+                url: 'https://upload.test/signed-target',
+              },
+              storageReference,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === 'https://upload.test/signed-target') {
+        assert.equal(init?.method, 'PUT');
+        putBytes = Buffer.from(init?.body as ArrayBuffer);
+        putContentType =
+          (init?.headers as Record<string, string>)['content-type'] ?? null;
+        return new Response('{}', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    };
+
+    try {
+      const result = await runMediaFileCommand([
+        'upload',
+        '--input-file',
+        videoPath,
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 0);
+
+      const body = createUploadBody as Record<string, unknown>;
+      assert.equal(body.capability, 'media-file');
+      assert.equal(body.operation, 'create-upload-url');
+      assert.deepEqual(body.file, {
+        mimeType: 'video/mp4',
+        name: 'clip.mp4',
+        sizeBytes: fileBytes.length,
+      });
+      assert.match(
+        String(body.operationId),
+        /^postplus-cli:media-file:create-upload-url:/u,
+      );
+      // The bytes were streamed to the signed target, not embedded in the JSON body.
+      assert.equal(putContentType, 'video/mp4');
+      assert.deepEqual(putBytes, fileBytes);
+
+      const output = JSON.parse(await readFile(outputPath, 'utf8'));
+      assert.deepEqual(output.storageReference, storageReference);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('media-file upload surfaces a structured hosted error from create-upload-url', async () => {
+    const uploadDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-upload-'));
+    tempDirs.push(uploadDir);
+    const videoPath = resolve(uploadDir, 'clip.mp4');
+    const outputPath = resolve(uploadDir, 'result.json');
+    await writeFile(videoPath, Buffer.from('bytes'));
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let putCount = 0;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url === 'https://postplus.test/api/postplus-cli/hosted/capability') {
+        return new Response(
+          JSON.stringify({
+            code: 'postplus_cli_hosted_media_upload_rejected',
+            layer: 'hosted-capability',
+            message: 'Mock upload rejected.',
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      putCount += 1;
+      return new Response('{}', { status: 200 });
+    };
+
+    try {
+      const result = await runMediaFileCommand([
+        'upload',
+        '--input-file',
+        videoPath,
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 1);
+      assert.equal(putCount, 0);
+      const output = JSON.parse(await readFile(outputPath, 'utf8'));
+      assert.equal(
+        output.error.code,
+        'postplus_cli_hosted_media_upload_rejected',
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
