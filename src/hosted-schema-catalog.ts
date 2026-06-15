@@ -201,18 +201,18 @@ export const MEDIA_ENDPOINT_HINTS: Record<string, Record<string, unknown>> = {
     prompt: 'A realistic vertical product image on a clean white desk.',
     size: '1024x1024',
   },
-  'transcription-whisper': {
+  'transcription': {
     audio: 'https://example.com/input-audio.mp3',
     enable_timestamps: true,
     language: 'en',
     task: 'transcribe',
   },
-  'transcription-whisper-turbo': {
+  'transcription-turbo': {
     audio: 'https://example.com/input-audio.mp3',
     language: 'en',
     task: 'transcribe',
   },
-  'transcription-whisper-with-video': {
+  'transcription-video': {
     enable_timestamps: true,
     language: 'en',
     task: 'transcribe',
@@ -287,11 +287,11 @@ export const MEDIA_ENDPOINT_HINTS: Record<string, Record<string, unknown>> = {
     prompt: 'A realistic vertical short-form product reveal.',
     resolution: '720p',
   },
-  'voice-qwen3-clone': {
+  'voice-clone': {
     reference_audio: 'https://example.com/reference-voice.wav',
     text: 'Short voiceover line to synthesize.',
   },
-  'voice-qwen3-design': {
+  'voice-design': {
     language: 'en',
     text: 'Short voiceover line to synthesize.',
     voiceDescription: 'Warm, clear, natural creator voice.',
@@ -302,7 +302,7 @@ export const VIDEO_ANALYSIS_MODEL_HINTS: Record<
   string,
   Record<string, unknown>
 > = {
-  'gemini-video-analysis': {
+  'video-analysis': {
     contents: [
       {
         parts: [

@@ -384,8 +384,8 @@ function buildMediaSchemaReport(
       'video-analysis.analyze': {
         capability: 'video-analysis',
         operation: 'analyze',
-        modelKey: 'gemini-video-analysis',
-        payload: VIDEO_ANALYSIS_MODEL_HINTS['gemini-video-analysis'],
+        modelKey: 'video-analysis',
+        payload: VIDEO_ANALYSIS_MODEL_HINTS['video-analysis'],
       },
     },
   };

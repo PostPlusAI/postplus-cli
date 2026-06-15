@@ -137,7 +137,7 @@ function createVideoAnalysisCatalogResponse(): Response {
           path: 'skills/video-analysis/SKILL.md',
           requirements: {
             hostedCapabilities: ['media-file', 'video-analysis'],
-            modelKeys: ['gemini-video-analysis'],
+            modelKeys: ['video-analysis'],
             localDependencies: [],
           },
           status: 'released',
@@ -268,9 +268,9 @@ function createMediaReadinessResponse(): Response {
           required: true,
         },
         {
-          id: 'video-analysis:gemini-video-analysis',
-          label: 'Video analysis: gemini-video-analysis',
-          modelKey: 'gemini-video-analysis',
+          id: 'video-analysis:video-analysis',
+          label: 'Video analysis: video-analysis',
+          modelKey: 'video-analysis',
           ok: true,
           required: true,
         },
@@ -2066,7 +2066,7 @@ describe('public skill catalog', () => {
                 endpointKeys: ['image-demo'],
                 hostedCapabilities: ['hosted-collection'],
                 localDependencies: ['ffmpeg', 'python3:yt_dlp'],
-                modelKeys: ['gemini-video-analysis'],
+                modelKeys: ['video-analysis'],
                 sourceKeys: ['facebook-post-by-url'],
               },
               status: 'released',
@@ -2099,7 +2099,7 @@ describe('public skill catalog', () => {
             endpointKeys: ['image-demo'],
             hostedCapabilities: ['hosted-collection'],
             localDependencies: ['ffmpeg', 'python3:yt_dlp'],
-            modelKeys: ['gemini-video-analysis'],
+            modelKeys: ['video-analysis'],
             sourceKeys: ['facebook-post-by-url'],
           },
           skillId: 'demo-skill',
@@ -3864,7 +3864,7 @@ describe('hosted domain commands', () => {
       'media',
       'schema',
       '--endpoint',
-      'transcription-whisper',
+      'transcription',
       '--json',
     ]);
     const report = JSON.parse(stdout) as Record<string, unknown>;
@@ -3874,7 +3874,7 @@ describe('hosted domain commands', () => {
     ] as Record<string, unknown>;
     const input = request.input as Record<string, unknown>;
 
-    assert.equal(request.endpointKey, 'transcription-whisper');
+    assert.equal(request.endpointKey, 'transcription');
     assert.equal(input.audio, 'https://example.com/input-audio.mp3');
     assert.equal(input.enable_timestamps, true);
     assert.equal(input.task, 'transcribe');
@@ -4143,7 +4143,7 @@ describe('hosted domain commands', () => {
     try {
       const result = await runHostedDomainCommand('media', [
         'transcribe',
-        'transcription-whisper',
+        'transcription',
         '--audio',
         'https://example.com/a.mp3',
         '--duration-seconds',
@@ -4167,7 +4167,7 @@ describe('hosted domain commands', () => {
       });
       assert.deepEqual(body.requestDimensions, {
         billableUnitCount: 1,
-        operationKey: 'transcription-whisper',
+        operationKey: 'transcription',
       });
     } finally {
       globalThis.fetch = originalFetch;
@@ -4190,7 +4190,7 @@ describe('hosted domain commands', () => {
         () =>
           runHostedDomainCommand('media', [
             'transcribe',
-            'transcription-whisper',
+            'transcription',
             '--audio',
             'https://example.com/a.mp3',
           ]),
@@ -4207,7 +4207,7 @@ describe('hosted domain commands', () => {
       () =>
         runHostedDomainCommand('media', [
           'transcribe',
-          'transcription-whisper',
+          'transcription',
           '--audio',
           'https://example.com/a.mp3',
           '--duration-seconds',
@@ -4450,7 +4450,7 @@ describe('hosted domain commands', () => {
     try {
       const result = await runHostedDomainCommand('media', [
         'analyze',
-        'gemini-video-analysis',
+        'video-analysis',
         '--request',
         requestPath,
       ]);
@@ -4458,7 +4458,7 @@ describe('hosted domain commands', () => {
       const body = postedBody as Record<string, unknown>;
       assert.equal(body.capability, 'video-analysis');
       assert.equal(body.operation, 'analyze');
-      assert.equal(body.modelKey, 'gemini-video-analysis');
+      assert.equal(body.modelKey, 'video-analysis');
       assert.deepEqual(body.payload, payload);
       assert.match(
         String(body.operationId),
@@ -4687,7 +4687,7 @@ describe('hosted domain commands', () => {
     try {
       const result = await runHostedDomainCommand('media', [
         'transcribe',
-        'transcription-whisper',
+        'transcription',
         '--audio',
         'https://example.com/a.mp3',
         '--duration-seconds',

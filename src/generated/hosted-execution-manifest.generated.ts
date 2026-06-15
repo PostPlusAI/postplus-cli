@@ -15,12 +15,12 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "domain": "media",
       "capability": "media-generation",
       "endpointKeys": [
-        "transcription-whisper",
-        "transcription-whisper-turbo"
+        "transcription",
+        "transcription-turbo"
       ],
       "endpoints": [
         {
-          "endpointKey": "transcription-whisper",
+          "endpointKey": "transcription",
           "provider": "wavespeed",
           "providerModelPath": "wavespeed-ai/openai-whisper",
           "fields": [
@@ -101,7 +101,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
           ]
         },
         {
-          "endpointKey": "transcription-whisper-turbo",
+          "endpointKey": "transcription-turbo",
           "provider": "wavespeed",
           "providerModelPath": "wavespeed-ai/openai-whisper-turbo",
           "fields": [
@@ -1665,11 +1665,11 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "domain": "media",
       "capability": "video-analysis",
       "modelKeys": [
-        "gemini-video-analysis"
+        "video-analysis"
       ],
       "models": [
         {
-          "modelKey": "gemini-video-analysis",
+          "modelKey": "video-analysis",
           "providerModelPath": "gemini-3.5-flash"
         }
       ]
@@ -2261,11 +2261,11 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "domain": "media",
       "capability": "media-generation",
       "endpointKeys": [
-        "transcription-whisper-with-video"
+        "transcription-video"
       ],
       "endpoints": [
         {
-          "endpointKey": "transcription-whisper-with-video",
+          "endpointKey": "transcription-video",
           "provider": "wavespeed",
           "providerModelPath": "wavespeed-ai/openai-whisper-with-video",
           "fields": [
@@ -2357,12 +2357,12 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "domain": "media",
       "capability": "media-generation",
       "endpointKeys": [
-        "voice-qwen3-design",
-        "voice-qwen3-clone"
+        "voice-design",
+        "voice-clone"
       ],
       "endpoints": [
         {
-          "endpointKey": "voice-qwen3-design",
+          "endpointKey": "voice-design",
           "provider": "wavespeed",
           "providerModelPath": "wavespeed-ai/qwen3-tts/voice-design",
           "fields": [
@@ -2415,7 +2415,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
           ]
         },
         {
-          "endpointKey": "voice-qwen3-clone",
+          "endpointKey": "voice-clone",
           "provider": "wavespeed",
           "providerModelPath": "wavespeed-ai/qwen3-tts/voice-clone",
           "fields": [
