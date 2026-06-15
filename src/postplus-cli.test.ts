@@ -4787,9 +4787,11 @@ describe('hosted domain commands', () => {
       if (url === 'https://upload.test/signed-target') {
         assert.equal(init?.method, 'PUT');
         const bodyStream = init?.body as ReadStream;
-        putBytes = Buffer.concat(
-          await Array.fromAsync(bodyStream, (chunk) => Buffer.from(chunk)),
-        );
+        const chunks: Buffer[] = [];
+        for await (const chunk of bodyStream) {
+          chunks.push(Buffer.from(chunk));
+        }
+        putBytes = Buffer.concat(chunks);
         putContentType =
           (init?.headers as Record<string, string>)['content-type'] ?? null;
         return new Response('{}', {
