@@ -576,7 +576,7 @@ describe('doctor and status', () => {
       assert.equal(status.schemaVersion, 1);
       assert.equal((await readLocalConfig())?.cliVersion, CURRENT_CLI_VERSION);
       assert.equal(status.ok, true);
-      assert.equal(status.doctor.schemaVersion, 1);
+      assert.equal(status.doctor.schemaVersion, 2);
       assert.equal(status.auth.ok, true);
       assert.equal(status.doctor.ok, true);
       assert.equal(status.skills.ok, true);
@@ -1345,7 +1345,7 @@ process.exit(1);
       const report = await generateDoctorReport();
       const formatted = formatDoctorReport(report);
 
-      assert.equal(report.schemaVersion, 1);
+      assert.equal(report.schemaVersion, 2);
       assert.equal(report.ok, false);
       assert.match(
         formatted,
@@ -1586,7 +1586,7 @@ process.exit(1);
       const report = await generateDoctorReport();
       const formatted = formatDoctorReport(report);
 
-      assert.equal(report.schemaVersion, 1);
+      assert.equal(report.schemaVersion, 2);
       assert.equal(report.ok, false);
       assert.match(formatted, /PostPlus Cloud/);
       assert.match(formatted, /postplus auth login/);
