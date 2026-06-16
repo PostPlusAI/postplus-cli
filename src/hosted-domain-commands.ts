@@ -102,6 +102,14 @@ export async function runHostedDomainCommand(
     return runHostedSchema(domain, rest);
   }
 
+  // Poll a pending async media-generation run by handle. This is a hand-coded
+  // branch (not a manifest verb) because a status poll has no endpointKey/field
+  // contract to project — exactly like the `research collect --run-handle`
+  // polling branch. It must be checked before the manifest verb dispatch.
+  if (domain === 'media' && subcommand === 'poll') {
+    return runMediaPoll(rest);
+  }
+
   if (domain === 'media' && subcommand && MEDIA_VERB_ENDPOINTS.has(subcommand)) {
     return runMediaVerb(subcommand, rest);
   }
@@ -616,6 +624,39 @@ function submitMediaGenerationRequest(params: {
     errorInputLabel: params.errorInputLabel,
     json: params.json,
     outputPath: params.outputPath,
+  });
+}
+
+// Poll a pending media-generation run: `postplus media poll --handle <run-id>`.
+// A media `create`/`transcribe`/`analyze` submit returns an async run handle
+// (`output.data.id`, also surfaced as `output.data.urls.get`) while the provider
+// job is still processing. This resumes that run by handle against the
+// media-generation `operation: 'status'` boundary. It is read-only and
+// billing-idempotent: the Web boundary finds the run by handle and settlement
+// reuses the submit's operationId, so polling never re-reserves or re-charges.
+// The body carries only the status quadruple; submit-only fields (input,
+// requestDimensions, quoteConfirmationToken) are never sent. Mirrors the
+// `research collect --run-handle` polling branch.
+async function runMediaPoll(args: string[]): Promise<number> {
+  const flags = parseFlags(args, new Set(['json']));
+  const handle = requireFlag(flags, 'handle');
+  const outputPath = flags.values.get('output') ?? null;
+
+  return runHostedCommand({
+    request: () =>
+      postHostedJson({
+        body: {
+          capability: 'media-generation',
+          handle,
+          operation: 'status',
+          operationId: `postplus-cli:media:media-generation:status:${randomUUID()}`,
+        },
+        pathName: '/api/postplus-cli/hosted/capability',
+        skillName: null,
+      }),
+    errorInputLabel: 'media-poll-handle',
+    json: flags.booleans.has('json'),
+    outputPath,
   });
 }
 
@@ -1285,7 +1326,8 @@ function printDomainVerbHelp(domain: Exclude<HostedDomain, 'research'>): void {
             (verb) =>
               `  postplus media ${verb} <endpoint-key> --<intent/default flags> [--json] [--output <result.json>]\n`,
           )
-          .join('')
+          .join('') +
+        '  postplus media poll --handle <run-id> [--json] [--output <result.json>]\n'
       : '  postplus publish <operation> --request <input.json> [--json] [--output <result.json>]\n';
 
   process.stdout.write(`PostPlus CLI - ${domain} commands

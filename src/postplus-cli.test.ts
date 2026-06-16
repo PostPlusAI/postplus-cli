@@ -4433,6 +4433,90 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('polls a pending media run by handle against /hosted/capability', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'result.json');
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedUrl: string | null = null;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      postedUrl = String(input);
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          output: { data: { id: 'run_1', status: 'processing' } },
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'poll',
+        '--handle',
+        'run_1',
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 0);
+      assert.equal(
+        postedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.capability, 'media-generation');
+      assert.equal(body.operation, 'status');
+      assert.equal(body.handle, 'run_1');
+      assert.match(
+        String(body.operationId),
+        /^postplus-cli:media:media-generation:status:/u,
+      );
+      // A poll resumes an existing run; it never carries submit-only billing
+      // fields, so it cannot re-reserve or re-charge.
+      assert.equal('input' in body, false);
+      assert.equal('requestDimensions' in body, false);
+      assert.equal('quoteConfirmationToken' in body, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fast-fails the media poll verb without a handle before any hosted call', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () => runHostedDomainCommand('media', ['poll']),
+        /Missing required option --handle\./u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('fast-fails the transcribe verb without a duration before any hosted call', async () => {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
