@@ -444,6 +444,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": "--output-format",
               "type": "string",
+              "enumValues": [
+                "png",
+                "jpeg"
+              ],
               "default": "png",
               "required": false
             },
@@ -521,6 +525,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": "--output-format",
               "type": "string",
+              "enumValues": [
+                "png",
+                "jpeg"
+              ],
               "default": "png",
               "required": false
             },
@@ -579,6 +587,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": "--output-format",
               "type": "string",
+              "enumValues": [
+                "png",
+                "jpeg"
+              ],
               "default": "png",
               "required": false
             },
@@ -637,6 +649,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": "--output-format",
               "type": "string",
+              "enumValues": [
+                "png",
+                "jpeg"
+              ],
               "default": "png",
               "required": false
             },
@@ -695,6 +711,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": "--output-format",
               "type": "string",
+              "enumValues": [
+                "png",
+                "jpeg"
+              ],
               "default": "png",
               "required": false
             },
@@ -761,6 +781,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": "--output-format",
               "type": "string",
+              "enumValues": [
+                "png",
+                "jpeg"
+              ],
               "default": "png",
               "required": false
             },
@@ -827,6 +851,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": "--output-format",
               "type": "string",
+              "enumValues": [
+                "png",
+                "jpeg"
+              ],
               "default": "png",
               "required": false
             },
@@ -893,6 +921,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": "--output-format",
               "type": "string",
+              "enumValues": [
+                "png",
+                "jpeg"
+              ],
               "default": "png",
               "required": false
             },
@@ -2391,6 +2423,19 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": null,
               "type": "string",
+              "enumValues": [
+                "auto",
+                "Chinese",
+                "English",
+                "German",
+                "Italian",
+                "Portuguese",
+                "Spanish",
+                "Japanese",
+                "Korean",
+                "French",
+                "Russian"
+              ],
               "default": "auto",
               "required": false
             },
@@ -2451,6 +2496,19 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "default",
               "flag": null,
               "type": "string",
+              "enumValues": [
+                "auto",
+                "Chinese",
+                "English",
+                "German",
+                "Italian",
+                "Portuguese",
+                "Spanish",
+                "Japanese",
+                "Korean",
+                "French",
+                "Russian"
+              ],
               "default": "auto",
               "required": false
             },
