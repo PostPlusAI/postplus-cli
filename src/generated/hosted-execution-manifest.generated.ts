@@ -1343,7 +1343,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": null,
               "type": "string",
               "enumValues": [
-                "480p",
                 "720p",
                 "1080p"
               ],
@@ -1502,7 +1501,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": null,
               "type": "string",
               "enumValues": [
-                "480p",
                 "720p",
                 "1080p"
               ],
