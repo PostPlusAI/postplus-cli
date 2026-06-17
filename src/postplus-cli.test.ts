@@ -3946,7 +3946,9 @@ describe('hosted domain commands', () => {
     const resolutionField = endpoints[0].fields.find(
       (field) => field.name === 'resolution',
     );
-    assert.deepEqual(resolutionField?.enumValues, ['480p', '720p', '1080p']);
+    // Turbo endpoints advertise only the resolutions priced in the cost table
+    // (no 480p turbo rate); the non-turbo seedance endpoints keep 480p.
+    assert.deepEqual(resolutionField?.enumValues, ['720p', '1080p']);
     assert.equal(resolutionField?.kind, 'default');
     assert.equal(resolutionField?.default, '720p');
     const durationField = endpoints[0].fields.find(
@@ -4814,6 +4816,99 @@ describe('hosted domain commands', () => {
       assert.equal(Object.hasOwn(body, 'endpointKey'), false);
       assert.equal(Object.hasOwn(body, 'input'), false);
       assert.equal(Object.hasOwn(body, 'estimatedUsage'), false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('media analyze forwards --video-seconds as estimatedUsage.videoSeconds', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    const payload = {
+      contents: [{ role: 'user', parts: [{ text: 'Analyze this short clip.' }] }],
+    };
+    await writeFile(requestPath, JSON.stringify(payload));
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (_input, init) => {
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'analyze',
+        'video-analysis',
+        '--request',
+        requestPath,
+        '--video-seconds',
+        '30',
+      ]);
+      assert.equal(result, 0);
+      const body = postedBody as Record<string, unknown>;
+      // Restores the video-analysis routing reachability the retired ffprobe runner
+      // had: the caller-supplied duration reaches the Web routing/preflight boundary.
+      assert.deepEqual(body.estimatedUsage, { videoSeconds: 30 });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('media analyze fast-fails on a non-positive --video-seconds before any hosted call', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    await writeFile(requestPath, JSON.stringify({ contents: [] }));
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'analyze',
+            'video-analysis',
+            '--request',
+            requestPath,
+            '--video-seconds',
+            '0',
+          ]),
+        /--video-seconds must be a positive number/u,
+      );
+      assert.equal(fetchCalls, 0);
     } finally {
       globalThis.fetch = originalFetch;
     }

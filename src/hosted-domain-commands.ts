@@ -339,8 +339,11 @@ function requireResolvedEndpoint(
 // video-analysis verb (request-json surface). The agent authors an opaque Gemini
 // request object (contents + generationConfig) in `--request <file>`; capability,
 // operation, and modelKey come from the verb + positional, so the body posts
-// EXACTLY the locked Web contract. There is no field classification and no
-// estimatedUsage — the payload is forwarded verbatim as the Gemini request.
+// EXACTLY the locked Web contract. There is no field classification; the payload
+// is forwarded verbatim as the Gemini request. The optional `--video-seconds`
+// flag is the one runner-supplied hint: when provided it is sent as
+// `estimatedUsage.videoSeconds` so the Web boundary can route eligible short
+// videos through its preflight/routing path (omit it to use the default route).
 async function runVideoAnalysisVerb(args: {
   args: string[];
   modelKey: string;
@@ -356,6 +359,7 @@ async function runVideoAnalysisVerb(args: {
     'quote-confirmation-token',
     'request',
     'skill',
+    'video-seconds',
   ]);
   for (const key of [...flags.values.keys(), ...flags.booleans]) {
     if (!allowedKeys.has(key)) {
@@ -373,11 +377,29 @@ async function runVideoAnalysisVerb(args: {
   }
   const payload = raw as Record<string, unknown>;
 
+  // Optional runner-supplied hint: the source video duration. When provided it is
+  // forwarded as estimatedUsage.videoSeconds so the Web boundary's video-analysis
+  // routing/preflight can consider eligible short videos; omitting it leaves the
+  // request on the default route. The CLI does not probe the media itself (no
+  // ffprobe in the open-source runner) — it only passes a value the caller knows.
+  const videoSecondsFlag = flags.values.get('video-seconds') ?? null;
+  let estimatedUsage: { videoSeconds: number } | undefined;
+  if (videoSecondsFlag !== null) {
+    const parsed = Number(videoSecondsFlag);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error(
+        `media ${verb} --video-seconds must be a positive number of seconds.`,
+      );
+    }
+    estimatedUsage = { videoSeconds: parsed };
+  }
+
   const body = {
     capability: 'video-analysis',
     operation: 'analyze',
     modelKey,
     payload,
+    ...(estimatedUsage ? { estimatedUsage } : {}),
     operationId:
       flags.values.get('hosted-operation-id') ??
       `postplus-cli:media:video-analysis:analyze:${randomUUID()}`,
@@ -1354,10 +1376,13 @@ function printMediaEndpointHelp(
 
   Surface: request-json (opaque Gemini request payload)
   Usage:
-    postplus ${domain} ${verb} ${targetKey} --request <input.json> [--json] [--output <result.json>]
+    postplus ${domain} ${verb} ${targetKey} --request <input.json> [--video-seconds <n>] [--json] [--output <result.json>]
 
   --request <file>  A JSON object authored verbatim as the Gemini request
                     (contents + optional generationConfig) under "payload".
+  --video-seconds <n>  Optional source video duration in seconds. Supplying it
+                    lets the hosted boundary route eligible short videos through
+                    its preflight path; omit it to use the default route.
   Runner-managed (minted by the CLI; never in the body): operationId, quoteConfirmationToken
 `);
     return;
