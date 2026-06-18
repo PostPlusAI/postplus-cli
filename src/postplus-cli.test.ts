@@ -4399,6 +4399,60 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('polls public-content research handles through the hosted collection route', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'poll-result.json');
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedUrl: string | null = null;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      postedUrl = String(input);
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          charged: false,
+          output: [{ url: 'https://www.facebook.com/facebook/' }],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    };
+
+    try {
+      const result = await runHostedDomainCommand('research', [
+        'collect',
+        '--run-handle',
+        's_public_content_snapshot',
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 0);
+      assert.equal(
+        postedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/collection',
+      );
+      assert.deepEqual(postedBody, {
+        runHandle: 's_public_content_snapshot',
+        runHandleType: 'public-content-collection',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('rejects an unknown research collect collection key', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);

@@ -789,7 +789,7 @@ async function runResearchCollect(args: string[]): Promise<number> {
     return runHostedCommand({
       request: () =>
         postHostedJson({
-          body: { runHandle },
+          body: { runHandle, runHandleType: 'public-content-collection' },
           pathName: '/api/postplus-cli/hosted/collection',
           skillName: null,
         }),
