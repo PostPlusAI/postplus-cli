@@ -420,14 +420,12 @@ async function runVideoAnalysisVerb(args: {
   });
 }
 
-// `media-file upload`: the generic local-file -> hosted storageReference verb.
-// Released skills ship no scripts, so any skill that must place a local file
-// behind a hosted reference before a hosted request (e.g. video-analysis before
-// `media analyze`) drives it through this verb. It is capability-generic: it has
-// no knowledge of any one skill's request payload, it only mints an opaque
-// storageReference the agent then embeds in its own hosted request. The runner
-// holds no provider keys — it asks the Web boundary for a signed upload target,
-// PUTs the bytes, and returns the storageReference the Web boundary issued.
+// `media-file upload`: the generic local-file -> hosted media verb. Released
+// skills ship no scripts, so a skill that must place a local file behind hosted
+// media first drives it through this verb. It is capability-generic: it knows no
+// skill request payload. The runner asks the Web boundary for a signed upload
+// target, PUTs bytes outside the JSON envelope, then asks the hosted provider
+// upload operation for the reusable provider-facing result.
 const MEDIA_FILE_MIME_BY_EXTENSION: Record<string, string> = {
   '.gif': 'image/gif',
   '.jpeg': 'image/jpeg',
@@ -509,8 +507,27 @@ async function runMediaFileUpload(args: string[]): Promise<number> {
       });
       const output = readHostedUploadOutput(payload);
       const signedUpload = readSignedUpload(output);
+      const storageReference = readStorageReferenceValue(output);
       await putHostedMediaBytes(signedUpload, absolutePath);
-      return { storageReference: readStorageReferenceValue(output) };
+
+      return await postHostedJson({
+        body: {
+          capability: 'media-file',
+          operation: 'upload',
+          file: {
+            mimeType,
+            name: path.basename(absolutePath),
+            storageReference,
+          },
+          operationId:
+            flags.values.get('hosted-operation-id') ??
+            `postplus-cli:media-file:upload:${randomUUID()}`,
+          quoteConfirmationToken:
+            flags.values.get('quote-confirmation-token') ?? undefined,
+        },
+        pathName: '/api/postplus-cli/hosted/capability',
+        skillName: flags.values.get('skill') ?? null,
+      });
     },
     errorInputLabel: inputFile,
     json: flags.booleans.has('json'),

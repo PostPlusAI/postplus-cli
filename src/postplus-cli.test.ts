@@ -5046,7 +5046,7 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('media-file upload mints a storageReference: create-upload-url then PUT the bytes', async () => {
+  it('media-file upload returns a hosted media URL after create-upload-url, PUT, and upload', async () => {
     const uploadDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-upload-'));
     tempDirs.push(uploadDir);
     const videoPath = resolve(uploadDir, 'clip.mp4');
@@ -5072,13 +5072,25 @@ describe('hosted domain commands', () => {
       storagePath: 'users/user-1/hosted-media/inputs/clip.mp4',
     };
     const originalFetch = globalThis.fetch;
-    let createUploadBody: unknown = null;
+    const hostedBodies: unknown[] = [];
     let putBytes: Buffer | null = null;
     let putContentType: string | null = null;
     globalThis.fetch = async (input, init) => {
       const url = String(input);
       if (url === 'https://postplus.test/api/postplus-cli/hosted/capability') {
-        createUploadBody = JSON.parse(String(init?.body));
+        const requestBody = JSON.parse(String(init?.body));
+        hostedBodies.push(requestBody);
+        if (requestBody.operation === 'upload') {
+          return new Response(
+            JSON.stringify({
+              output: {
+                download_url: 'https://uploads.example.com/clip.mp4',
+                storageReference,
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
         return new Response(
           JSON.stringify({
             output: {
@@ -5123,7 +5135,8 @@ describe('hosted domain commands', () => {
       ]);
       assert.equal(result, 0);
 
-      const body = createUploadBody as Record<string, unknown>;
+      assert.equal(hostedBodies.length, 2);
+      const body = hostedBodies[0] as Record<string, unknown>;
       assert.equal(body.capability, 'media-file');
       assert.equal(body.operation, 'create-upload-url');
       assert.deepEqual(body.file, {
@@ -5135,12 +5148,25 @@ describe('hosted domain commands', () => {
         String(body.operationId),
         /^postplus-cli:media-file:create-upload-url:/u,
       );
+      const uploadBody = hostedBodies[1] as Record<string, unknown>;
+      assert.equal(uploadBody.capability, 'media-file');
+      assert.equal(uploadBody.operation, 'upload');
+      assert.match(
+        String(uploadBody.operationId),
+        /^postplus-cli:media-file:upload:/u,
+      );
+      assert.deepEqual(uploadBody.file, {
+        mimeType: 'video/mp4',
+        name: 'clip.mp4',
+        storageReference,
+      });
       // The bytes were streamed to the signed target, not embedded in the JSON body.
       assert.equal(putContentType, 'video/mp4');
       assert.deepEqual(putBytes, fileBytes);
 
       const output = JSON.parse(await readFile(outputPath, 'utf8'));
-      assert.deepEqual(output.storageReference, storageReference);
+      assert.equal(output.output.download_url, 'https://uploads.example.com/clip.mp4');
+      assert.deepEqual(output.output.storageReference, storageReference);
     } finally {
       globalThis.fetch = originalFetch;
     }
