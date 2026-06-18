@@ -716,8 +716,15 @@ function collectHostedRequirementKeys(
   ]);
 }
 
+// Capability families whose sub-keys are intentionally NOT expressible as catalog
+// requirement keys: a skill requires the bare family capability, and any released
+// sub-key readiness row satisfies it. social-publishing operations and
+// public-content-discovery tools (e.g. web-search) both have no requirement-key
+// binding, so requiring the family must match the whole family. Without this,
+// `public-content-discovery:web-search` readiness is filtered out for skills that
+// require `public-content-discovery`, producing a false "readiness check missing".
 function isWholeFamilyHostedCapability(prefix: string): boolean {
-  return prefix === 'social-publishing';
+  return prefix === 'public-content-discovery' || prefix === 'social-publishing';
 }
 
 function requiresSocialPublishingPlan(

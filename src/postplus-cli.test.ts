@@ -331,6 +331,90 @@ function createSocialPublishingReadinessResponse(): Response {
   );
 }
 
+function createYoutubeResearchCatalogResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      schemaVersion: 1,
+      releaseId: 'catalog-1',
+      source: 'PostPlusAI/postplus-skills',
+      skills: [
+        {
+          name: 'youtube-research',
+          path: 'skills/20-research/youtube-research/SKILL.md',
+          requirements: {
+            collectionKeys: [
+              'youtube-channel-summary',
+              'youtube-comments',
+              'youtube-video-download',
+            ],
+            hostedCapabilities: [
+              'hosted-collection',
+              'public-content-collection',
+              'public-content-discovery',
+            ],
+            sourceKeys: ['youtube-videos'],
+            localDependencies: [],
+          },
+          status: 'released',
+        },
+      ],
+    }),
+    {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    },
+  );
+}
+
+function createYoutubeResearchReadinessResponse(): Response {
+  const okCapability = (
+    id: string,
+    label: string,
+    extra: Record<string, unknown>,
+  ) => ({ id, label, ok: true, required: true, ...extra });
+
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      subscriptionActive: true,
+      subscriptionStatus: 'active',
+      capabilities: [
+        okCapability(
+          'hosted-collection:youtube-channel-summary',
+          'Hosted collection: youtube-channel-summary',
+          { collectionKey: 'youtube-channel-summary' },
+        ),
+        okCapability(
+          'hosted-collection:youtube-comments',
+          'Hosted collection: youtube-comments',
+          { collectionKey: 'youtube-comments' },
+        ),
+        okCapability(
+          'hosted-collection:youtube-video-download',
+          'Hosted collection: youtube-video-download',
+          { collectionKey: 'youtube-video-download' },
+        ),
+        okCapability(
+          'public-content-collection:youtube-videos',
+          'Public content source: youtube-videos',
+          { sourceKey: 'youtube-videos' },
+        ),
+        // The discovery surface emits a tool-suffixed id with no requirement-key
+        // binding; requiring the bare `public-content-discovery` family must match it.
+        okCapability(
+          'public-content-discovery:web-search',
+          'Public content discovery: web-search',
+          { toolKey: 'web-search' },
+        ),
+      ],
+    }),
+    {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    },
+  );
+}
+
 const subscriptionStatusCases: {
   name: string;
   payload: Record<string, unknown>;
@@ -1550,6 +1634,54 @@ process.exit(1);
         /PostPlus Plus or Pro plan required; current subscription none/,
       );
       assert.doesNotMatch(formatted, /readiness check missing/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('matches public-content-discovery readiness to a skill that requires the discovery family', async () => {
+    await setLocalSession({
+      cliSessionToken: 'cli-session-token-value',
+      accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
+      apiBaseUrl: 'https://postplus.example.com',
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (isPublicCatalogUrl(url)) {
+        return createYoutubeResearchCatalogResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return createWhoamiResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+        return createYoutubeResearchReadinessResponse();
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const report = await generateDoctorReport({ skillId: 'youtube-research' });
+      const formatted = formatDoctorReport(report);
+
+      // The discovery family row is matched, so doctor must not report it missing.
+      assert.doesNotMatch(formatted, /readiness check missing/);
+      assert.match(formatted, /Hosted capabilities for youtube-research/);
+      assert.equal(report.ok, true);
+      assert.equal(report.requiredOk, true);
     } finally {
       globalThis.fetch = originalFetch;
     }
