@@ -3,10 +3,8 @@ import {
   type FreshRemoteAuth,
   resolveFreshRemoteAuth,
 } from './auth-session.js';
-import {
-  buildPostPlusClientCompatibilityHeaders,
-  formatPostPlusCompatibilityError,
-} from './client-compatibility.js';
+import { sendAuthedCloudRequest } from './authed-cloud-request.js';
+import { formatPostPlusCompatibilityError } from './client-compatibility.js';
 import { resolveHostedBaseUrl } from './hosted-release.js';
 import {
   formatLocalDependencyReport,
@@ -292,20 +290,11 @@ function buildDoctorReport(
 
 async function checkRemoteAuth(input: FreshRemoteAuth): Promise<DoctorCheck> {
   try {
-    let response = await requestWithAuth(
-      input,
-      '/api/postplus-cli/auth/whoami',
-    );
-
-    if (response.status === 401) {
-      const refreshedAuth = await resolveFreshRemoteAuth({
-        forceRefresh: true,
-      });
-      response = await requestWithAuth(
-        refreshedAuth,
-        '/api/postplus-cli/auth/whoami',
-      );
-    }
+    const response = await sendAuthedCloudRequest({
+      auth: input,
+      pathName: '/api/postplus-cli/auth/whoami',
+      retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
+    });
 
     const payload = (await response.json()) as {
       accountId?: unknown;
@@ -368,20 +357,11 @@ async function checkHostedCapabilities(
   skillScope: SkillScope | null,
 ): Promise<DoctorCheck> {
   try {
-    let response = await requestWithAuth(
-      input,
-      '/api/postplus-cli/hosted/readiness',
-    );
-
-    if (response.status === 401) {
-      const refreshedAuth = await resolveFreshRemoteAuth({
-        forceRefresh: true,
-      });
-      response = await requestWithAuth(
-        refreshedAuth,
-        '/api/postplus-cli/hosted/readiness',
-      );
-    }
+    const response = await sendAuthedCloudRequest({
+      auth: input,
+      pathName: '/api/postplus-cli/hosted/readiness',
+      retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
+    });
 
     const payload = (await response.json()) as {
       capabilities?: unknown;
@@ -829,19 +809,6 @@ function readErrorMessage(
   return typeof payload.error === 'string' && payload.error.trim().length > 0
     ? payload.error
     : fallback;
-}
-
-async function requestWithAuth(input: FreshRemoteAuth, path: string) {
-  const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
-
-  return fetch(`${input.apiBaseUrl}${path}`, {
-    headers: {
-      accept: 'application/json',
-      ...compatibilityHeaders,
-      authorization: `Bearer ${input.cliSessionToken}`,
-    },
-    signal: AbortSignal.timeout(15000),
-  });
 }
 
 export function formatDoctorReport(report: DoctorReport): string {

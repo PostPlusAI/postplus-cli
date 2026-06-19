@@ -1,10 +1,8 @@
 import { formatAccountBindingLines } from './account-binding-display.js';
 import { refreshRemoteAuthSession } from './auth-session.js';
 import { clearAuthState, generateAuthStatusReport } from './auth.js';
-import {
-  buildPostPlusClientCompatibilityHeaders,
-  formatPostPlusCompatibilityError,
-} from './client-compatibility.js';
+import { sendAuthedCloudRequest } from './authed-cloud-request.js';
+import { formatPostPlusCompatibilityError } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { resolveCliSessionTokenState } from './local-state.js';
 import { readSubscriptionStatusField } from './subscription-status.js';
@@ -59,17 +57,11 @@ export async function revokeRemoteAuth() {
     throw new Error('Run `postplus auth login` before revoking PostPlus auth.');
   }
 
-  const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
-  const response = await fetch(`${apiBaseUrl}/api/postplus-cli/auth/revoke`, {
+  const response = await sendAuthedCloudRequest({
+    auth: { apiBaseUrl, cliSessionToken: cliSessionTokenState.value },
+    body: {},
     method: 'POST',
-    headers: {
-      accept: 'application/json',
-      ...compatibilityHeaders,
-      authorization: `Bearer ${cliSessionTokenState.value}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({}),
-    signal: AbortSignal.timeout(15000),
+    pathName: '/api/postplus-cli/auth/revoke',
   });
   const payload = (await response.json()) as
     | {

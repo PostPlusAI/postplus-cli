@@ -1,5 +1,5 @@
+import { sendAuthedCloudRequest } from './authed-cloud-request.js';
 import {
-  buildPostPlusClientCompatibilityHeaders,
   formatPostPlusCompatibilityError,
   writeCurrentCliVersionToLocalConfig,
 } from './client-compatibility.js';
@@ -99,17 +99,11 @@ export async function refreshRemoteAuthSession(input?: {
     );
   }
 
-  const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
-  const response = await fetch(`${apiBaseUrl}/api/postplus-cli/auth/refresh`, {
+  const response = await sendAuthedCloudRequest({
+    auth: { apiBaseUrl, cliSessionToken },
+    body: {},
     method: 'POST',
-    headers: {
-      accept: 'application/json',
-      ...compatibilityHeaders,
-      authorization: `Bearer ${cliSessionToken}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({}),
-    signal: AbortSignal.timeout(15000),
+    pathName: '/api/postplus-cli/auth/refresh',
   });
   const payload = (await response.json()) as RemoteAuthRefreshPayload;
 

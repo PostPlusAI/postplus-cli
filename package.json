@@ -12,6 +12,7 @@
     "build/auth-session.js",
     "build/auth-validate.js",
     "build/auth.js",
+    "build/authed-cloud-request.js",
     "build/client-compatibility.js",
     "build/command-runner.js",
     "build/doctor.js",

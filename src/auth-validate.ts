@@ -1,9 +1,7 @@
 import { formatAccountBindingLines } from './account-binding-display.js';
 import { resolveFreshRemoteAuth } from './auth-session.js';
-import {
-  buildPostPlusClientCompatibilityHeaders,
-  formatPostPlusCompatibilityError,
-} from './client-compatibility.js';
+import { sendAuthedCloudRequest } from './authed-cloud-request.js';
+import { formatPostPlusCompatibilityError } from './client-compatibility.js';
 import { readSubscriptionStatusField } from './subscription-status.js';
 
 export type AuthValidateReport = {
@@ -20,15 +18,12 @@ export type AuthValidateReport = {
 };
 
 export async function validateRemoteAuth(): Promise<AuthValidateReport> {
-  let auth = await resolveFreshRemoteAuth();
-  let response = await fetchWhoami(auth);
-
-  if (response.status === 401) {
-    auth = await resolveFreshRemoteAuth({
-      forceRefresh: true,
-    });
-    response = await fetchWhoami(auth);
-  }
+  const auth = await resolveFreshRemoteAuth();
+  const response = await sendAuthedCloudRequest({
+    auth,
+    pathName: '/api/postplus-cli/auth/whoami',
+    retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
+  });
 
   const payload = (await response.json()) as Record<string, unknown>;
 
@@ -97,23 +92,6 @@ function readAccountType(
   }
 
   return value;
-}
-
-async function fetchWhoami(input: {
-  apiBaseUrl: string;
-  cliSessionToken: string;
-}) {
-  const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
-
-  return fetch(`${input.apiBaseUrl}/api/postplus-cli/auth/whoami`, {
-    method: 'GET',
-    headers: {
-      accept: 'application/json',
-      ...compatibilityHeaders,
-      authorization: `Bearer ${input.cliSessionToken}`,
-    },
-    signal: AbortSignal.timeout(15000),
-  });
 }
 
 function readRequiredString(
