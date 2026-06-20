@@ -7,16 +7,16 @@ import { resolveFreshRemoteAuth } from './auth-session.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
 import { formatPostPlusCompatibilityError } from './client-compatibility.js';
 import {
-  buildHostedRequestSchemaReport,
-  buildMediaGenerationRequestDimensions,
-} from './hosted-request-schemas.js';
-import {
   type HostedDomain,
   type ManifestEndpoint,
   type ManifestField,
   type ResolvedVerbTarget,
   buildVerbTargetIndex,
 } from './hosted-manifest-index.js';
+import {
+  buildHostedRequestSchemaReport,
+  buildMediaGenerationRequestDimensions,
+} from './hosted-request-schemas.js';
 import {
   type LargeCreditQuoteConfirmationChallenge,
   readLargeCreditQuoteConfirmationChallenge,
@@ -108,7 +108,11 @@ export async function runHostedDomainCommand(
     return runMediaPoll(rest);
   }
 
-  if (domain === 'media' && subcommand && MEDIA_VERB_ENDPOINTS.has(subcommand)) {
+  if (
+    domain === 'media' &&
+    subcommand &&
+    MEDIA_VERB_ENDPOINTS.has(subcommand)
+  ) {
     return runMediaVerb(subcommand, rest);
   }
 
@@ -296,10 +300,7 @@ async function runMediaVerbRequestJson(args: {
   // Runner-managed fields are minted/derived by the CLI; reject them in the body so
   // the agent cannot smuggle in ids, tokens, or billing dimensions.
   for (const field of endpoint.fields) {
-    if (
-      field.class === 'runner-managed' &&
-      Object.hasOwn(input, field.name)
-    ) {
+    if (field.class === 'runner-managed' && Object.hasOwn(input, field.name)) {
       throw new Error(
         `media ${verb} ${endpointKey} input must not include runner-managed field "${field.name}"; the CLI mints or derives it.`,
       );
@@ -478,8 +479,10 @@ async function runMediaFileUpload(args: string[]): Promise<number> {
   if (!fileStat.isFile()) {
     throw new Error(`media-file upload source is not a file: ${absolutePath}`);
   }
-  const mimeType = flags.values.get('mime') ?? inferUploadMimeType(absolutePath);
+  const mimeType =
+    flags.values.get('mime') ?? inferUploadMimeType(absolutePath);
   const outputPath = flags.values.get('output') ?? null;
+  const hostedOperationId = flags.values.get('hosted-operation-id') ?? null;
 
   const body = {
     capability: 'media-file',
@@ -490,7 +493,7 @@ async function runMediaFileUpload(args: string[]): Promise<number> {
       sizeBytes: fileStat.size,
     },
     operationId:
-      flags.values.get('hosted-operation-id') ??
+      hostedOperationId ??
       `postplus-cli:media-file:create-upload-url:${randomUUID()}`,
     quoteConfirmationToken:
       flags.values.get('quote-confirmation-token') ?? undefined,
@@ -517,9 +520,9 @@ async function runMediaFileUpload(args: string[]): Promise<number> {
             name: path.basename(absolutePath),
             storageReference,
           },
-          operationId:
-            flags.values.get('hosted-operation-id') ??
-            `postplus-cli:media-file:upload:${randomUUID()}`,
+          operationId: hostedOperationId
+            ? `${hostedOperationId}:upload`
+            : `postplus-cli:media-file:upload:${randomUUID()}`,
           quoteConfirmationToken:
             flags.values.get('quote-confirmation-token') ?? undefined,
         },
@@ -594,7 +597,9 @@ function readStorageReferenceValue(output: Record<string, unknown>): unknown {
     typeof storageReference !== 'object' ||
     Array.isArray(storageReference)
   ) {
-    throw new Error('Hosted media upload response is missing storageReference.');
+    throw new Error(
+      'Hosted media upload response is missing storageReference.',
+    );
   }
   return storageReference;
 }
@@ -1393,7 +1398,12 @@ function printMediaEndpointHelp(
     '',
   ];
 
-  appendFieldGroup(lines, 'Intent (you must / may write):', intent, isFlagsSurface);
+  appendFieldGroup(
+    lines,
+    'Intent (you must / may write):',
+    intent,
+    isFlagsSurface,
+  );
   appendFieldGroup(
     lines,
     'Default (manifest-defaulted; write only to deviate):',
@@ -1478,7 +1488,9 @@ function printOpaqueTargetHelp(
   // publish's operation is both the verb and the target, so the header/usage show
   // it once; research shows `<verb> <target>`.
   const header =
-    domain === 'publish' ? `publish ${targetKey}` : `research ${verb} ${targetKey}`;
+    domain === 'publish'
+      ? `publish ${targetKey}`
+      : `research ${verb} ${targetKey}`;
   const usage =
     domain === 'publish'
       ? `    postplus publish ${targetKey} --request <input.json> [--json] [--output <result.json>]`

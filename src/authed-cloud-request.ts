@@ -66,7 +66,9 @@ async function issueAuthedCloudRequest(
     headers['content-type'] = 'application/json';
   }
 
-  return fetch(`${auth.apiBaseUrl}${input.pathName}`, {
+  const requestUrl = new URL(input.pathName, normalizeBaseUrl(auth.apiBaseUrl));
+
+  return fetch(requestUrl, {
     method: input.method ?? 'GET',
     headers,
     ...(hasBody ? { body: JSON.stringify(input.body) } : {}),
@@ -74,4 +76,8 @@ async function issueAuthedCloudRequest(
       input.timeoutMs ?? DEFAULT_AUTHED_REQUEST_TIMEOUT_MS,
     ),
   });
+}
+
+function normalizeBaseUrl(apiBaseUrl: string): string {
+  return apiBaseUrl.endsWith('/') ? apiBaseUrl : `${apiBaseUrl}/`;
 }

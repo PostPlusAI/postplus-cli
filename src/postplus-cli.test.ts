@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { readFileSync, type ReadStream } from 'node:fs';
+import { type ReadStream, readFileSync } from 'node:fs';
 import {
   mkdir,
   mkdtemp,
@@ -1674,7 +1674,9 @@ process.exit(1);
     };
 
     try {
-      const report = await generateDoctorReport({ skillId: 'youtube-research' });
+      const report = await generateDoctorReport({
+        skillId: 'youtube-research',
+      });
       const formatted = formatDoctorReport(report);
 
       // The discovery family row is matched, so doctor must not report it missing.
@@ -5012,7 +5014,9 @@ describe('hosted domain commands', () => {
     tempDirs.push(requestDir);
     const requestPath = resolve(requestDir, 'request.json');
     const payload = {
-      contents: [{ role: 'user', parts: [{ text: 'Analyze this short clip.' }] }],
+      contents: [
+        { role: 'user', parts: [{ text: 'Analyze this short clip.' }] },
+      ],
     };
     await writeFile(requestPath, JSON.stringify(payload));
 
@@ -5184,6 +5188,8 @@ describe('hosted domain commands', () => {
         'upload',
         '--input-file',
         videoPath,
+        '--hosted-operation-id',
+        'upload-test-op',
         '--output',
         outputPath,
       ]);
@@ -5198,17 +5204,11 @@ describe('hosted domain commands', () => {
         name: 'clip.mp4',
         sizeBytes: fileBytes.length,
       });
-      assert.match(
-        String(body.operationId),
-        /^postplus-cli:media-file:create-upload-url:/u,
-      );
+      assert.equal(body.operationId, 'upload-test-op');
       const uploadBody = hostedBodies[1] as Record<string, unknown>;
       assert.equal(uploadBody.capability, 'media-file');
       assert.equal(uploadBody.operation, 'upload');
-      assert.match(
-        String(uploadBody.operationId),
-        /^postplus-cli:media-file:upload:/u,
-      );
+      assert.equal(uploadBody.operationId, 'upload-test-op:upload');
       assert.deepEqual(uploadBody.file, {
         mimeType: 'video/mp4',
         name: 'clip.mp4',
@@ -5219,7 +5219,10 @@ describe('hosted domain commands', () => {
       assert.deepEqual(putBytes, fileBytes);
 
       const output = JSON.parse(await readFile(outputPath, 'utf8'));
-      assert.equal(output.output.download_url, 'https://uploads.example.com/clip.mp4');
+      assert.equal(
+        output.output.download_url,
+        'https://uploads.example.com/clip.mp4',
+      );
       assert.deepEqual(output.output.storageReference, storageReference);
     } finally {
       globalThis.fetch = originalFetch;
