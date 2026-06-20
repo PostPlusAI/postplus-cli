@@ -15,95 +15,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "domain": "media",
       "capability": "media-generation",
       "endpointKeys": [
-        "transcription",
-        "transcription-turbo"
+        "transcription"
       ],
       "endpoints": [
         {
           "endpointKey": "transcription",
           "provider": "wavespeed",
           "providerModelPath": "wavespeed-ai/openai-whisper",
-          "fields": [
-            {
-              "name": "audio",
-              "class": "intent",
-              "flag": "--audio",
-              "type": "media-url",
-              "required": true
-            },
-            {
-              "name": "duration_seconds",
-              "class": "intent",
-              "flag": "--duration-seconds",
-              "type": "number",
-              "required": true
-            },
-            {
-              "name": "task",
-              "class": "default",
-              "flag": "--task",
-              "type": "string",
-              "enumValues": [
-                "transcribe",
-                "translate"
-              ],
-              "default": "transcribe",
-              "required": false
-            },
-            {
-              "name": "language",
-              "class": "default",
-              "flag": "--language",
-              "type": "string",
-              "default": "auto",
-              "required": false
-            },
-            {
-              "name": "enable_timestamps",
-              "class": "default",
-              "flag": "--enable-timestamps",
-              "type": "boolean",
-              "default": false,
-              "required": false
-            },
-            {
-              "name": "prompt",
-              "class": "intent",
-              "flag": "--prompt",
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "mediaSeconds",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "number",
-              "required": false,
-              "derivedFrom": "duration_seconds"
-            },
-            {
-              "name": "operationId",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "quoteConfirmationToken",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            }
-          ],
-          "billingDimensions": [
-            "mediaSeconds"
-          ]
-        },
-        {
-          "endpointKey": "transcription-turbo",
-          "provider": "wavespeed",
-          "providerModelPath": "wavespeed-ai/openai-whisper-turbo",
           "fields": [
             {
               "name": "audio",
@@ -1242,9 +1160,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "capability": "media-generation",
       "endpointKeys": [
         "video-seedance-2-image",
-        "video-seedance-2-image-turbo",
-        "video-seedance-2-text",
-        "video-seedance-2-text-turbo"
+        "video-seedance-2-text"
       ],
       "endpoints": [
         {
@@ -1319,76 +1235,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
           ]
         },
         {
-          "endpointKey": "video-seedance-2-image-turbo",
-          "provider": "wavespeed",
-          "providerModelPath": "bytedance/seedance-2.0/image-to-video-turbo",
-          "fields": [
-            {
-              "name": "prompt",
-              "class": "intent",
-              "flag": null,
-              "type": "string",
-              "required": true
-            },
-            {
-              "name": "image",
-              "class": "intent",
-              "flag": null,
-              "type": "media-url",
-              "required": true
-            },
-            {
-              "name": "resolution",
-              "class": "default",
-              "flag": null,
-              "type": "string",
-              "enumValues": [
-                "720p",
-                "1080p"
-              ],
-              "default": "720p",
-              "required": false
-            },
-            {
-              "name": "duration",
-              "class": "default",
-              "flag": null,
-              "type": "number",
-              "default": 5,
-              "required": false,
-              "min": 4,
-              "max": 15
-            },
-            {
-              "name": "operationId",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "quoteConfirmationToken",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "requestDimensions",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            }
-          ],
-          "billingDimensions": [
-            "duration",
-            "resolution",
-            "referenceVideoCount",
-            "referenceVideoMode"
-          ]
-        },
-        {
           "endpointKey": "video-seedance-2-text",
           "provider": "wavespeed",
           "providerModelPath": "bytedance/seedance-2.0/text-to-video",
@@ -1407,100 +1253,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "enumValues": [
                 "480p",
-                "720p",
-                "1080p"
-              ],
-              "default": "720p",
-              "required": false
-            },
-            {
-              "name": "aspect_ratio",
-              "class": "intent",
-              "flag": null,
-              "type": "string",
-              "enumValues": [
-                "21:9",
-                "16:9",
-                "4:3",
-                "1:1",
-                "3:4",
-                "9:16"
-              ],
-              "required": false
-            },
-            {
-              "name": "duration",
-              "class": "default",
-              "flag": null,
-              "type": "number",
-              "default": 5,
-              "required": false,
-              "min": 4,
-              "max": 15
-            },
-            {
-              "name": "reference_images",
-              "class": "intent",
-              "flag": null,
-              "type": "media-url",
-              "repeatable": true,
-              "required": false
-            },
-            {
-              "name": "reference_videos",
-              "class": "intent",
-              "flag": null,
-              "type": "media-url",
-              "repeatable": true,
-              "required": false
-            },
-            {
-              "name": "operationId",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "quoteConfirmationToken",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "requestDimensions",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            }
-          ],
-          "billingDimensions": [
-            "duration",
-            "resolution",
-            "referenceVideoCount",
-            "referenceVideoMode"
-          ]
-        },
-        {
-          "endpointKey": "video-seedance-2-text-turbo",
-          "provider": "wavespeed",
-          "providerModelPath": "bytedance/seedance-2.0/text-to-video-turbo",
-          "fields": [
-            {
-              "name": "prompt",
-              "class": "intent",
-              "flag": null,
-              "type": "string",
-              "required": true
-            },
-            {
-              "name": "resolution",
-              "class": "default",
-              "flag": null,
-              "type": "string",
-              "enumValues": [
                 "720p",
                 "1080p"
               ],
@@ -1724,8 +1476,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "video-kling-v3-0-pro-image",
         "video-kling-v3-0-std-text",
         "video-kling-v3-0-std-image",
-        "video-wanx2-1-t2v-turbo",
-        "video-wanx2-1-i2v-turbo",
         "video-infinitetalk",
         "video-kling-v2-6-pro-motion-control"
       ],
@@ -1994,148 +1744,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
           "billingDimensions": [
             "duration",
             "audioMode"
-          ]
-        },
-        {
-          "endpointKey": "video-wanx2-1-t2v-turbo",
-          "provider": "dashscope",
-          "providerModelPath": "wanx2.1-t2v-turbo",
-          "fields": [
-            {
-              "name": "prompt",
-              "class": "intent",
-              "flag": null,
-              "type": "string",
-              "required": true
-            },
-            {
-              "name": "aspect_ratio",
-              "class": "intent",
-              "flag": null,
-              "type": "string",
-              "enumValues": [
-                "9:16",
-                "16:9"
-              ],
-              "required": false
-            },
-            {
-              "name": "resolution",
-              "class": "default",
-              "flag": null,
-              "type": "string",
-              "enumValues": [
-                "480p",
-                "720p"
-              ],
-              "default": "720p",
-              "required": false
-            },
-            {
-              "name": "duration",
-              "class": "default",
-              "flag": null,
-              "type": "number",
-              "enumValues": [
-                "5"
-              ],
-              "default": 5,
-              "required": false
-            },
-            {
-              "name": "operationId",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "quoteConfirmationToken",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "requestDimensions",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            }
-          ],
-          "billingDimensions": [
-            "resolution",
-            "duration"
-          ]
-        },
-        {
-          "endpointKey": "video-wanx2-1-i2v-turbo",
-          "provider": "dashscope",
-          "providerModelPath": "wanx2.1-i2v-turbo",
-          "fields": [
-            {
-              "name": "prompt",
-              "class": "intent",
-              "flag": null,
-              "type": "string",
-              "required": true
-            },
-            {
-              "name": "image",
-              "class": "intent",
-              "flag": null,
-              "type": "media-url",
-              "required": true
-            },
-            {
-              "name": "resolution",
-              "class": "default",
-              "flag": null,
-              "type": "string",
-              "enumValues": [
-                "480p",
-                "720p"
-              ],
-              "default": "720p",
-              "required": false
-            },
-            {
-              "name": "duration",
-              "class": "default",
-              "flag": null,
-              "type": "number",
-              "enumValues": [
-                "5"
-              ],
-              "default": 5,
-              "required": false
-            },
-            {
-              "name": "operationId",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "quoteConfirmationToken",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "requestDimensions",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            }
-          ],
-          "billingDimensions": [
-            "resolution",
-            "duration"
           ]
         },
         {

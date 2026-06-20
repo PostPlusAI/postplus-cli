@@ -4030,7 +4030,7 @@ describe('hosted domain commands', () => {
       'media',
       'schema',
       '--endpoint',
-      'video-seedance-2-text-turbo',
+      'video-seedance-2-text',
       '--json',
     ]);
     const report = JSON.parse(stdout) as Record<string, unknown>;
@@ -4042,7 +4042,7 @@ describe('hosted domain commands', () => {
       /postplus media <verb> <endpoint-key>/u,
     );
     assert.ok(
-      (report.endpointKeys as string[]).includes('video-seedance-2-text-turbo'),
+      (report.endpointKeys as string[]).includes('video-seedance-2-text'),
     );
 
     // endpointKey is a real enum projected from the manifest, not a bare string.
@@ -4055,7 +4055,7 @@ describe('hosted domain commands', () => {
     assert.ok(requestSchema);
     assert.ok(
       requestSchema.jsonSchema.properties.endpointKey.enum?.includes(
-        'video-seedance-2-text-turbo',
+        'video-seedance-2-text',
       ),
     );
     assert.ok(
@@ -4076,13 +4076,13 @@ describe('hosted domain commands', () => {
       }>;
     }>;
     assert.equal(endpoints.length, 1);
-    assert.equal(endpoints[0].endpointKey, 'video-seedance-2-text-turbo');
+    assert.equal(endpoints[0].endpointKey, 'video-seedance-2-text');
     const resolutionField = endpoints[0].fields.find(
       (field) => field.name === 'resolution',
     );
-    // Turbo endpoints advertise only the resolutions priced in the cost table
-    // (no 480p turbo rate); the non-turbo seedance endpoints keep 480p.
-    assert.deepEqual(resolutionField?.enumValues, ['720p', '1080p']);
+    // The non-turbo seedance endpoints advertise the full resolution ladder,
+    // including 480p, as priced in the cost table.
+    assert.deepEqual(resolutionField?.enumValues, ['480p', '720p', '1080p']);
     assert.equal(resolutionField?.kind, 'default');
     assert.equal(resolutionField?.default, '720p');
     const durationField = endpoints[0].fields.find(
@@ -4185,7 +4185,7 @@ describe('hosted domain commands', () => {
           execError.stderr ?? '',
           /Unknown media endpoint video-missing-provider/u,
         );
-        assert.match(execError.stderr ?? '', /video-seedance-2-text-turbo/u);
+        assert.match(execError.stderr ?? '', /video-seedance-2-text/u);
         return true;
       },
     );
@@ -4847,7 +4847,7 @@ describe('hosted domain commands', () => {
     try {
       const result = await runHostedDomainCommand('media', [
         'create',
-        'video-seedance-2-text-turbo',
+        'video-seedance-2-text',
         '--request',
         requestPath,
       ]);
@@ -4855,7 +4855,7 @@ describe('hosted domain commands', () => {
       const body = postedBody as Record<string, unknown>;
       assert.equal(body.capability, 'media-generation');
       assert.equal(body.operation, 'request');
-      assert.equal(body.endpointKey, 'video-seedance-2-text-turbo');
+      assert.equal(body.endpointKey, 'video-seedance-2-text');
       assert.match(
         String(body.operationId),
         /^postplus-cli:media:media-generation:request:/u,
@@ -4867,7 +4867,7 @@ describe('hosted domain commands', () => {
         aspect_ratio: '9:16',
       });
       const dimensions = body.requestDimensions as Record<string, unknown>;
-      assert.equal(dimensions.operationKey, 'video-seedance-2-text-turbo');
+      assert.equal(dimensions.operationKey, 'video-seedance-2-text');
       assert.equal(dimensions.duration, 5);
       assert.equal(dimensions.resolution, '720p');
       assert.equal(dimensions.referenceVideoCount, 0);
@@ -4909,7 +4909,7 @@ describe('hosted domain commands', () => {
         }>;
       }
     ).endpoints.find(
-      (e) => e.endpointKey === 'video-seedance-2-text-turbo',
+      (e) => e.endpointKey === 'video-seedance-2-text',
     )!.fields;
     const manifestDuration = seedanceFields.find(
       (f) => f.name === 'duration',
@@ -4935,7 +4935,7 @@ describe('hosted domain commands', () => {
     try {
       const result = await runHostedDomainCommand('media', [
         'create',
-        'video-seedance-2-text-turbo',
+        'video-seedance-2-text',
         '--request',
         requestPath,
       ]);
@@ -4984,7 +4984,7 @@ describe('hosted domain commands', () => {
         () =>
           runHostedDomainCommand('media', [
             'create',
-            'video-seedance-2-text-turbo',
+            'video-seedance-2-text',
             '--request',
             requestPath,
           ]),
@@ -5622,7 +5622,7 @@ describe('hosted domain commands', () => {
         () =>
           runHostedDomainCommand('media', [
             'create',
-            'video-seedance-2-text-turbo',
+            'video-seedance-2-text',
             '--request',
             requestPath,
             '--output',
