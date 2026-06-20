@@ -4,10 +4,8 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { resolveFreshRemoteAuth } from './auth-session.js';
-import {
-  buildPostPlusClientCompatibilityHeaders,
-  formatPostPlusCompatibilityError,
-} from './client-compatibility.js';
+import { sendAuthedCloudRequest } from './authed-cloud-request.js';
+import { formatPostPlusCompatibilityError } from './client-compatibility.js';
 import {
   buildHostedRequestSchemaReport,
   buildMediaGenerationRequestDimensions,
@@ -1087,25 +1085,16 @@ async function postHostedJson(input: {
   pathName: string;
   skillName: string | null;
 }): Promise<unknown> {
-  let auth = await resolveFreshRemoteAuth();
-  let response = await postJson({
-    apiBaseUrl: auth.apiBaseUrl,
+  const auth = await resolveFreshRemoteAuth();
+  const response = await sendAuthedCloudRequest({
+    auth,
     body: input.body,
-    cliSessionToken: auth.cliSessionToken,
+    method: 'POST',
     pathName: input.pathName,
+    retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
     skillName: input.skillName,
+    timeoutMs: 120000,
   });
-
-  if (response.status === 401) {
-    auth = await resolveFreshRemoteAuth({ forceRefresh: true });
-    response = await postJson({
-      apiBaseUrl: auth.apiBaseUrl,
-      body: input.body,
-      cliSessionToken: auth.cliSessionToken,
-      pathName: input.pathName,
-      skillName: input.skillName,
-    });
-  }
 
   const payload = await readJsonResponse(response);
   if (!response.ok) {
@@ -1194,30 +1183,6 @@ async function writeQuoteConfirmationChallenge(
   );
 
   return challengePath;
-}
-
-async function postJson(input: {
-  apiBaseUrl: string;
-  body: unknown;
-  cliSessionToken: string;
-  pathName: string;
-  skillName: string | null;
-}): Promise<Response> {
-  const headers = await buildPostPlusClientCompatibilityHeaders({
-    skillName: input.skillName,
-  });
-
-  return fetch(`${input.apiBaseUrl}${input.pathName}`, {
-    body: JSON.stringify(input.body),
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${input.cliSessionToken}`,
-      ...headers,
-      'content-type': 'application/json',
-    },
-    method: 'POST',
-    signal: AbortSignal.timeout(120000),
-  });
 }
 
 async function readJsonResponse(response: Response): Promise<unknown> {

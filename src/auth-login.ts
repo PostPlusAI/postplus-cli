@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 
+import { sendAuthedCloudRequest } from './authed-cloud-request.js';
 import {
   buildPostPlusClientCompatibilityHeaders,
   formatPostPlusCompatibilityError,
@@ -244,19 +245,10 @@ export async function validateCliSession(input: {
   apiBaseUrl: string;
   cliSessionToken: string;
 }): Promise<ValidatedCliSession> {
-  const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
-  const response = await fetch(
-    `${input.apiBaseUrl}/api/postplus-cli/auth/whoami`,
-    {
-      method: 'GET',
-      headers: {
-        accept: 'application/json',
-        ...compatibilityHeaders,
-        authorization: `Bearer ${input.cliSessionToken}`,
-      },
-      signal: AbortSignal.timeout(15000),
-    },
-  );
+  const response = await sendAuthedCloudRequest({
+    auth: input,
+    pathName: '/api/postplus-cli/auth/whoami',
+  });
   const payload = (await response.json()) as
     | SessionWhoAmIErrorPayload
     | ValidatedCliSession;
