@@ -19,6 +19,11 @@ export type ManifestField = {
   enumValues?: readonly string[];
   min?: number;
   max?: number;
+  // How a string value is normalized before the early enum check compares it against
+  // enumValues (issue #475). Projected verbatim from the Web EnvelopeFieldSpec hint —
+  // the single source both the Web validator and this CLI early validator read — so
+  // the two sides can never drift on casing. See hosted-field-validation.ts.
+  canonicalize?: 'lowercase' | 'image-resolution-tier';
   default?: string | number | boolean;
   required: boolean;
   derivedFrom?: string;

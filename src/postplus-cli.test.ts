@@ -4996,6 +4996,203 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('fast-fails an out-of-enum seedance resolution (request-json) before any hosted call (#475)', async () => {
+    // The #475 repro: the request-json surface previously did NO enum validation, so
+    // an invalid resolution sailed to the provider and surfaced as a generic internal
+    // failure. It must now fast-fail locally as a field-level error before any call.
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    await writeFile(
+      requestPath,
+      JSON.stringify({ prompt: 'a cinematic product reveal', resolution: '999p' }),
+    );
+
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'video-seedance-2-text',
+            '--request',
+            requestPath,
+          ]),
+        /video-seedance-2-text resolution must be one of 480p, 720p, 1080p; received "999p"\./u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fast-fails an out-of-range seedance duration (request-json) before any hosted call (#475)', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    await writeFile(
+      requestPath,
+      JSON.stringify({ prompt: 'a cinematic product reveal', duration: 99 }),
+    );
+
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'video-seedance-2-text',
+            '--request',
+            requestPath,
+          ]),
+        /video-seedance-2-text duration must be an integer from 4 to 15; received 99\./u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('accepts a mixed-case seedance resolution (request-json) by canonicalizing before the enum check (#475)', async () => {
+    // "720P" is not literally in the {480p,720p,1080p} enum but the manifest
+    // canonicalize hint lowercases it, mirroring the Web boundary, so it must pass.
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    await writeFile(
+      requestPath,
+      JSON.stringify({ prompt: 'a cinematic product reveal', resolution: '720P' }),
+    );
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'video-seedance-2-text',
+        '--request',
+        requestPath,
+      ]);
+      assert.equal(result, 0);
+      // The CLI passes the raw body through; the Web boundary canonicalizes it.
+      const body = postedBody as Record<string, unknown>;
+      assert.equal((body.input as Record<string, unknown>).resolution, '720P');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fast-fails an out-of-enum voice language and accepts the exact-cased one (request-json) (#475)', async () => {
+    // voice `language` is NOT canonicalized (no hint) — it matches the provider's
+    // exact Title-cased enum, so "english" fails while "English" passes. This is the
+    // canonicalization-faithfulness guarantee in the other direction.
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const rejectPath = resolve(requestDir, 'reject.json');
+    const acceptPath = resolve(requestDir, 'accept.json');
+    await writeFile(
+      rejectPath,
+      JSON.stringify({
+        text: 'hello there',
+        voice_description: 'a warm narrator',
+        language: 'english',
+      }),
+    );
+    await writeFile(
+      acceptPath,
+      JSON.stringify({
+        text: 'hello there',
+        voice_description: 'a warm narrator',
+        language: 'English',
+      }),
+    );
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      fetchCalls += 1;
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'voice-design',
+            '--request',
+            rejectPath,
+          ]),
+        /voice-design language must be one of .*English.*; received "english"\./u,
+      );
+      assert.equal(fetchCalls, 0);
+
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'voice-design',
+        '--request',
+        acceptPath,
+      ]);
+      assert.equal(result, 0);
+      assert.equal(fetchCalls, 1);
+      const body = postedBody as Record<string, unknown>;
+      assert.equal((body.input as Record<string, unknown>).language, 'English');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('submits a manifest-driven video-analysis request (request-json) posting the opaque Gemini payload verbatim', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);
@@ -5497,7 +5694,7 @@ describe('hosted domain commands', () => {
             '--quality',
             'ultra',
           ]),
-        /--quality must be one of low, medium, high\./u,
+        /image-gpt-image-2-text quality must be one of low, medium, high; received "ultra"\./u,
       );
       await assert.rejects(
         () =>
@@ -5509,9 +5706,60 @@ describe('hosted domain commands', () => {
             '--resolution',
             '8k',
           ]),
-        /--resolution must be one of 0\.5k, 1k, 2k, 4k\./u,
+        /image-nano-banana-2-text resolution must be one of 0\.5k, 1k, 2k, 4k; received "8k"\./u,
       );
       assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('accepts mixed-case image resolution/quality flags by canonicalizing before the enum check (#475)', async () => {
+    // The whole point of reading the manifest canonicalize hint: a mixed-case flag
+    // that the Web boundary would accept must not be wrongly rejected locally. "4K"
+    // canonicalizes to the k-tier "4k"; "High" lowercases to "high".
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(
+        String(input),
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'image-gpt-image-2-text',
+        '--prompt',
+        'a hero shot',
+        '--resolution',
+        '4K',
+        '--quality',
+        'High',
+      ]);
+      assert.equal(result, 0);
+      const body = postedBody as Record<string, unknown>;
+      const sentInput = body.input as Record<string, unknown>;
+      // The CLI passes the raw flag value through (the Web boundary canonicalizes the
+      // outbound body); local validation only canonicalizes for the membership check.
+      assert.equal(sentInput.resolution, '4K');
+      assert.equal(sentInput.quality, 'High');
     } finally {
       globalThis.fetch = originalFetch;
     }

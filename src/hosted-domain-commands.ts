@@ -6,6 +6,7 @@ import path from 'node:path';
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
 import { formatPostPlusCompatibilityError } from './client-compatibility.js';
+import { assertModelledFieldValuesInRange } from './hosted-field-validation.js';
 import {
   type HostedDomain,
   type ManifestEndpoint,
@@ -245,6 +246,12 @@ async function runMediaVerbFlags(args: {
     verb,
   });
 
+  // Schema-driven early validation reads the manifest enum/range + canonicalize hint
+  // for every modelled field (a single source shared with the Web boundary, which
+  // stays authoritative). It runs on the built input so a mixed-case "4K"/"High"
+  // passes while an out-of-enum value fast-fails locally before the hosted call.
+  assertModelledFieldValuesInRange(endpointKey, fields, input);
+
   return submitMediaGenerationRequest({
     capability: resolved.capability,
     endpointKey,
@@ -306,6 +313,13 @@ async function runMediaVerbRequestJson(args: {
       );
     }
   }
+
+  // Schema-driven early validation reads the manifest enum/range + canonicalize hint
+  // for every modelled field (a single source shared with the Web boundary, which
+  // stays authoritative). It runs on the agent-authored body so an out-of-enum
+  // resolution ("999p") fast-fails locally before the hosted call while a mixed-case
+  // "720P" passes.
+  assertModelledFieldValuesInRange(endpointKey, endpoint.fields, input);
 
   return submitMediaGenerationRequest({
     capability: resolved.capability,
@@ -753,12 +767,11 @@ function buildMediaVerbInput(input: {
       continue;
     }
 
-    if (field.enumValues && !field.enumValues.includes(raw)) {
-      throw new Error(
-        `--${key} must be one of ${field.enumValues.join(', ')}.`,
-      );
-    }
-
+    // Enum / numeric-range membership (with canonicalize-faithful casing) is gated
+    // once by assertModelledFieldValuesInRange after the input is built — not here —
+    // so a mixed-case "4K" is not wrongly rejected by a raw includes() check. This
+    // path only parses the flag string into its typed value; the number floor below
+    // keeps a non-range number field (e.g. transcription duration_seconds) positive.
     if (field.type === 'number') {
       const parsed = Number(raw);
       if (!Number.isFinite(parsed) || parsed <= 0) {

@@ -205,6 +205,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "2k",
                 "4k"
               ],
+              "canonicalize": "image-resolution-tier",
               "default": "1k",
               "required": false
             },
@@ -218,6 +219,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "medium",
                 "high"
               ],
+              "canonicalize": "lowercase",
               "default": "medium",
               "required": false
             },
@@ -279,6 +281,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "2k",
                 "4k"
               ],
+              "canonicalize": "image-resolution-tier",
               "default": "1k",
               "required": false
             },
@@ -292,6 +295,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "medium",
                 "high"
               ],
+              "canonicalize": "lowercase",
               "default": "medium",
               "required": false
             },
@@ -346,6 +350,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "2k",
                 "4k"
               ],
+              "canonicalize": "image-resolution-tier",
               "default": "1k",
               "required": false
             },
@@ -366,6 +371,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "png",
                 "jpeg"
               ],
+              "canonicalize": "lowercase",
               "default": "png",
               "required": false
             },
@@ -427,6 +433,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "2k",
                 "4k"
               ],
+              "canonicalize": "image-resolution-tier",
               "default": "1k",
               "required": false
             },
@@ -447,6 +454,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "png",
                 "jpeg"
               ],
+              "canonicalize": "lowercase",
               "default": "png",
               "required": false
             },
@@ -497,6 +505,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "enumValues": [
                 "1k"
               ],
+              "canonicalize": "image-resolution-tier",
               "default": "1k",
               "required": false
             },
@@ -509,6 +518,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "png",
                 "jpeg"
               ],
+              "canonicalize": "lowercase",
               "default": "png",
               "required": false
             },
@@ -559,6 +569,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "enumValues": [
                 "2k"
               ],
+              "canonicalize": "image-resolution-tier",
               "default": "2k",
               "required": false
             },
@@ -571,6 +582,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "png",
                 "jpeg"
               ],
+              "canonicalize": "lowercase",
               "default": "png",
               "required": false
             },
@@ -621,6 +633,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "enumValues": [
                 "4k"
               ],
+              "canonicalize": "image-resolution-tier",
               "default": "4k",
               "required": false
             },
@@ -633,6 +646,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "png",
                 "jpeg"
               ],
+              "canonicalize": "lowercase",
               "default": "png",
               "required": false
             },
@@ -691,6 +705,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "enumValues": [
                 "1k"
               ],
+              "canonicalize": "image-resolution-tier",
               "default": "1k",
               "required": false
             },
@@ -703,6 +718,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "png",
                 "jpeg"
               ],
+              "canonicalize": "lowercase",
               "default": "png",
               "required": false
             },
@@ -761,6 +777,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "enumValues": [
                 "2k"
               ],
+              "canonicalize": "image-resolution-tier",
               "default": "2k",
               "required": false
             },
@@ -773,6 +790,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "png",
                 "jpeg"
               ],
+              "canonicalize": "lowercase",
               "default": "png",
               "required": false
             },
@@ -831,6 +849,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "enumValues": [
                 "4k"
               ],
+              "canonicalize": "image-resolution-tier",
               "default": "4k",
               "required": false
             },
@@ -843,6 +862,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "png",
                 "jpeg"
               ],
+              "canonicalize": "lowercase",
               "default": "png",
               "required": false
             },
@@ -894,6 +914,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "jpeg",
                 "png"
               ],
+              "canonicalize": "lowercase",
               "default": "png",
               "required": false
             },
@@ -945,6 +966,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "jpeg",
                 "png"
               ],
+              "canonicalize": "lowercase",
               "default": "png",
               "required": false
             },
@@ -1013,6 +1035,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "jpeg",
                 "png"
               ],
+              "canonicalize": "lowercase",
               "default": "png",
               "required": false
             },
@@ -1072,6 +1095,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "jpeg",
                 "png"
               ],
+              "canonicalize": "lowercase",
               "default": "png",
               "required": false
             },
@@ -1192,6 +1216,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "720p",
                 "1080p"
               ],
+              "canonicalize": "lowercase",
               "default": "720p",
               "required": false
             },
@@ -1256,6 +1281,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "720p",
                 "1080p"
               ],
+              "canonicalize": "lowercase",
               "default": "720p",
               "required": false
             },

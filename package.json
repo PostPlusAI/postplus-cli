@@ -18,6 +18,7 @@
     "build/doctor.js",
     "build/hosted-domain-commands.js",
     "build/generated/hosted-execution-manifest.generated.js",
+    "build/hosted-field-validation.js",
     "build/hosted-manifest-index.js",
     "build/hosted-release.js",
     "build/hosted-request-schemas.js",

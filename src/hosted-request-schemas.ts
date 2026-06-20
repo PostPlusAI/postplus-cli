@@ -24,6 +24,9 @@ type FieldContract = {
   enumValues?: readonly string[];
   min?: number;
   max?: number;
+  // Casing-normalization hint for the enum check, projected from the manifest so the
+  // discovery surface documents the accepted casing (e.g. resolution "720P" == "720p").
+  canonicalize?: 'lowercase' | 'image-resolution-tier';
   default?: string | number | boolean;
   derivedFrom?: string;
 };
@@ -93,6 +96,9 @@ function toFieldContract(field: ManifestField): FieldContract {
   }
   if (field.max !== undefined) {
     contract.max = field.max;
+  }
+  if (field.canonicalize) {
+    contract.canonicalize = field.canonicalize;
   }
   if (field.default !== undefined) {
     contract.default = field.default;
