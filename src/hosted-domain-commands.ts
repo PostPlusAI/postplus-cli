@@ -792,7 +792,7 @@ async function runResearchCollect(args: string[]): Promise<number> {
     return runHostedCommand({
       request: () =>
         postHostedJson({
-          body: { runHandle, runHandleType: 'public-content-collection' },
+          body: { runHandle, runHandleType: 'hosted-collection' },
           pathName: '/api/postplus-cli/hosted/collection',
           skillName: null,
         }),
@@ -896,10 +896,21 @@ async function runResearchScrape(args: string[]): Promise<number> {
   const targets = RESEARCH_VERB_TARGETS.get(verb);
 
   if (!first || first.startsWith('--')) {
-    const valid = targets ? [...targets.keys()].join(', ') : '';
-    throw new Error(
-      `postplus research ${verb} requires a source key. Valid: ${valid}.`,
-    );
+    const flags = parseFlags(args, new Set(['json']));
+    const runHandle = requireFlag(flags, 'run-handle');
+    const outputPath = flags.values.get('output') ?? null;
+
+    return runHostedCommand({
+      request: () =>
+        postHostedJson({
+          body: { runHandle, runHandleType: 'public-content-collection' },
+          pathName: '/api/postplus-cli/hosted/collection',
+          skillName: null,
+        }),
+      errorInputLabel: 'research-scrape-run-handle',
+      json: flags.booleans.has('json'),
+      outputPath,
+    });
   }
 
   const sourceKey = first;
@@ -1324,6 +1335,7 @@ Usage:
   postplus research collect <collection-key> --request <input.json> [--skill <skill-id>] [--max-charge-usd <usd>] [--output <result.json>]
   postplus research collect --run-handle <runHandle> [--output <result.json>]
   postplus research scrape <source-key> --request <input-array.json> [--skill <skill-id>] [--max-charge-usd <usd>] [--output <result.json>]
+  postplus research scrape --run-handle <runHandle> [--output <result.json>]
 `);
 }
 

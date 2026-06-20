@@ -4401,7 +4401,7 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('polls public-content research handles through the hosted collection route', async () => {
+  it('polls hosted research collection handles through the hosted collection route', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);
     const outputPath = resolve(requestDir, 'poll-result.json');
@@ -4436,6 +4436,60 @@ describe('hosted domain commands', () => {
     try {
       const result = await runHostedDomainCommand('research', [
         'collect',
+        '--run-handle',
+        'hosted-collection-run-handle',
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 0);
+      assert.equal(
+        postedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/collection',
+      );
+      assert.deepEqual(postedBody, {
+        runHandle: 'hosted-collection-run-handle',
+        runHandleType: 'hosted-collection',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('polls public-content research scrape handles through the hosted collection route', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'poll-result.json');
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedUrl: string | null = null;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      postedUrl = String(input);
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          charged: false,
+          output: [{ url: 'https://www.facebook.com/facebook/' }],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    };
+
+    try {
+      const result = await runHostedDomainCommand('research', [
+        'scrape',
         '--run-handle',
         's_public_content_snapshot',
         '--output',
