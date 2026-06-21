@@ -3407,6 +3407,82 @@ describe('skill management commands', () => {
     }
   });
 
+  it('updates current skills and removes retired PostPlus skills tracked by the installer lock', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    const calls: string[][] = [];
+
+    try {
+      await writeManagedSkillBaseline({
+        releaseId: 'catalog-2',
+        skillNames: ['demo-skill'],
+      });
+      await writeGlobalSkillsInstallerLock({
+        'demo-skill': {
+          source: 'PostPlusAI/postplus-skills',
+          sourceType: 'github',
+          sourceUrl: 'https://github.com/PostPlusAI/postplus-skills.git',
+          skillFolderHash: 'demo-hash',
+          skillPath: 'skills/demo-skill/SKILL.md',
+        },
+        'local-user-skill': {
+          source: '/Users/example/custom-skills',
+          sourceType: 'local',
+          sourceUrl: '/Users/example/custom-skills',
+        },
+        'retired-skill': {
+          source: 'PostPlusAI/postplus-skills',
+          sourceType: 'github',
+          sourceUrl: 'https://github.com/PostPlusAI/postplus-skills.git',
+          skillFolderHash: 'retired-hash',
+          skillPath: 'skills/old/retired-skill/SKILL.md',
+        },
+      });
+
+      const exitCode = await runPostPlusSkillUpdate({
+        runInteractiveCommand: async (_command, args) => {
+          calls.push(args);
+          return 0;
+        },
+      });
+
+      assert.equal(exitCode, 0);
+      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length * 2);
+      assert.deepEqual(
+        calls[POSTPLUS_SKILLS_AGENT_TARGETS.length],
+        buildPostPlusSkillUninstallArgs(
+          ['retired-skill'],
+          'global',
+          'claude-code',
+        ),
+      );
+      assert.doesNotMatch(
+        calls.flat().join(' '),
+        /local-user-skill/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('updates current-directory public skills when requested', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
