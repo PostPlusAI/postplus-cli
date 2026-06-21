@@ -26,7 +26,10 @@ import {
   validateRemoteAuth,
 } from './auth-validate.js';
 import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
-import { POSTPLUS_CLIENT_COMPATIBILITY_HEADERS } from './client-compatibility.js';
+import {
+  POSTPLUS_CLI_UPDATE_COMMAND,
+  POSTPLUS_CLIENT_COMPATIBILITY_HEADERS,
+} from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import { HOSTED_EXECUTION_MANIFESTS } from './generated/hosted-execution-manifest.generated.js';
 import {
@@ -72,7 +75,6 @@ import {
 } from './status.js';
 import { resolveStudioRoot } from './studio.js';
 import {
-  POSTPLUS_CLI_UPDATE_COMMAND,
   generateUpdateStatusReport,
   runCliSelfUpdateIfOutdated,
 } from './update-check.js';

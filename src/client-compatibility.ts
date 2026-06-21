@@ -4,6 +4,11 @@ import { readLocalConfig, updateLocalConfig } from './local-state.js';
 
 export const POSTPLUS_CLIENT_CONTRACT_VERSION = 2;
 export const POSTPLUS_CLIENT_RUNTIME = 'postplus-cli';
+// Single source for the CLI self-update command. Lives here (the upgrade-error
+// formatter's home) so update-check.ts can import it without a cycle —
+// update-check already depends on this module for readCurrentCliVersion.
+export const POSTPLUS_CLI_UPDATE_COMMAND =
+  'npm install -g @postplus/cli@latest';
 
 export const POSTPLUS_CLIENT_COMPATIBILITY_HEADERS = {
   cliVersion: 'x-postplus-cli-version',
@@ -87,8 +92,7 @@ export function formatPostPlusClientUpgradeError(payload: unknown) {
       ? (payload as PostPlusClientUpgradePayload)
       : {};
   const cliCommand =
-    record.compatibility?.upgrade?.cli?.command ??
-    'npm install -g @postplus/cli@latest';
+    record.compatibility?.upgrade?.cli?.command ?? POSTPLUS_CLI_UPDATE_COMMAND;
   const skillsCommand =
     record.compatibility?.upgrade?.skills?.command ?? 'postplus update';
   const restart = record.compatibility?.upgrade?.restartAgentSession

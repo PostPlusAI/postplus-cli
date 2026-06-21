@@ -1,7 +1,10 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { readCurrentCliVersion } from './client-compatibility.js';
+import {
+  POSTPLUS_CLI_UPDATE_COMMAND,
+  readCurrentCliVersion,
+} from './client-compatibility.js';
 import {
   runInteractiveCommand as runDefaultInteractiveCommand,
 } from './command-runner.js';
@@ -20,8 +23,6 @@ const NPM_PACKAGE_NAME = '@postplus/cli';
 const NPM_LATEST_URL = `https://registry.npmjs.org/${encodeURIComponent(
   NPM_PACKAGE_NAME,
 )}/latest`;
-export const POSTPLUS_CLI_UPDATE_COMMAND =
-  'npm install -g @postplus/cli@latest';
 const POSTPLUS_CLI_UPDATE_ARGS = ['install', '-g', '@postplus/cli@latest'];
 
 export type UpdateStatusReport = {
