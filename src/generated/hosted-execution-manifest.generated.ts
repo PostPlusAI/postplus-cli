@@ -1327,6 +1327,30 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": false
             },
             {
+              "name": "reference_audios",
+              "class": "intent",
+              "flag": null,
+              "type": "media-url",
+              "repeatable": true,
+              "required": false
+            },
+            {
+              "name": "enable_web_search",
+              "class": "default",
+              "flag": null,
+              "type": "boolean",
+              "default": false,
+              "required": false
+            },
+            {
+              "name": "generate_audio",
+              "class": "default",
+              "flag": null,
+              "type": "boolean",
+              "default": true,
+              "required": false
+            },
+            {
               "name": "operationId",
               "class": "runner-managed",
               "flag": null,
