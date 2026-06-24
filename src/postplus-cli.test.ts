@@ -31,7 +31,6 @@ import {
   POSTPLUS_CLIENT_COMPATIBILITY_HEADERS,
 } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
-import { HOSTED_EXECUTION_MANIFESTS } from './generated/hosted-execution-manifest.generated.js';
 import {
   runHostedDomainCommand,
   runMediaFileCommand,
@@ -4669,11 +4668,9 @@ describe('hosted domain commands', () => {
         language: 'auto',
         task: 'transcribe',
       });
-      assert.deepEqual(body.requestDimensions, {
-        billableUnitCount: 1,
-        mediaSeconds: 30,
-        operationKey: 'transcription',
-      });
+      // The CLI sends only the payload; billing dimensions are derived solely at
+      // the Web boundary, so the wire body carries no requestDimensions.
+      assert.equal(Object.hasOwn(body, 'requestDimensions'), false);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -4868,12 +4865,9 @@ describe('hosted domain commands', () => {
         duration: 5,
         aspect_ratio: '9:16',
       });
-      const dimensions = body.requestDimensions as Record<string, unknown>;
-      assert.equal(dimensions.operationKey, 'video-seedance-2-text');
-      assert.equal(dimensions.duration, 5);
-      assert.equal(dimensions.resolution, '720p');
-      assert.equal(dimensions.referenceVideoCount, 0);
-      assert.equal(dimensions.referenceVideoMode, 'without_reference_videos');
+      // Billing dimensions are derived solely at the Web boundary; the CLI sends
+      // only the payload (with input defaults filled above), no requestDimensions.
+      assert.equal(Object.hasOwn(body, 'requestDimensions'), false);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -4900,25 +4894,6 @@ describe('hosted domain commands', () => {
         prompt: 'a blue sticky note slides across a white desk',
       }),
     );
-
-    // The manifest is the single source for these platform defaults; the runner
-    // reads them instead of the CLI duplicating literal 720p / 5s.
-    const seedanceFields = (
-      HOSTED_EXECUTION_MANIFESTS['seedance-submitter'][0] as unknown as {
-        endpoints: ReadonlyArray<{
-          endpointKey: string;
-          fields: ReadonlyArray<{ name: string; default?: unknown }>;
-        }>;
-      }
-    ).endpoints.find(
-      (e) => e.endpointKey === 'video-seedance-2-text',
-    )!.fields;
-    const manifestDuration = seedanceFields.find(
-      (f) => f.name === 'duration',
-    )!.default;
-    const manifestResolution = seedanceFields.find(
-      (f) => f.name === 'resolution',
-    )!.default;
 
     const originalFetch = globalThis.fetch;
     let postedBody: unknown = null;
@@ -4948,12 +4923,9 @@ describe('hosted domain commands', () => {
       assert.deepEqual(body.input, {
         prompt: 'a blue sticky note slides across a white desk',
       });
-      // ...but the runner derives billing dimensions from the manifest default.
-      const dimensions = body.requestDimensions as Record<string, unknown>;
-      assert.equal(dimensions.duration, manifestDuration);
-      assert.equal(dimensions.resolution, manifestResolution);
-      assert.equal(dimensions.duration, 5);
-      assert.equal(dimensions.resolution, '720p');
+      // ...and billing dimensions are derived solely at the Web boundary, so the
+      // CLI request-json body carries no requestDimensions.
+      assert.equal(Object.hasOwn(body, 'requestDimensions'), false);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -5584,12 +5556,9 @@ describe('hosted domain commands', () => {
         quality: 'medium',
         resolution: '1k',
       });
-      assert.deepEqual(body.requestDimensions, {
-        billableUnitCount: 1,
-        imageSize: '1k',
-        operationKey: 'image-gpt-image-2-text',
-        quality: 'medium',
-      });
+      // Billing dimensions are derived solely at the Web boundary; the CLI sends
+      // only the payload, so the wire body carries no requestDimensions.
+      assert.equal(Object.hasOwn(body, 'requestDimensions'), false);
     } finally {
       globalThis.fetch = originalFetch;
     }

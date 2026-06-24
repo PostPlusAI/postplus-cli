@@ -14,10 +14,7 @@ import {
   type ResolvedVerbTarget,
   buildVerbTargetIndex,
 } from './hosted-manifest-index.js';
-import {
-  buildHostedRequestSchemaReport,
-  buildMediaGenerationRequestDimensions,
-} from './hosted-request-schemas.js';
+import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import {
   type LargeCreditQuoteConfirmationChallenge,
   readLargeCreditQuoteConfirmationChallenge,
@@ -657,6 +654,9 @@ function submitMediaGenerationRequest(params: {
   quoteConfirmationToken: string | undefined;
   skillName: string;
 }): Promise<number> {
+  // Billing dimensions are derived solely at the Web boundary from
+  // (endpointKey, input); the CLI sends only the payload. The Web request schema
+  // rejects any caller-supplied `requestDimensions` (single source of truth).
   const body = {
     capability: params.capability,
     endpointKey: params.endpointKey,
@@ -664,10 +664,6 @@ function submitMediaGenerationRequest(params: {
     operation: 'request',
     operationId: params.operationId,
     quoteConfirmationToken: params.quoteConfirmationToken ?? undefined,
-    requestDimensions: buildMediaGenerationRequestDimensions(
-      params.endpointKey,
-      params.input,
-    ),
   };
 
   return runHostedCommand({
