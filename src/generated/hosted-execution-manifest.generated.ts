@@ -172,7 +172,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "image-seedream-v5-lite-text",
         "image-seedream-v5-lite-sequential",
         "image-seedream-v5-lite-edit",
-        "image-seedream-v5-lite-edit-sequential"
+        "image-seedream-v5-lite-edit-sequential",
+        "image-higgsfield-soul-text"
       ],
       "endpoints": [
         {
@@ -1125,6 +1126,85 @@ export const HOSTED_EXECUTION_MANIFESTS = {
           ],
           "billingDimensions": [
             "billableUnitCount"
+          ]
+        },
+        {
+          "endpointKey": "image-higgsfield-soul-text",
+          "provider": "higgsfield",
+          "providerModelPath": "higgsfield-ai/soul/standard",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "width_and_height",
+              "class": "intent",
+              "flag": "--width-and-height",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "quality",
+              "class": "default",
+              "flag": "--quality",
+              "type": "string",
+              "enumValues": [
+                "720p",
+                "1080p"
+              ],
+              "canonicalize": "lowercase",
+              "default": "720p",
+              "required": false
+            },
+            {
+              "name": "style_id",
+              "class": "intent",
+              "flag": "--style-id",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "style_strength",
+              "class": "intent",
+              "flag": "--style-strength",
+              "type": "number",
+              "required": false
+            },
+            {
+              "name": "seed",
+              "class": "intent",
+              "flag": "--seed",
+              "type": "number",
+              "required": false
+            },
+            {
+              "name": "enhance_prompt",
+              "class": "intent",
+              "flag": "--enhance-prompt",
+              "type": "boolean",
+              "required": false
+            },
+            {
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ],
+          "billingDimensions": [
+            "quality"
           ]
         }
       ]
