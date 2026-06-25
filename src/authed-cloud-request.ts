@@ -17,6 +17,13 @@ export type AuthedCloudRequestInput = {
    */
   body?: unknown;
   skillName?: string | null;
+  /**
+   * In-process override for the skills release id header. When provided (the
+   * hosted-lib path) it is stamped verbatim and the disk config is NOT read for
+   * the release id; when omitted (the bin path) the release id comes from
+   * `readLocalConfig()` as before.
+   */
+  skillsReleaseId?: string | null;
   timeoutMs?: number;
   /**
    * Optional once-only 401 refresh. When provided, a `401` response triggers a
@@ -54,6 +61,9 @@ async function issueAuthedCloudRequest(
 ): Promise<Response> {
   const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders({
     skillName: input.skillName ?? null,
+    ...(input.skillsReleaseId !== undefined
+      ? { skillsReleaseId: input.skillsReleaseId }
+      : {}),
   });
   const hasBody = input.body !== undefined;
   const headers: Record<string, string> = {

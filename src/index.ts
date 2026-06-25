@@ -546,17 +546,25 @@ async function main(): Promise<void> {
     case 'doctor':
       process.exitCode = await runDoctor(parseDiagnosticOptions(rest));
       return;
+    // The bin path never passes the in-process context, so these always resolve
+    // to the numeric exit code (the `unknown` return is the hosted-lib path only).
     case 'research':
-      process.exitCode = await runHostedDomainCommand('research', rest);
+      process.exitCode = (await runHostedDomainCommand(
+        'research',
+        rest,
+      )) as number;
       return;
     case 'media':
-      process.exitCode = await runHostedDomainCommand('media', rest);
+      process.exitCode = (await runHostedDomainCommand('media', rest)) as number;
       return;
     case 'media-file':
-      process.exitCode = await runMediaFileCommand(rest);
+      process.exitCode = (await runMediaFileCommand(rest)) as number;
       return;
     case 'publish':
-      process.exitCode = await runHostedDomainCommand('publish', rest);
+      process.exitCode = (await runHostedDomainCommand(
+        'publish',
+        rest,
+      )) as number;
       return;
     case 'quote':
       process.exitCode = await runQuoteCommand(rest);

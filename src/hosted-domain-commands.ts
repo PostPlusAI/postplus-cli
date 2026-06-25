@@ -4,7 +4,10 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { resolveFreshRemoteAuth } from './auth-session.js';
-import { sendAuthedCloudRequest } from './authed-cloud-request.js';
+import {
+  type AuthedCloudRequestAuth,
+  sendAuthedCloudRequest,
+} from './authed-cloud-request.js';
 import { formatPostPlusCompatibilityError } from './client-compatibility.js';
 import { assertModelledFieldValuesInRange } from './hosted-field-validation.js';
 import {
@@ -46,6 +49,43 @@ type ParsedFlags = {
   arrays: Map<string, string[]>;
 };
 
+// In-process execution context for the hosted-lib path (src/hosted-lib.ts). When
+// present it makes the SAME resolve/dispatch core run without any disk or
+// filesystem touch: the POST uses the injected `auth` + `skillsReleaseId` instead
+// of `resolveFreshRemoteAuth()`/disk config, the request-json surfaces read the
+// envelope from the injected `requestJson` object instead of a `--request <file>`,
+// and runHostedCommand returns the parsed payload (throwing the structured errors)
+// instead of writing stdout/file/exit-code. When the context is `undefined`
+// (the bin path) every code path keeps its current disk/file/stdout behavior.
+export type HostedRequestContext = {
+  auth: AuthedCloudRequestAuth;
+  skillsReleaseId?: string;
+  /**
+   * The request-json envelope injected in place of a `--request <file>` read.
+   * Surfaces that need a body assert it is present and the right shape (object vs
+   * array) exactly as the file-read path validated the parsed file contents.
+   */
+  requestJson?: Record<string, unknown> | unknown[];
+};
+
+// Reads the request-json body for a surface: from the injected object (lib path)
+// or by reading `--request <file>` (bin path). This is the SINGLE place the two
+// paths diverge on input source; the resolved body then flows through the SAME
+// validation + envelope build, so the URL/body/headers stay byte-identical.
+async function resolveRequestBody(
+  context: HostedRequestContext | undefined,
+  flags: ParsedFlags,
+): Promise<{ body: unknown; errorInputLabel: string }> {
+  if (context) {
+    if (context.requestJson === undefined) {
+      throw new Error('This hosted command requires a requestJson body.');
+    }
+    return { body: context.requestJson, errorInputLabel: 'requestJson' };
+  }
+  const requestPath = requireFlag(flags, 'request');
+  return { body: await readJsonFile(requestPath), errorInputLabel: requestPath };
+}
+
 class HostedQuoteConfirmationRequiredError extends Error {
   constructor(
     message: string,
@@ -77,7 +117,11 @@ class HostedProductRequestError extends Error {
 export async function runHostedDomainCommand(
   domain: HostedDomain,
   args: string[],
-): Promise<number> {
+  // Present only on the in-process hosted-lib path; the bin path never passes it.
+  // See HostedRequestContext: it carries the injected auth/releaseId/requestJson
+  // and switches every leaf onto the no-disk, no-file, return-payload behavior.
+  context?: HostedRequestContext,
+): Promise<number | unknown> {
   const [subcommand, ...rest] = args;
 
   if (domain === 'research') {
@@ -85,10 +129,10 @@ export async function runHostedDomainCommand(
       return runHostedSchema(domain, rest);
     }
     if (subcommand === 'collect') {
-      return runResearchCollect(rest);
+      return runResearchCollect(rest, context);
     }
     if (subcommand === 'scrape') {
-      return runResearchScrape(rest);
+      return runResearchScrape(rest, context);
     }
     printResearchHelp();
     return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
@@ -103,7 +147,7 @@ export async function runHostedDomainCommand(
   // contract to project — exactly like the `research collect --run-handle`
   // polling branch. It must be checked before the manifest verb dispatch.
   if (domain === 'media' && subcommand === 'poll') {
-    return runMediaPoll(rest);
+    return runMediaPoll(rest, context);
   }
 
   if (
@@ -111,7 +155,7 @@ export async function runHostedDomainCommand(
     subcommand &&
     MEDIA_VERB_ENDPOINTS.has(subcommand)
   ) {
-    return runMediaVerb(subcommand, rest);
+    return runMediaVerb(subcommand, rest, context);
   }
 
   // publish: the OPERATION is the subcommand (no separate target positional).
@@ -120,7 +164,7 @@ export async function runHostedDomainCommand(
     subcommand &&
     PUBLISH_VERB_OPERATIONS.has(subcommand)
   ) {
-    return runPublishOperation(subcommand, rest);
+    return runPublishOperation(subcommand, rest, context);
   }
 
   printDomainVerbHelp(domain);
@@ -132,7 +176,11 @@ export async function runHostedDomainCommand(
 // scalar intent/default fields to flags, a request-json surface reads the nested
 // envelope from `--request <file>`. Either way runner-managed fields (billing
 // dimensions, ids, tokens) are derived/minted by the runner, never agent-supplied.
-async function runMediaVerb(verb: string, args: string[]): Promise<number> {
+async function runMediaVerb(
+  verb: string,
+  args: string[],
+  context: HostedRequestContext | undefined,
+): Promise<number | unknown> {
   const targets = MEDIA_VERB_ENDPOINTS.get(verb);
   if (!targets) {
     throw new Error(`Unknown media verb ${verb}.`);
@@ -165,6 +213,7 @@ async function runMediaVerb(verb: string, args: string[]): Promise<number> {
       modelKey: targetKey,
       resolved,
       verb,
+      context,
     });
   }
 
@@ -174,6 +223,7 @@ async function runMediaVerb(verb: string, args: string[]): Promise<number> {
       endpointKey: targetKey,
       resolved,
       verb,
+      context,
     });
   }
 
@@ -182,6 +232,7 @@ async function runMediaVerb(verb: string, args: string[]): Promise<number> {
     endpointKey: targetKey,
     resolved,
     verb,
+    context,
   });
 }
 
@@ -192,8 +243,9 @@ async function runMediaVerbFlags(args: {
   endpointKey: string;
   resolved: ResolvedVerbTarget;
   verb: string;
-}): Promise<number> {
-  const { endpointKey, resolved, verb } = args;
+  context: HostedRequestContext | undefined;
+}): Promise<number | unknown> {
+  const { endpointKey, resolved, verb, context } = args;
   const endpoint = requireResolvedEndpoint(resolved, verb, endpointKey);
   const fields = endpoint.fields;
   const flagToField = new Map<string, ManifestField>();
@@ -261,6 +313,7 @@ async function runMediaVerbFlags(args: {
     outputPath,
     quoteConfirmationToken: flags.values.get('quote-confirmation-token'),
     skillName: flags.values.get('skill') ?? resolved.skill,
+    context,
   });
 }
 
@@ -273,8 +326,9 @@ async function runMediaVerbRequestJson(args: {
   endpointKey: string;
   resolved: ResolvedVerbTarget;
   verb: string;
-}): Promise<number> {
-  const { endpointKey, resolved, verb } = args;
+  context: HostedRequestContext | undefined;
+}): Promise<number | unknown> {
+  const { endpointKey, resolved, verb, context } = args;
   const endpoint = requireResolvedEndpoint(resolved, verb, endpointKey);
   const flags = parseFlags(args.args, new Set(['json']));
   const allowedKeys = new Set([
@@ -291,9 +345,11 @@ async function runMediaVerbRequestJson(args: {
     }
   }
 
-  const requestPath = requireFlag(flags, 'request');
   const outputPath = flags.values.get('output') ?? null;
-  const raw = await readJsonFile(requestPath);
+  const { body: raw, errorInputLabel } = await resolveRequestBody(
+    context,
+    flags,
+  );
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(
       `media ${verb} ${endpointKey} --request must be a JSON object of media-generation input.`,
@@ -321,7 +377,7 @@ async function runMediaVerbRequestJson(args: {
   return submitMediaGenerationRequest({
     capability: resolved.capability,
     endpointKey,
-    errorInputLabel: requestPath,
+    errorInputLabel,
     input,
     json: flags.booleans.has('json'),
     operationId:
@@ -330,6 +386,7 @@ async function runMediaVerbRequestJson(args: {
     outputPath,
     quoteConfirmationToken: flags.values.get('quote-confirmation-token'),
     skillName: flags.values.get('skill') ?? resolved.skill,
+    context,
   });
 }
 
@@ -359,8 +416,9 @@ async function runVideoAnalysisVerb(args: {
   modelKey: string;
   resolved: ResolvedVerbTarget;
   verb: string;
-}): Promise<number> {
-  const { modelKey, resolved, verb } = args;
+  context: HostedRequestContext | undefined;
+}): Promise<number | unknown> {
+  const { modelKey, resolved, verb, context } = args;
   const flags = parseFlags(args.args, new Set(['json']));
   const allowedKeys = new Set([
     'hosted-operation-id',
@@ -377,9 +435,11 @@ async function runVideoAnalysisVerb(args: {
     }
   }
 
-  const requestPath = requireFlag(flags, 'request');
   const outputPath = flags.values.get('output') ?? null;
-  const raw = await readJsonFile(requestPath);
+  const { body: raw, errorInputLabel } = await resolveRequestBody(
+    context,
+    flags,
+  );
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(
       `media ${verb} ${modelKey} --request must be a JSON object of Gemini request payload.`,
@@ -417,17 +477,21 @@ async function runVideoAnalysisVerb(args: {
       flags.values.get('quote-confirmation-token') ?? undefined,
   };
 
-  return runHostedCommand({
-    request: () =>
-      postHostedJson({
-        body,
-        pathName: '/api/postplus-cli/hosted/capability',
-        skillName: flags.values.get('skill') ?? resolved.skill,
-      }),
-    errorInputLabel: requestPath,
-    json: flags.booleans.has('json'),
-    outputPath,
-  });
+  return dispatchHostedCommand(
+    {
+      request: () =>
+        postHostedJson({
+          body,
+          pathName: '/api/postplus-cli/hosted/capability',
+          skillName: flags.values.get('skill') ?? resolved.skill,
+          context,
+        }),
+      errorInputLabel,
+      json: flags.booleans.has('json'),
+      outputPath,
+    },
+    context,
+  );
 }
 
 // `media-file upload`: the generic local-file -> hosted media verb. Released
@@ -458,16 +522,22 @@ function inferUploadMimeType(filePath: string): string {
   );
 }
 
-export async function runMediaFileCommand(args: string[]): Promise<number> {
+export async function runMediaFileCommand(
+  args: string[],
+  context?: HostedRequestContext,
+): Promise<number | unknown> {
   const [subcommand, ...rest] = args;
   if (subcommand === 'upload') {
-    return runMediaFileUpload(rest);
+    return runMediaFileUpload(rest, context);
   }
   printMediaFileHelp();
   return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
 }
 
-async function runMediaFileUpload(args: string[]): Promise<number> {
+async function runMediaFileUpload(
+  args: string[],
+  context: HostedRequestContext | undefined,
+): Promise<number | unknown> {
   const flags = parseFlags(args, new Set(['json']));
   const allowedKeys = new Set([
     'hosted-operation-id',
@@ -510,41 +580,46 @@ async function runMediaFileUpload(args: string[]): Promise<number> {
       flags.values.get('quote-confirmation-token') ?? undefined,
   };
 
-  return runHostedCommand({
-    request: async () => {
-      const payload = await postHostedJson({
-        body,
-        pathName: '/api/postplus-cli/hosted/capability',
-        skillName: flags.values.get('skill') ?? null,
-      });
-      const output = readHostedUploadOutput(payload);
-      const signedUpload = readSignedUpload(output);
-      const storageReference = readStorageReferenceValue(output);
-      await putHostedMediaBytes(signedUpload, absolutePath);
+  return dispatchHostedCommand(
+    {
+      request: async () => {
+        const payload = await postHostedJson({
+          body,
+          pathName: '/api/postplus-cli/hosted/capability',
+          skillName: flags.values.get('skill') ?? null,
+          context,
+        });
+        const output = readHostedUploadOutput(payload);
+        const signedUpload = readSignedUpload(output);
+        const storageReference = readStorageReferenceValue(output);
+        await putHostedMediaBytes(signedUpload, absolutePath);
 
-      return await postHostedJson({
-        body: {
-          capability: 'media-file',
-          operation: 'upload',
-          file: {
-            mimeType,
-            name: path.basename(absolutePath),
-            storageReference,
+        return await postHostedJson({
+          body: {
+            capability: 'media-file',
+            operation: 'upload',
+            file: {
+              mimeType,
+              name: path.basename(absolutePath),
+              storageReference,
+            },
+            operationId: hostedOperationId
+              ? `${hostedOperationId}:upload`
+              : `postplus-cli:media-file:upload:${randomUUID()}`,
+            quoteConfirmationToken:
+              flags.values.get('quote-confirmation-token') ?? undefined,
           },
-          operationId: hostedOperationId
-            ? `${hostedOperationId}:upload`
-            : `postplus-cli:media-file:upload:${randomUUID()}`,
-          quoteConfirmationToken:
-            flags.values.get('quote-confirmation-token') ?? undefined,
-        },
-        pathName: '/api/postplus-cli/hosted/capability',
-        skillName: flags.values.get('skill') ?? null,
-      });
+          pathName: '/api/postplus-cli/hosted/capability',
+          skillName: flags.values.get('skill') ?? null,
+          context,
+        });
+      },
+      errorInputLabel: inputFile,
+      json: flags.booleans.has('json'),
+      outputPath,
     },
-    errorInputLabel: inputFile,
-    json: flags.booleans.has('json'),
-    outputPath,
-  });
+    context,
+  );
 }
 
 type SignedUpload = {
@@ -653,7 +728,8 @@ function submitMediaGenerationRequest(params: {
   outputPath: string | null;
   quoteConfirmationToken: string | undefined;
   skillName: string;
-}): Promise<number> {
+  context: HostedRequestContext | undefined;
+}): Promise<number | unknown> {
   // Billing dimensions are derived solely at the Web boundary from
   // (endpointKey, input); the CLI sends only the payload. The Web request schema
   // rejects any caller-supplied `requestDimensions` (single source of truth).
@@ -666,17 +742,21 @@ function submitMediaGenerationRequest(params: {
     quoteConfirmationToken: params.quoteConfirmationToken ?? undefined,
   };
 
-  return runHostedCommand({
-    request: () =>
-      postHostedJson({
-        body,
-        pathName: '/api/postplus-cli/hosted/capability',
-        skillName: params.skillName,
-      }),
-    errorInputLabel: params.errorInputLabel,
-    json: params.json,
-    outputPath: params.outputPath,
-  });
+  return dispatchHostedCommand(
+    {
+      request: () =>
+        postHostedJson({
+          body,
+          pathName: '/api/postplus-cli/hosted/capability',
+          skillName: params.skillName,
+          context: params.context,
+        }),
+      errorInputLabel: params.errorInputLabel,
+      json: params.json,
+      outputPath: params.outputPath,
+    },
+    params.context,
+  );
 }
 
 // Poll a pending media-generation run: `postplus media poll --handle <run-id>`.
@@ -689,27 +769,34 @@ function submitMediaGenerationRequest(params: {
 // The body carries only the status quadruple; submit-only fields (input,
 // requestDimensions, quoteConfirmationToken) are never sent. Mirrors the
 // `research collect --run-handle` polling branch.
-async function runMediaPoll(args: string[]): Promise<number> {
+async function runMediaPoll(
+  args: string[],
+  context: HostedRequestContext | undefined,
+): Promise<number | unknown> {
   const flags = parseFlags(args, new Set(['json']));
   const handle = requireFlag(flags, 'handle');
   const outputPath = flags.values.get('output') ?? null;
 
-  return runHostedCommand({
-    request: () =>
-      postHostedJson({
-        body: {
-          capability: 'media-generation',
-          handle,
-          operation: 'status',
-          operationId: `postplus-cli:media:media-generation:status:${randomUUID()}`,
-        },
-        pathName: '/api/postplus-cli/hosted/capability',
-        skillName: null,
-      }),
-    errorInputLabel: 'media-poll-handle',
-    json: flags.booleans.has('json'),
-    outputPath,
-  });
+  return dispatchHostedCommand(
+    {
+      request: () =>
+        postHostedJson({
+          body: {
+            capability: 'media-generation',
+            handle,
+            operation: 'status',
+            operationId: `postplus-cli:media:media-generation:status:${randomUUID()}`,
+          },
+          pathName: '/api/postplus-cli/hosted/capability',
+          skillName: null,
+          context,
+        }),
+      errorInputLabel: 'media-poll-handle',
+      json: flags.booleans.has('json'),
+      outputPath,
+    },
+    context,
+  );
 }
 
 function buildMediaVerbInput(input: {
@@ -789,7 +876,10 @@ function buildMediaVerbInput(input: {
 // schemaVersion envelope), and posts to /hosted/collection. The resolved entry
 // gives the default skillName (overridable by `--skill`); the actorId stays
 // internal and is never placed on the public body.
-async function runResearchCollect(args: string[]): Promise<number> {
+async function runResearchCollect(
+  args: string[],
+  context: HostedRequestContext | undefined,
+): Promise<number | unknown> {
   const [first, ...rest] = args;
 
   // Polling path: `research collect --run-handle <h>`. No positional collectionKey.
@@ -798,17 +888,21 @@ async function runResearchCollect(args: string[]): Promise<number> {
     const runHandle = requireFlag(flags, 'run-handle');
     const outputPath = flags.values.get('output') ?? null;
 
-    return runHostedCommand({
-      request: () =>
-        postHostedJson({
-          body: { runHandle, runHandleType: 'hosted-collection' },
-          pathName: '/api/postplus-cli/hosted/collection',
-          skillName: null,
-        }),
-      errorInputLabel: 'research-collect-run-handle',
-      json: flags.booleans.has('json'),
-      outputPath,
-    });
+    return dispatchHostedCommand(
+      {
+        request: () =>
+          postHostedJson({
+            body: { runHandle, runHandleType: 'hosted-collection' },
+            pathName: '/api/postplus-cli/hosted/collection',
+            skillName: null,
+            context,
+          }),
+        errorInputLabel: 'research-collect-run-handle',
+        json: flags.booleans.has('json'),
+        outputPath,
+      },
+      context,
+    );
   }
 
   const verb = 'collect';
@@ -844,9 +938,11 @@ async function runResearchCollect(args: string[]): Promise<number> {
     }
   }
 
-  const requestPath = requireFlag(flags, 'request');
   const outputPath = flags.values.get('output') ?? null;
-  const raw = await readJsonFile(requestPath);
+  const { body: raw, errorInputLabel } = await resolveRequestBody(
+    context,
+    flags,
+  );
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(
       `research ${verb} ${collectionKey} --request must be a JSON object of collection input.`,
@@ -871,24 +967,28 @@ async function runResearchCollect(args: string[]): Promise<number> {
     maxTotalChargeUsd = parsed;
   }
 
-  return runHostedCommand({
-    request: () =>
-      postHostedJson({
-        body: {
-          collectionKey,
-          input,
-          operationId,
-          quoteConfirmationToken: quoteConfirmationToken ?? undefined,
+  return dispatchHostedCommand(
+    {
+      request: () =>
+        postHostedJson({
+          body: {
+            collectionKey,
+            input,
+            operationId,
+            quoteConfirmationToken: quoteConfirmationToken ?? undefined,
+            skillName,
+            maxTotalChargeUsd,
+          },
+          pathName: '/api/postplus-cli/hosted/collection',
           skillName,
-          maxTotalChargeUsd,
-        },
-        pathName: '/api/postplus-cli/hosted/collection',
-        skillName,
-      }),
-    errorInputLabel: requestPath,
-    json: flags.booleans.has('json'),
-    outputPath,
-  });
+          context,
+        }),
+      errorInputLabel,
+      json: flags.booleans.has('json'),
+      outputPath,
+    },
+    context,
+  );
 }
 
 // Manifest-driven public-content-collection verb (request-json surface). Resolves
@@ -898,7 +998,10 @@ async function runResearchCollect(args: string[]): Promise<number> {
 // capability `public-content-collection` / operation `scrape`. The resolved entry
 // gives the default skillName (overridable by `--skill`); the datasetId stays
 // internal and is never placed on the public body.
-async function runResearchScrape(args: string[]): Promise<number> {
+async function runResearchScrape(
+  args: string[],
+  context: HostedRequestContext | undefined,
+): Promise<number | unknown> {
   const [first, ...rest] = args;
 
   const verb = 'scrape';
@@ -909,17 +1012,21 @@ async function runResearchScrape(args: string[]): Promise<number> {
     const runHandle = requireFlag(flags, 'run-handle');
     const outputPath = flags.values.get('output') ?? null;
 
-    return runHostedCommand({
-      request: () =>
-        postHostedJson({
-          body: { runHandle, runHandleType: 'public-content-collection' },
-          pathName: '/api/postplus-cli/hosted/collection',
-          skillName: null,
-        }),
-      errorInputLabel: 'research-scrape-run-handle',
-      json: flags.booleans.has('json'),
-      outputPath,
-    });
+    return dispatchHostedCommand(
+      {
+        request: () =>
+          postHostedJson({
+            body: { runHandle, runHandleType: 'public-content-collection' },
+            pathName: '/api/postplus-cli/hosted/collection',
+            skillName: null,
+            context,
+          }),
+        errorInputLabel: 'research-scrape-run-handle',
+        json: flags.booleans.has('json'),
+        outputPath,
+      },
+      context,
+    );
   }
 
   const sourceKey = first;
@@ -953,9 +1060,11 @@ async function runResearchScrape(args: string[]): Promise<number> {
     }
   }
 
-  const requestPath = requireFlag(flags, 'request');
   const outputPath = flags.values.get('output') ?? null;
-  const raw = await readJsonFile(requestPath);
+  const { body: raw, errorInputLabel } = await resolveRequestBody(
+    context,
+    flags,
+  );
   if (!Array.isArray(raw) || raw.length === 0) {
     throw new Error(
       `research ${verb} ${sourceKey} --request must be a non-empty JSON array of scrape input records.`,
@@ -982,25 +1091,29 @@ async function runResearchScrape(args: string[]): Promise<number> {
 
   // The Web /hosted/capability scrape contract is a strict object: skillName is
   // carried as the compatibility header (postHostedJson), never on the public body.
-  return runHostedCommand({
-    request: () =>
-      postHostedJson({
-        body: {
-          capability: 'public-content-collection',
-          operation: 'scrape',
-          sourceKey,
-          input,
-          operationId,
-          quoteConfirmationToken: quoteConfirmationToken ?? undefined,
-          maxTotalChargeUsd,
-        },
-        pathName: '/api/postplus-cli/hosted/capability',
-        skillName,
-      }),
-    errorInputLabel: requestPath,
-    json: flags.booleans.has('json'),
-    outputPath,
-  });
+  return dispatchHostedCommand(
+    {
+      request: () =>
+        postHostedJson({
+          body: {
+            capability: 'public-content-collection',
+            operation: 'scrape',
+            sourceKey,
+            input,
+            operationId,
+            quoteConfirmationToken: quoteConfirmationToken ?? undefined,
+            maxTotalChargeUsd,
+          },
+          pathName: '/api/postplus-cli/hosted/capability',
+          skillName,
+          context,
+        }),
+      errorInputLabel,
+      json: flags.booleans.has('json'),
+      outputPath,
+    },
+    context,
+  );
 }
 
 // Manifest-driven publish operation (request-json surface). The OPERATION is the
@@ -1013,7 +1126,8 @@ async function runResearchScrape(args: string[]): Promise<number> {
 async function runPublishOperation(
   operation: string,
   args: string[],
-): Promise<number> {
+  context: HostedRequestContext | undefined,
+): Promise<number | unknown> {
   const resolved = PUBLISH_VERB_OPERATIONS.get(operation);
   if (!resolved) {
     throw new Error(
@@ -1042,9 +1156,11 @@ async function runPublishOperation(
     }
   }
 
-  const requestPath = requireFlag(flags, 'request');
   const outputPath = flags.values.get('output') ?? null;
-  const raw = await readJsonFile(requestPath);
+  const { body: raw, errorInputLabel } = await resolveRequestBody(
+    context,
+    flags,
+  );
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(
       `publish ${operation} --request must be a JSON object of publishing input.`,
@@ -1058,23 +1174,27 @@ async function runPublishOperation(
     `postplus-cli:publish:social-publishing:request:${randomUUID()}`;
   const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
 
-  return runHostedCommand({
-    request: () =>
-      postHostedJson({
-        body: {
-          capability: 'social-publishing',
-          operation,
-          input,
-          operationId,
-          quoteConfirmationToken: quoteConfirmationToken ?? undefined,
-        },
-        pathName: '/api/postplus-cli/hosted/capability',
-        skillName,
-      }),
-    errorInputLabel: requestPath,
-    json: flags.booleans.has('json'),
-    outputPath,
-  });
+  return dispatchHostedCommand(
+    {
+      request: () =>
+        postHostedJson({
+          body: {
+            capability: 'social-publishing',
+            operation,
+            input,
+            operationId,
+            quoteConfirmationToken: quoteConfirmationToken ?? undefined,
+          },
+          pathName: '/api/postplus-cli/hosted/capability',
+          skillName,
+          context,
+        }),
+      errorInputLabel,
+      json: flags.booleans.has('json'),
+      outputPath,
+    },
+    context,
+  );
 }
 
 async function runHostedSchema(
@@ -1109,17 +1229,32 @@ async function postHostedJson(input: {
   body: unknown;
   pathName: string;
   skillName: string | null;
+  // When present (the hosted-lib path) the POST uses the injected auth +
+  // skillsReleaseId with NO disk read and NO 401-refresh-retry (the eve runtime
+  // supplies fresh session auth each turn). When absent (the bin path) the auth
+  // is resolved from disk and a single 401 triggers a forced refresh, exactly as
+  // before. Either way the body/URL/headers are built identically.
+  context?: HostedRequestContext;
 }): Promise<unknown> {
-  const auth = await resolveFreshRemoteAuth();
-  const response = await sendAuthedCloudRequest({
-    auth,
-    body: input.body,
-    method: 'POST',
-    pathName: input.pathName,
-    retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
-    skillName: input.skillName,
-    timeoutMs: 120000,
-  });
+  const response = input.context
+    ? await sendAuthedCloudRequest({
+        auth: input.context.auth,
+        body: input.body,
+        method: 'POST',
+        pathName: input.pathName,
+        skillName: input.skillName,
+        skillsReleaseId: input.context.skillsReleaseId ?? null,
+        timeoutMs: 120000,
+      })
+    : await sendAuthedCloudRequest({
+        auth: await resolveFreshRemoteAuth(),
+        body: input.body,
+        method: 'POST',
+        pathName: input.pathName,
+        retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
+        skillName: input.skillName,
+        timeoutMs: 120000,
+      });
 
   const payload = await readJsonResponse(response);
   if (!response.ok) {
@@ -1142,7 +1277,7 @@ async function postHostedJson(input: {
   return payload;
 }
 
-// Single exit path for every hosted command: success writes the result and
+// Single exit path for the BIN hosted command: success writes the result and
 // returns 0; a quote challenge writes the challenge file and rethrows actionable
 // guidance; a structured product error writes the full error envelope to the
 // result JSON and surfaces code/layer/operationId on the terminal, exiting 1.
@@ -1186,6 +1321,29 @@ async function runHostedCommand(input: {
 
   await writeResult(payload, input.outputPath, input.json);
   return 0;
+}
+
+// Single exit path for both BIN and LIB hosted commands. Each dispatch function
+// builds the SAME `request` closure (resolve verb -> build envelope -> POST) and
+// hands it here. The bin path (no `context`) keeps stdout/file/exit-code behavior
+// via runHostedCommand. The lib path (with `context`) returns the parsed payload
+// and rethrows the structured HostedProductRequestError / quote-confirmation error
+// VERBATIM — no stdout, no file writes, no exit code — so the in-process caller
+// surfaces the structured JSON and fails honestly. Because the closure is shared,
+// the wire request (URL + body + headers) is byte-identical across both paths.
+async function dispatchHostedCommand(
+  input: {
+    request: () => Promise<unknown>;
+    errorInputLabel: string;
+    json: boolean;
+    outputPath: string | null;
+  },
+  context: HostedRequestContext | undefined,
+): Promise<number | unknown> {
+  if (!context) {
+    return runHostedCommand(input);
+  }
+  return input.request();
 }
 
 async function writeQuoteConfirmationChallenge(
