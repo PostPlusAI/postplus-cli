@@ -1145,6 +1145,22 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--width-and-height",
               "type": "string",
+              "enumValues": [
+                "2048x1152",
+                "2048x1536",
+                "2016x1344",
+                "1696x960",
+                "1632x1088",
+                "1152x2048",
+                "1536x2048",
+                "1344x2016",
+                "960x1696",
+                "1088x1632",
+                "1536x1536",
+                "1536x1152",
+                "1152x1536"
+              ],
+              "canonicalize": "lowercase",
               "required": true
             },
             {
