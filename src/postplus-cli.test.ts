@@ -35,6 +35,7 @@ import {
   runHostedDomainCommand,
   runMediaFileCommand,
 } from './hosted-domain-commands.js';
+import { runHostedRequest } from './hosted-lib.js';
 import { generateLocalDependencyReport } from './local-dependencies.js';
 import {
   readLocalConfig,
@@ -6017,5 +6018,307 @@ describe('studio commands', () => {
       resolveStudioRoot('/tmp/demo/PostPlus Studio'),
       resolve('/tmp/demo/PostPlus Studio'),
     );
+  });
+});
+
+// ANTI-DRIFT PARITY: the bin path (runHostedDomainCommand / runMediaFileCommand
+// reading `--request <file>` + disk auth) and the in-process hosted-lib path
+// (runHostedRequest with injected requestJson + parameter auth) MUST produce a
+// byte-identical hosted HTTP request — same URL, method, headers (authorization,
+// x-postplus-skills-release-id, x-postplus-cli-version, x-postplus-client-*,
+// x-postplus-skill-name), and JSON body — because they share one resolve+build+
+// post core. If this ever fails, the grammar has forked; fix the refactor, never
+// weaken the test. operationId is pinned via --hosted-operation-id so the only
+// nondeterministic field is removed and the bodies are exactly comparable.
+describe('hosted lib / bin request parity', () => {
+  const PARITY_AUTH = {
+    apiBaseUrl: 'https://postplus.test',
+    cliSessionToken: 'cli-session-token',
+  } as const;
+  const PARITY_RELEASE_ID = 'release-parity-1';
+  const PARITY_OP_ID = 'op-parity-fixed-id';
+
+  type CapturedRequest = {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    body: unknown;
+  };
+
+  // Runs `run` against a fetch stub that records the single hosted request and
+  // returns a fixed 200 payload, then restores fetch. The hosted lib path and the
+  // bin path are each driven through this so their captured requests can be
+  // compared field by field.
+  async function captureSingleHostedRequest(
+    run: () => Promise<unknown>,
+  ): Promise<CapturedRequest> {
+    const originalFetch = globalThis.fetch;
+    let captured: CapturedRequest | null = null;
+    globalThis.fetch = async (input, init) => {
+      const headerEntries: Record<string, string> = {};
+      const rawHeaders = init?.headers as Record<string, string> | undefined;
+      if (rawHeaders) {
+        for (const [key, value] of Object.entries(rawHeaders)) {
+          headerEntries[key.toLowerCase()] = value;
+        }
+      }
+      captured = {
+        url: String(input),
+        method: String(init?.method),
+        headers: headerEntries,
+        body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+      };
+      return new Response(JSON.stringify({ ok: true, parity: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    try {
+      await run();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    if (!captured) {
+      throw new Error('Expected exactly one hosted fetch to be captured.');
+    }
+    return captured;
+  }
+
+  // Seeds the disk session + managed-skills release id the BIN path reads, so its
+  // auth/releaseId header inputs match what the lib path receives as parameters.
+  async function seedBinDiskState(): Promise<void> {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: PARITY_AUTH.apiBaseUrl,
+      cliSessionToken: PARITY_AUTH.cliSessionToken,
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    await writeLocalConfig({
+      ...(await readLocalConfig()),
+      apiBaseUrl: PARITY_AUTH.apiBaseUrl,
+      cliSessionToken: PARITY_AUTH.cliSessionToken,
+      managedSkills: { releaseId: PARITY_RELEASE_ID, skillNames: [] },
+    });
+  }
+
+  type ParityCase = {
+    name: string;
+    domain: 'media' | 'research' | 'publish' | 'media-file';
+    // Tokens AFTER the domain, shared by both paths EXCEPT the request source.
+    baseArgs: string[];
+    // request-json surfaces: the injected object (lib) / written file (bin).
+    requestJson?: Record<string, unknown> | unknown[];
+  };
+
+  const CASES: ParityCase[] = [
+    {
+      name: 'media create (flags surface) image-gpt-image-2-text',
+      domain: 'media',
+      baseArgs: [
+        'create',
+        'image-gpt-image-2-text',
+        '--prompt',
+        'a hero shot',
+        '--resolution',
+        '4K',
+        '--quality',
+        'High',
+        '--hosted-operation-id',
+        PARITY_OP_ID,
+      ],
+    },
+    {
+      name: 'media create (request-json surface) video-seedance-2-text',
+      domain: 'media',
+      baseArgs: [
+        'create',
+        'video-seedance-2-text',
+        '--hosted-operation-id',
+        PARITY_OP_ID,
+      ],
+      requestJson: {
+        prompt: 'a blue sticky note slides across a white desk',
+        resolution: '720p',
+        duration: 5,
+        aspect_ratio: '9:16',
+      },
+    },
+    {
+      name: 'research collect google-trends-fast',
+      domain: 'research',
+      baseArgs: [
+        'collect',
+        'google-trends-fast',
+        '--hosted-operation-id',
+        PARITY_OP_ID,
+      ],
+      requestJson: {
+        keyword: 'portable blender',
+        geo: 'US',
+        timeframe: 'today 12-m',
+        enableTrendingSearches: false,
+      },
+    },
+    {
+      name: 'publish create-post',
+      domain: 'publish',
+      baseArgs: ['create-post', '--hosted-operation-id', PARITY_OP_ID],
+      requestJson: {
+        channelId: 'channel_1',
+        content: 'hello world',
+      },
+    },
+  ];
+
+  for (const parityCase of CASES) {
+    it(`bin and lib emit byte-identical requests: ${parityCase.name}`, async () => {
+      // BIN path: write the request-json file (when the surface needs one), seed
+      // disk auth + release id, dispatch through the bin entry function.
+      await seedBinDiskState();
+      const binArgs = [...parityCase.baseArgs];
+      if (parityCase.requestJson !== undefined) {
+        const requestDir = await mkdtemp(
+          resolve(tmpdir(), 'postplus-cli-parity-'),
+        );
+        tempDirs.push(requestDir);
+        const requestPath = resolve(requestDir, 'request.json');
+        await writeFile(requestPath, JSON.stringify(parityCase.requestJson));
+        binArgs.push('--request', requestPath);
+      }
+
+      const binRequest = await captureSingleHostedRequest(() =>
+        parityCase.domain === 'media-file'
+          ? runMediaFileCommand(binArgs)
+          : runHostedDomainCommand(parityCase.domain, binArgs),
+      );
+
+      // LIB path: same args (minus the --request file), inject requestJson +
+      // parameter auth + parameter skillsReleaseId. No disk read, no file.
+      const libRequest = await captureSingleHostedRequest(() =>
+        runHostedRequest({
+          domain: parityCase.domain,
+          args: parityCase.baseArgs,
+          ...(parityCase.requestJson !== undefined
+            ? { requestJson: parityCase.requestJson }
+            : {}),
+          auth: PARITY_AUTH,
+          skillsReleaseId: PARITY_RELEASE_ID,
+        }),
+      );
+
+      // URL + method must match exactly.
+      assert.equal(libRequest.url, binRequest.url);
+      assert.equal(libRequest.method, binRequest.method);
+
+      // Body must be byte-identical (operationId pinned, so fully deterministic).
+      assert.deepEqual(libRequest.body, binRequest.body);
+
+      // Every compatibility + auth header must match exactly, including the
+      // release id stamped from disk (bin) vs parameter (lib).
+      for (const headerName of [
+        'authorization',
+        POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.cliVersion,
+        POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.contractVersion,
+        POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.runtime,
+        POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.skillsReleaseId,
+        POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.skillName,
+        'content-type',
+        'accept',
+      ]) {
+        assert.equal(
+          libRequest.headers[headerName],
+          binRequest.headers[headerName],
+          `header ${headerName} must match between bin and lib`,
+        );
+      }
+
+      // Positive guards: the release id header is actually present (not both
+      // undefined), and the authorization carries the session token.
+      assert.equal(
+        libRequest.headers[
+          POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.skillsReleaseId
+        ],
+        PARITY_RELEASE_ID,
+      );
+      assert.equal(
+        libRequest.headers.authorization,
+        `Bearer ${PARITY_AUTH.cliSessionToken}`,
+      );
+      // operationId pinned identically on both bodies.
+      assert.equal(
+        (libRequest.body as Record<string, unknown>).operationId,
+        PARITY_OP_ID,
+      );
+    });
+  }
+
+  it('returns the parsed hosted payload in-process (no exit code, no file)', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({ output: { data: { id: 'run_parity' } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    try {
+      const payload = await runHostedRequest({
+        domain: 'media',
+        args: [
+          'create',
+          'video-seedance-2-text',
+          '--hosted-operation-id',
+          PARITY_OP_ID,
+        ],
+        requestJson: { prompt: 'parity payload' },
+        auth: PARITY_AUTH,
+        skillsReleaseId: PARITY_RELEASE_ID,
+      });
+      // The lib returns the parsed payload OBJECT — not a number exit code and
+      // not a stdout string.
+      assert.deepEqual(payload, { output: { data: { id: 'run_parity' } } });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('throws the structured product error verbatim in-process', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          code: 'postplus_cli_hosted_provider_timeout',
+          error: 'Media generation timed out while calling the provider.',
+          layer: 'hosted-capability',
+          operationId: 'op-from-web-123',
+          userMessageRule: 'retry_later',
+        }),
+        { status: 504, headers: { 'content-type': 'application/json' } },
+      );
+    try {
+      await assert.rejects(
+        () =>
+          runHostedRequest({
+            domain: 'media',
+            args: [
+              'create',
+              'video-seedance-2-text',
+              '--hosted-operation-id',
+              PARITY_OP_ID,
+            ],
+            requestJson: { prompt: 'parity error' },
+            auth: PARITY_AUTH,
+            skillsReleaseId: PARITY_RELEASE_ID,
+          }),
+        (error: unknown) =>
+          error instanceof Error &&
+          /Media generation timed out/u.test(error.message) &&
+          /code=postplus_cli_hosted_provider_timeout/u.test(error.message) &&
+          /operationId=op-from-web-123/u.test(error.message),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

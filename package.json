@@ -13,14 +13,19 @@
     "build/auth-validate.js",
     "build/auth.js",
     "build/authed-cloud-request.js",
+    "build/authed-cloud-request.d.ts",
     "build/client-compatibility.js",
     "build/command-runner.js",
     "build/doctor.js",
     "build/hosted-domain-commands.js",
+    "build/hosted-domain-commands.d.ts",
+    "build/hosted-lib.js",
+    "build/hosted-lib.d.ts",
     "build/generated/hosted-execution-manifest.generated.js",
     "build/generated/hosted-field-validation-core.generated.js",
     "build/hosted-field-validation.js",
     "build/hosted-manifest-index.js",
+    "build/hosted-manifest-index.d.ts",
     "build/hosted-release.js",
     "build/hosted-request-schemas.js",
     "build/index.js",
@@ -47,6 +52,13 @@
   },
   "bin": {
     "postplus": "build/index.js"
+  },
+  "exports": {
+    "./hosted-lib": {
+      "types": "./build/hosted-lib.d.ts",
+      "default": "./build/hosted-lib.js"
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
     "build": "node ./scripts/clean-build.mjs && tsc && node ./scripts/finalize-build.mjs",

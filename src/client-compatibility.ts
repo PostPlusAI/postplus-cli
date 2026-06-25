@@ -37,11 +37,20 @@ export type PostPlusClientUpgradePayload = {
 export async function buildPostPlusClientCompatibilityHeaders(
   input: {
     skillName?: string | null;
+    /**
+     * In-process override for the skills release id stamped into
+     * `x-postplus-skills-release-id`. When provided (the hosted-lib path), it is
+     * used verbatim and the disk config is NOT read for the release id. When
+     * omitted (the bin path), the release id comes from `readLocalConfig()` as
+     * before. Either way the cliVersion is read from the package version.
+     */
+    skillsReleaseId?: string | null;
   } = {},
 ): Promise<Record<string, string>> {
+  const hasReleaseIdOverride = input.skillsReleaseId !== undefined;
   const [cliVersion, config] = await Promise.all([
     readCurrentCliVersion(),
-    readLocalConfig(),
+    hasReleaseIdOverride ? Promise.resolve(null) : readLocalConfig(),
   ]);
   const headers: Record<string, string> = {
     [POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.cliVersion]: cliVersion,
@@ -50,7 +59,9 @@ export async function buildPostPlusClientCompatibilityHeaders(
     ),
     [POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.runtime]: POSTPLUS_CLIENT_RUNTIME,
   };
-  const skillsReleaseId = config?.managedSkills?.releaseId?.trim();
+  const skillsReleaseId = hasReleaseIdOverride
+    ? input.skillsReleaseId?.trim()
+    : config?.managedSkills?.releaseId?.trim();
   const skillName = input.skillName?.trim();
 
   if (skillsReleaseId) {

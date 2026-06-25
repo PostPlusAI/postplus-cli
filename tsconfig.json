@@ -3,6 +3,7 @@
     "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo.json",
     "outDir": "./build",
     "noEmit": false,
+    "declaration": true,
     "strict": true,
     "target": "ES2022",
     "module": "nodenext",
