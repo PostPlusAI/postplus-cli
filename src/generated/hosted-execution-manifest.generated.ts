@@ -1141,39 +1141,20 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": true
             },
             {
-              "name": "width_and_height",
-              "class": "intent",
-              "flag": "--width-and-height",
-              "type": "string",
-              "enumValues": [
-                "2048x1152",
-                "2048x1536",
-                "2016x1344",
-                "1696x960",
-                "1632x1088",
-                "1152x2048",
-                "1536x2048",
-                "1344x2016",
-                "960x1696",
-                "1088x1632",
-                "1536x1536",
-                "1536x1152",
-                "1152x1536"
-              ],
-              "canonicalize": "lowercase",
-              "required": true
-            },
-            {
-              "name": "quality",
+              "name": "aspect_ratio",
               "class": "default",
-              "flag": "--quality",
+              "flag": "--aspect-ratio",
               "type": "string",
               "enumValues": [
-                "720p",
-                "1080p"
+                "9:16",
+                "16:9",
+                "4:3",
+                "3:4",
+                "1:1",
+                "2:3",
+                "3:2"
               ],
-              "canonicalize": "lowercase",
-              "default": "720p",
+              "default": "1:1",
               "required": false
             },
             {
@@ -1220,7 +1201,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             }
           ],
           "billingDimensions": [
-            "quality"
+            "billableUnitCount"
           ]
         }
       ]
