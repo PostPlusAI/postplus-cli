@@ -1280,6 +1280,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "capability": "media-generation",
       "endpointKeys": [
         "video-seedance-2-image",
+        "video-seedance-2-mini-image",
+        "video-seedance-2-mini-text",
         "video-seedance-2-text"
       ],
       "endpoints": [
@@ -1325,6 +1327,200 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": false,
               "min": 4,
               "max": 15
+            },
+            {
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "requestDimensions",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ],
+          "billingDimensions": [
+            "duration",
+            "resolution",
+            "referenceVideoCount",
+            "referenceVideoMode"
+          ]
+        },
+        {
+          "endpointKey": "video-seedance-2-mini-image",
+          "provider": "wavespeed",
+          "providerModelPath": "bytedance/seedance-2.0-mini/image-to-video",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": null,
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "image",
+              "class": "intent",
+              "flag": null,
+              "type": "media-url",
+              "required": true
+            },
+            {
+              "name": "resolution",
+              "class": "default",
+              "flag": null,
+              "type": "string",
+              "enumValues": [
+                "480p",
+                "720p",
+                "1080p",
+                "4k"
+              ],
+              "canonicalize": "lowercase",
+              "default": "720p",
+              "required": false
+            },
+            {
+              "name": "duration",
+              "class": "default",
+              "flag": null,
+              "type": "number",
+              "default": 5,
+              "required": false,
+              "min": 4,
+              "max": 15
+            },
+            {
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "requestDimensions",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ],
+          "billingDimensions": [
+            "duration",
+            "resolution",
+            "referenceVideoCount",
+            "referenceVideoMode"
+          ]
+        },
+        {
+          "endpointKey": "video-seedance-2-mini-text",
+          "provider": "wavespeed",
+          "providerModelPath": "bytedance/seedance-2.0-mini/text-to-video",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": null,
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "resolution",
+              "class": "default",
+              "flag": null,
+              "type": "string",
+              "enumValues": [
+                "480p",
+                "720p",
+                "1080p",
+                "4k"
+              ],
+              "canonicalize": "lowercase",
+              "default": "720p",
+              "required": false
+            },
+            {
+              "name": "aspect_ratio",
+              "class": "intent",
+              "flag": null,
+              "type": "string",
+              "enumValues": [
+                "21:9",
+                "16:9",
+                "4:3",
+                "1:1",
+                "3:4",
+                "9:16"
+              ],
+              "required": false
+            },
+            {
+              "name": "duration",
+              "class": "default",
+              "flag": null,
+              "type": "number",
+              "default": 5,
+              "required": false,
+              "min": 4,
+              "max": 15
+            },
+            {
+              "name": "reference_images",
+              "class": "intent",
+              "flag": null,
+              "type": "media-url",
+              "repeatable": true,
+              "required": false
+            },
+            {
+              "name": "reference_videos",
+              "class": "intent",
+              "flag": null,
+              "type": "media-url",
+              "repeatable": true,
+              "required": false
+            },
+            {
+              "name": "reference_audios",
+              "class": "intent",
+              "flag": null,
+              "type": "media-url",
+              "repeatable": true,
+              "required": false
+            },
+            {
+              "name": "enable_web_search",
+              "class": "default",
+              "flag": null,
+              "type": "boolean",
+              "default": false,
+              "required": false
+            },
+            {
+              "name": "generate_audio",
+              "class": "default",
+              "flag": null,
+              "type": "boolean",
+              "default": true,
+              "required": false
             },
             {
               "name": "operationId",
