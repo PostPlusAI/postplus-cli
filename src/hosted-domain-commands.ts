@@ -126,7 +126,7 @@ export async function runHostedDomainCommand(
 
   if (domain === 'research') {
     if (subcommand === 'schema') {
-      return runHostedSchema(domain, rest);
+      return runHostedSchema(domain, rest, context);
     }
     if (subcommand === 'collect') {
       return runResearchCollect(rest, context);
@@ -139,7 +139,7 @@ export async function runHostedDomainCommand(
   }
 
   if (subcommand === 'schema') {
-    return runHostedSchema(domain, rest);
+    return runHostedSchema(domain, rest, context);
   }
 
   // Poll a pending async media-generation run by handle. This is a hand-coded
@@ -1200,7 +1200,8 @@ async function runPublishOperation(
 async function runHostedSchema(
   domain: HostedDomain,
   args: string[],
-): Promise<number> {
+  context: HostedRequestContext | undefined,
+): Promise<number | unknown> {
   const flags = parseFlags(args, new Set(['json']));
   const allowedFlags =
     domain === 'media'
@@ -1215,13 +1216,20 @@ async function runHostedSchema(
     }
   }
 
-  writeJson(
-    buildHostedRequestSchemaReport({
-      collectionKey: flags.values.get('collection-key') ?? null,
-      domain,
-      endpointKey: flags.values.get('endpoint') ?? null,
-    }),
-  );
+  const report = buildHostedRequestSchemaReport({
+    collectionKey: flags.values.get('collection-key') ?? null,
+    domain,
+    endpointKey: flags.values.get('endpoint') ?? null,
+  });
+
+  // In-process / context path: RETURN the structured catalog so the model
+  // receives it as the call result. The bin path (no context) keeps writeJson +
+  // return 0 for human CLI stdout output. Mirrors the spend-verb dispatch.
+  if (context) {
+    return report;
+  }
+
+  writeJson(report);
   return 0;
 }
 

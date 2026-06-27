@@ -6283,6 +6283,47 @@ describe('hosted lib / bin request parity', () => {
     }
   });
 
+  it('returns the media schema catalog object in-process (not exit code 0)', async () => {
+    // The in-process / context path must RESOLVE to the structured catalog so the
+    // model receives it as the call result — NOT writeJson + return 0, which sends
+    // the catalog to process stdout and hands the model the number 0.
+    const result = await runHostedDomainCommand('media', ['schema', '--json'], {
+      auth: PARITY_AUTH,
+      skillsReleaseId: PARITY_RELEASE_ID,
+    });
+    assert.notEqual(result, 0);
+    const report = result as Record<string, unknown>;
+    assert.equal(report.domain, 'media');
+    const endpoints = report.endpoints as Array<{ endpointKey: string }>;
+    assert.ok(Array.isArray(endpoints) && endpoints.length > 0);
+    const endpointKeys = endpoints.map((endpoint) => endpoint.endpointKey);
+    assert.ok(endpointKeys.includes('image-higgsfield-soul-text'));
+    assert.ok(endpointKeys.includes('video-seedance-2-mini-text'));
+
+    // BIN-path parity: with no context the catalog goes to stdout and the call
+    // returns the 0 exit code, exactly as the human CLI expects.
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    let stdout = '';
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      stdout += String(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+    let binResult: number | unknown;
+    try {
+      binResult = await runHostedDomainCommand('media', ['schema', '--json']);
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    assert.equal(binResult, 0);
+    const binReport = JSON.parse(stdout) as Record<string, unknown>;
+    assert.equal(binReport.domain, 'media');
+    assert.ok(
+      (binReport.endpoints as Array<{ endpointKey: string }>).some(
+        (endpoint) => endpoint.endpointKey === 'image-higgsfield-soul-text',
+      ),
+    );
+  });
+
   it('throws the structured product error verbatim in-process', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
