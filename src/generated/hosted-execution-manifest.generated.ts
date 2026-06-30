@@ -1268,7 +1268,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "endpoints": [
         {
           "endpointKey": "video-seedance-2-image",
-          "provider": "wavespeed",
+          "provider": "byteplus",
           "providerModelPath": "bytedance/seedance-2.0/image-to-video",
           "fields": [
             {
@@ -1340,7 +1340,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         },
         {
           "endpointKey": "video-seedance-2-mini-image",
-          "provider": "wavespeed",
+          "provider": "byteplus",
           "providerModelPath": "bytedance/seedance-2.0-mini/image-to-video",
           "fields": [
             {
@@ -1413,7 +1413,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         },
         {
           "endpointKey": "video-seedance-2-mini-text",
-          "provider": "wavespeed",
+          "provider": "byteplus",
           "providerModelPath": "bytedance/seedance-2.0-mini/text-to-video",
           "fields": [
             {
@@ -1534,7 +1534,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         },
         {
           "endpointKey": "video-seedance-2-text",
-          "provider": "wavespeed",
+          "provider": "byteplus",
           "providerModelPath": "bytedance/seedance-2.0/text-to-video",
           "fields": [
             {
