@@ -45,6 +45,7 @@ import {
   runHostedDomainCommand,
   runMediaFileCommand,
 } from './hosted-domain-commands.js';
+import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import { runHostedRequest } from './hosted-lib.js';
 import { generateLocalDependencyReport } from './local-dependencies.js';
 import {
@@ -4174,6 +4175,75 @@ describe('hosted domain commands', () => {
     // The retired catalog's example-only fields are gone from the contract.
     assert.equal(byName.has('response_format'), false);
     assert.equal(byName.has('timestamp_granularities'), false);
+  });
+
+  it('synthesizes a copy-pasteable example per media endpoint (required ∪ prompt, enums at first value)', () => {
+    for (const endpointKey of ['transcription', 'video-seedance-2-text']) {
+      const report = buildHostedRequestSchemaReport({
+        domain: 'media',
+        endpointKey,
+      });
+      const endpoints = report.endpoints as Array<{
+        endpointKey: string;
+        fields: Array<{
+          name: string;
+          kind: string;
+          type: string;
+          flag: string | null;
+          repeatable?: boolean;
+          enumValues?: string[];
+          required: boolean;
+        }>;
+        example?: {
+          command: string;
+          request: Record<string, unknown>;
+          estimate: string;
+        };
+      }>;
+      const endpoint = endpoints.find((e) => e.endpointKey === endpointKey);
+      assert.ok(endpoint, `endpoint ${endpointKey} present`);
+      const example = endpoint.example;
+      assert.ok(example, `example present for ${endpointKey}`);
+
+      // Example field set = (required ∪ {prompt}) minus runner-managed.
+      const expectedFields = endpoint.fields.filter(
+        (field) =>
+          field.kind !== 'runner-managed' &&
+          (field.required || field.name === 'prompt'),
+      );
+      assert.deepEqual(
+        Object.keys(example.request).sort(),
+        expectedFields.map((field) => field.name).sort(),
+      );
+
+      // No runner-managed field is ever synthesized into the example body.
+      for (const field of endpoint.fields) {
+        if (field.kind === 'runner-managed') {
+          assert.equal(Object.hasOwn(example.request, field.name), false);
+        }
+      }
+
+      // Every enum field in the example takes its FIRST value.
+      for (const field of expectedFields) {
+        if (field.enumValues && field.enumValues.length > 0) {
+          const expected = field.repeatable
+            ? [field.enumValues[0]]
+            : field.enumValues[0];
+          assert.deepEqual(example.request[field.name], expected);
+        }
+      }
+
+      // The command is copy-pasteable in the endpoint's own surface form, and the
+      // estimate line prices the same request with no charge.
+      assert.match(
+        example.command,
+        new RegExp(`^postplus media \\w+ ${endpointKey}`, 'u'),
+      );
+      assert.match(
+        example.estimate,
+        new RegExp(`^postplus media estimate ${endpointKey}`, 'u'),
+      );
+    }
   });
 
   it('rejects unknown hosted media schema endpoints', async () => {
