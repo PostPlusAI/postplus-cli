@@ -32,6 +32,16 @@ import {
 } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import {
+  fetchHostedBalance,
+  fetchHostedRunDetail,
+  fetchHostedRunsList,
+  formatHostedBalanceReport,
+  formatHostedRunDetailReport,
+  formatHostedRunsListReport,
+  parseRunsListOptions,
+  buildRunsListPath,
+} from './hosted-account-commands.js';
+import {
   runHostedDomainCommand,
   runMediaFileCommand,
 } from './hosted-domain-commands.js';
@@ -5866,6 +5876,233 @@ describe('hosted domain commands', () => {
         ),
         challenge,
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('account read-only commands', () => {
+  it('reads the hosted balance projection with a GET and normalizes it', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Acme',
+      accountType: 'team',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let requestedUrl: string | null = null;
+    let requestedMethod: string | undefined;
+    globalThis.fetch = async (input, init) => {
+      requestedUrl = String(input);
+      requestedMethod = init?.method;
+      return new Response(
+        JSON.stringify({
+          accountId: 'account_1',
+          accountType: 'team',
+          accountName: 'Acme',
+          availableCredits: 42,
+          availableMillicredits: 42000,
+          reservedMillicredits: 1500,
+          subscriptionStatus: 'active',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      const report = await fetchHostedBalance();
+      assert.equal(
+        requestedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/balance',
+      );
+      // A balance read is a pure GET — it must never POST (no reserve, no ledger).
+      assert.equal(requestedMethod, 'GET');
+      assert.deepEqual(report, {
+        accountId: 'account_1',
+        accountType: 'team',
+        accountName: 'Acme',
+        availableCredits: 42,
+        availableMillicredits: 42000,
+        reservedMillicredits: 1500,
+        subscriptionStatus: 'active',
+      });
+      const human = formatHostedBalanceReport(report);
+      assert.match(human, /Available credits: 42/u);
+      assert.match(human, /Acme \(team\)/u);
+      assert.match(human, /Subscription: active/u);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('surfaces a hosted balance error message verbatim', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Acme',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          error: 'PostPlus CLI session is invalid or expired. Sign in again to continue.',
+          code: 'postplus_cli_auth_invalid_session',
+        }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      );
+
+    try {
+      await assert.rejects(
+        () => fetchHostedBalance(),
+        (error: unknown) =>
+          error instanceof Error &&
+          /invalid or expired/u.test(error.message),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('builds runs list query paths from filters and lists with settled cost', async () => {
+    assert.equal(
+      buildRunsListPath(parseRunsListOptions([])),
+      '/api/postplus-cli/hosted/runs',
+    );
+    assert.equal(
+      buildRunsListPath(
+        parseRunsListOptions([
+          '--status',
+          'completed',
+          '--since',
+          '2026-07-01T00:00:00Z',
+          '--limit',
+          '5',
+        ]),
+      ),
+      '/api/postplus-cli/hosted/runs?status=completed&since=2026-07-01T00%3A00%3A00Z&limit=5',
+    );
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Acme',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let requestedUrl: string | null = null;
+    let requestedMethod: string | undefined;
+    globalThis.fetch = async (input, init) => {
+      requestedUrl = String(input);
+      requestedMethod = init?.method;
+      return new Response(
+        JSON.stringify({
+          count: 1,
+          runs: [
+            {
+              id: 'run_1',
+              capability: 'media-generation',
+              status: 'completed',
+              target: 'video-seedance-2-text',
+              createdAt: '2026-07-02T10:00:00Z',
+              updatedAt: '2026-07-02T10:05:00Z',
+              finalizedMillicredits: 3200,
+              reservedMillicredits: 4000,
+              providerStatus: 'succeeded',
+              hasError: false,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      const report = await fetchHostedRunsList(
+        parseRunsListOptions(['--limit', '10']),
+      );
+      assert.equal(
+        requestedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/runs?limit=10',
+      );
+      assert.equal(requestedMethod, 'GET');
+      assert.equal(report.runs.length, 1);
+      const human = formatHostedRunsListReport(report);
+      assert.match(human, /run_1/u);
+      assert.match(human, /3200mc/u);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('reads a single run detail with settled actual cost', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Acme',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let requestedUrl: string | null = null;
+    globalThis.fetch = async (input, init) => {
+      requestedUrl = String(input);
+      assert.equal(init?.method, 'GET');
+      return new Response(
+        JSON.stringify({
+          id: 'run_1',
+          capability: 'media-generation',
+          status: 'completed',
+          target: 'video-seedance-2-text',
+          operationId: 'postplus-cli:media:media-generation:request:abc',
+          providerFamily: 'dashscope',
+          providerModelPath: 'video-generation/seedance',
+          providerStatus: 'succeeded',
+          providerTaskId: 'task_9',
+          providerUrls: { get: 'https://cdn.example.com/x.mp4' },
+          outputs: { data: { id: 'run_1' } },
+          error: null,
+          requestDimensions: { seconds: 5 },
+          createdAt: '2026-07-02T10:00:00Z',
+          updatedAt: '2026-07-02T10:05:00Z',
+          completedAt: '2026-07-02T10:05:00Z',
+          failedAt: null,
+          expiresAt: '2026-07-09T10:00:00Z',
+          finalizedMillicredits: 3200,
+          reservedMillicredits: 4000,
+          hasError: false,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      const report = await fetchHostedRunDetail('run_1');
+      assert.equal(
+        requestedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/runs/run_1',
+      );
+      assert.equal(report.finalizedMillicredits, 3200);
+      const human = formatHostedRunDetailReport(report);
+      assert.match(human, /Settled cost: 3200 millicredits \(actual\)/u);
+      assert.match(human, /This run is terminal\./u);
     } finally {
       globalThis.fetch = originalFetch;
     }

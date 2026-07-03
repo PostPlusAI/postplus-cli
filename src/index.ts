@@ -20,6 +20,10 @@ import {
 import { readCurrentCliVersion } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import {
+  runBalanceCommand,
+  runRunsCommand,
+} from './hosted-account-commands.js';
+import {
   runHostedDomainCommand,
   runMediaFileCommand,
 } from './hosted-domain-commands.js';
@@ -81,6 +85,9 @@ Usage:
   postplus auth validate [--json]
   postplus auth logout [--json]
   postplus doctor [--skill <skill-id>] [--json]
+  postplus balance [--json]
+  postplus runs list [--status <status>] [--since <iso>] [--limit <n>] [--json]
+  postplus runs show <run-id> [--json]
   postplus research schema [--collection-key <key>] [--json]
   postplus research collect <collection-key> --request <input.json> [--skill <skill-id>] [--output <result.json>]
   postplus research scrape <source-key> --request <input-array.json> [--skill <skill-id>] [--output <result.json>]
@@ -545,6 +552,12 @@ async function main(): Promise<void> {
     }
     case 'doctor':
       process.exitCode = await runDoctor(parseDiagnosticOptions(rest));
+      return;
+    case 'balance':
+      process.exitCode = await runBalanceCommand(rest);
+      return;
+    case 'runs':
+      process.exitCode = await runRunsCommand(rest);
       return;
     // The bin path never passes the in-process context, so these always resolve
     // to the numeric exit code (the `unknown` return is the hosted-lib path only).
