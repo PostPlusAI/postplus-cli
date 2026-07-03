@@ -4864,6 +4864,69 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('emits a literal resume command on an async-pending media submit in both human and --json modes', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const runSubmit = async (extraArgs: string[], responseBody: unknown) => {
+      const originalFetch = globalThis.fetch;
+      const originalStderrWrite = process.stderr.write.bind(process.stderr);
+      const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+      let stderrText = '';
+      globalThis.fetch = async () =>
+        new Response(JSON.stringify(responseBody), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      process.stderr.write = ((chunk: unknown) => {
+        stderrText += String(chunk);
+        return true;
+      }) as typeof process.stderr.write;
+      process.stdout.write = (() => true) as typeof process.stdout.write;
+      try {
+        const result = await runHostedDomainCommand('media', [
+          'transcribe',
+          'transcription',
+          '--audio',
+          'https://example.com/a.mp3',
+          '--duration-seconds',
+          '30',
+          ...extraArgs,
+        ]);
+        assert.equal(result, 0);
+        return stderrText;
+      } finally {
+        globalThis.fetch = originalFetch;
+        process.stderr.write = originalStderrWrite;
+        process.stdout.write = originalStdoutWrite;
+      }
+    };
+
+    const pending = { output: { data: { id: 'run_1', status: 'processing' } } };
+
+    // Human mode: the run id is already in the stdout payload; the LITERAL resume
+    // command is emitted to stderr so it is never lost.
+    const humanStderr = await runSubmit([], pending);
+    assert.match(humanStderr, /postplus media poll --handle run_1/u);
+
+    // --json mode: same literal resume command on stderr (stdout stays pure JSON).
+    const jsonStderr = await runSubmit(['--json'], pending);
+    assert.match(jsonStderr, /postplus media poll --handle run_1/u);
+
+    // A terminal payload has nothing to resume — stay silent.
+    const terminalStderr = await runSubmit([], {
+      output: { data: { id: 'run_1', status: 'completed' } },
+    });
+    assert.doesNotMatch(terminalStderr, /resume/iu);
+  });
+
   it('polls a pending media run by handle against /hosted/capability', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);

@@ -763,6 +763,7 @@ function submitMediaGenerationRequest(params: {
       errorInputLabel: params.errorInputLabel,
       json: params.json,
       outputPath: params.outputPath,
+      asyncResume: extractMediaPollResume,
     },
     params.context,
   );
@@ -1185,6 +1186,7 @@ async function runResearchCollect(
       errorInputLabel,
       json: flags.booleans.has('json'),
       outputPath,
+      asyncResume: (payload) => extractResearchResume(payload, 'collect'),
     },
     context,
   );
@@ -1310,6 +1312,7 @@ async function runResearchScrape(
       errorInputLabel,
       json: flags.booleans.has('json'),
       outputPath,
+      asyncResume: (payload) => extractResearchResume(payload, 'scrape'),
     },
     context,
   );
@@ -1493,6 +1496,13 @@ async function runHostedCommand(input: {
   errorInputLabel: string;
   json: boolean;
   outputPath: string | null;
+  // Fail-soft-to-resumable (plan E): when an async submit returns a still-pending
+  // run, the call site provides a closure that maps the payload to the LITERAL
+  // resume command (`postplus media poll --handle <id>` / `research <verb>
+  // --run-handle <h>`). We emit it to stderr — in BOTH human and --json modes, so
+  // the run id (already in the stdout payload) is never lost — without touching
+  // the server payload on stdout. Returns null for a terminal/non-async payload.
+  asyncResume?: (payload: unknown) => string | null;
 }): Promise<number> {
   let payload: unknown;
   try {
@@ -1527,6 +1537,12 @@ async function runHostedCommand(input: {
   }
 
   await writeResult(payload, input.outputPath, input.json);
+
+  const resumeCommand = input.asyncResume?.(payload) ?? null;
+  if (resumeCommand) {
+    process.stderr.write(`Async run pending — resume: ${resumeCommand}\n`);
+  }
+
   return 0;
 }
 
@@ -1544,6 +1560,7 @@ async function dispatchHostedCommand(
     errorInputLabel: string;
     json: boolean;
     outputPath: string | null;
+    asyncResume?: (payload: unknown) => string | null;
   },
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
@@ -1551,6 +1568,72 @@ async function dispatchHostedCommand(
     return runHostedCommand(input);
   }
   return input.request();
+}
+
+// Resume-command extractors (plan E). A media-generation submit returns the run
+// handle as `output.data.id`; a research collect/scrape launch returns it as a
+// top-level `runHandle`. Both may also come back already terminal (small/sync
+// jobs), in which case there is nothing to resume and we stay silent.
+const TERMINAL_RUN_STATUSES = new Set([
+  'completed',
+  'succeeded',
+  'success',
+  'failed',
+  'error',
+  'expired',
+  'canceled',
+  'cancelled',
+]);
+
+function isTerminalRunStatus(status: string): boolean {
+  return TERMINAL_RUN_STATUSES.has(status.toLowerCase());
+}
+
+function extractMediaPollResume(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+  const output = (payload as Record<string, unknown>).output;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    return null;
+  }
+  const data = (output as Record<string, unknown>).data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return null;
+  }
+  const record = data as Record<string, unknown>;
+  const id =
+    typeof record.id === 'string' && record.id.trim() ? record.id : null;
+  if (!id) {
+    return null;
+  }
+  const status = typeof record.status === 'string' ? record.status : null;
+  if (status && isTerminalRunStatus(status)) {
+    return null;
+  }
+  return `postplus media poll --handle ${id}`;
+}
+
+function extractResearchResume(
+  payload: unknown,
+  verb: 'collect' | 'scrape',
+): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const runHandle =
+    typeof record.runHandle === 'string' && record.runHandle.trim()
+      ? record.runHandle
+      : null;
+  if (!runHandle) {
+    return null;
+  }
+  const status = typeof record.status === 'string' ? record.status : null;
+  if (status && isTerminalRunStatus(status)) {
+    return null;
+  }
+  return `postplus research ${verb} --run-handle ${runHandle}`;
 }
 
 async function writeQuoteConfirmationChallenge(
