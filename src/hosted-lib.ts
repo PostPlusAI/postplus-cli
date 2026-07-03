@@ -24,6 +24,7 @@
 import type { AuthedCloudRequestAuth } from './authed-cloud-request.js';
 import {
   type HostedRequestContext,
+  postHostedCapabilityEnvelope,
   runHostedDomainCommand,
   runMediaFileCommand,
 } from './hosted-domain-commands.js';
@@ -80,4 +81,37 @@ export async function runHostedRequest(
   }
 
   return runHostedDomainCommand(input.domain, input.args, context);
+}
+
+export type RunHostedCapabilityEnvelopeInput = {
+  /**
+   * The raw `/api/postplus-cli/hosted/capability` request body (capability,
+   * operation, operationId, verb fields). The Web boundary owns validation —
+   * this entry is a pure transport for verb families with no CLI grammar
+   * (e.g. the internal `workflow` verbs the eve-agent workspace tools drive).
+   */
+  body: Record<string, unknown>;
+  /** The account's fresh session auth, supplied by the trusted host runtime. */
+  auth: AuthedCloudRequestAuth;
+  /** The skills release id stamped into `x-postplus-skills-release-id`. */
+  skillsReleaseId?: string;
+};
+
+/**
+ * Posts a hosted capability envelope in-process and returns the parsed payload.
+ * Shares `postHostedJson` with every bin verb, so headers and the structured
+ * HostedProductRequestError / quote-confirmation error behavior are identical.
+ */
+export async function runHostedCapabilityEnvelope(
+  input: RunHostedCapabilityEnvelopeInput,
+): Promise<unknown> {
+  return postHostedCapabilityEnvelope({
+    body: input.body,
+    context: {
+      auth: input.auth,
+      ...(input.skillsReleaseId !== undefined
+        ? { skillsReleaseId: input.skillsReleaseId }
+        : {}),
+    },
+  });
 }

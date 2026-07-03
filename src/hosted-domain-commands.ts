@@ -534,6 +534,27 @@ export async function runMediaFileCommand(
   return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
 }
 
+/**
+ * In-process-only capability envelope POST (hosted-lib path, no bin verb).
+ * A trusted host runtime (eve-agent) posts a raw `/hosted/capability` body —
+ * e.g. the INTERNAL `workflow` verb family, which deliberately has no CLI
+ * command surface — through the SAME transport core the bin verbs use
+ * (`postHostedJson`: canonical headers, structured HostedProductRequestError,
+ * quote-confirmation error thrown verbatim). Requires the injected context
+ * auth; there is intentionally no disk-config fallback on this entry.
+ */
+export async function postHostedCapabilityEnvelope(input: {
+  body: Record<string, unknown>;
+  context: HostedRequestContext;
+}): Promise<unknown> {
+  return postHostedJson({
+    body: input.body,
+    context: input.context,
+    pathName: '/api/postplus-cli/hosted/capability',
+    skillName: null,
+  });
+}
+
 async function runMediaFileUpload(
   args: string[],
   context: HostedRequestContext | undefined,
