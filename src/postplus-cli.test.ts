@@ -40,6 +40,8 @@ import {
   formatHostedRunsListReport,
   parseRunsListOptions,
   buildRunsListPath,
+  runBalanceCommand,
+  runRunsCommand,
 } from './hosted-account-commands.js';
 import {
   runHostedDomainCommand,
@@ -6346,6 +6348,107 @@ describe('account read-only commands', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('emits machine-readable JSON on --json for every hosted read command (F coverage)', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Acme',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes('/hosted/balance')) {
+        return new Response(
+          JSON.stringify({
+            accountId: 'account_1',
+            accountType: 'team',
+            accountName: 'Acme',
+            availableCredits: 10,
+            availableMillicredits: 10000,
+            reservedMillicredits: 0,
+            subscriptionStatus: 'active',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.includes('/hosted/runs/')) {
+        return new Response(
+          JSON.stringify({
+            id: 'run_1',
+            capability: 'media-generation',
+            status: 'completed',
+            finalizedMillicredits: 100,
+            reservedMillicredits: 100,
+            createdAt: '2026-07-02T10:00:00Z',
+            updatedAt: '2026-07-02T10:05:00Z',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ count: 0, runs: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    // Capture stdout for each --json invocation and assert it is valid JSON, so
+    // every hosted read command is machine-readable (discover→inspect→execute).
+    const captureJsonStdout = async (
+      run: () => Promise<number>,
+    ): Promise<unknown> => {
+      const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+      let stdoutText = '';
+      process.stdout.write = ((chunk: unknown) => {
+        stdoutText += String(chunk);
+        return true;
+      }) as typeof process.stdout.write;
+      try {
+        const exitCode = await run();
+        assert.equal(exitCode, 0);
+      } finally {
+        process.stdout.write = originalStdoutWrite;
+      }
+      return JSON.parse(stdoutText);
+    };
+
+    try {
+      const balance = await captureJsonStdout(() =>
+        runBalanceCommand(['--json']),
+      );
+      assert.equal((balance as { accountId: string }).accountId, 'account_1');
+
+      const runsList = await captureJsonStdout(() =>
+        runRunsCommand(['list', '--json']),
+      );
+      assert.ok(Array.isArray((runsList as { runs: unknown[] }).runs));
+
+      const runDetail = await captureJsonStdout(() =>
+        runRunsCommand(['show', 'run_1', '--json']),
+      );
+      assert.equal((runDetail as { id: string }).id, 'run_1');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('teaches the discover→inspect→execute loop in the media schema notes (F)', () => {
+    const report = buildHostedRequestSchemaReport({ domain: 'media' });
+    const notes = (report as { notes: string[] }).notes.join('\n');
+    // discover: the schema lists selectable endpoints; inspect: --help / example;
+    // execute + price: media <verb> and the no-charge estimate.
+    assert.match(notes, /--help/u);
+    assert.match(notes, /example\.command/u);
+    assert.match(notes, /estimate/u);
+    assert.ok(
+      Array.isArray((report as { endpointKeys?: string[] }).endpointKeys),
+    );
   });
 });
 
