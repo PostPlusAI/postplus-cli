@@ -5857,6 +5857,13 @@ describe('hosted domain commands', () => {
             String((error as Error).message),
             /--quote-confirmation-token <token>/u,
           );
+          // The rerun guidance must pin the challenged operation id: the token is
+          // server-signed against it, and the operationId flag otherwise defaults
+          // to a fresh randomUUID() that would no longer match the token.
+          assert.match(
+            String((error as Error).message),
+            /--hosted-operation-id operation-1 --quote-confirmation-token <token>/u,
+          );
           return true;
         },
       );
