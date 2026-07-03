@@ -150,6 +150,15 @@ export async function runHostedDomainCommand(
     return runMediaPoll(rest, context);
   }
 
+  // Quote-only dry-run price: `postplus media estimate <endpoint-key> ...`. Takes
+  // the SAME flags/--request as `media create/transcribe <endpoint-key>`, builds
+  // the SAME canonical input, but posts to the estimate boundary which prices
+  // without reserving. Checked before the verb dispatch (estimate is not a
+  // manifest verb — it is a hand-coded pricing branch, like poll).
+  if (domain === 'media' && subcommand === 'estimate') {
+    return runMediaEstimate(rest, context);
+  }
+
   if (
     domain === 'media' &&
     subcommand &&
@@ -797,6 +806,196 @@ async function runMediaPoll(
     },
     context,
   );
+}
+
+// Resolve a media-generation endpoint by key across ALL media verbs (create /
+// transcribe / …). `media estimate <endpoint-key>` addresses the endpoint
+// directly (no verb positional), so it needs the endpoint's surface + fields
+// without knowing which verb owns it. Returns null for an unknown key or a
+// non-media-generation target (e.g. the video-analysis model).
+function findMediaGenerationEndpointTarget(
+  endpointKey: string,
+): ResolvedVerbTarget | null {
+  for (const targets of MEDIA_VERB_ENDPOINTS.values()) {
+    const resolved = targets.get(endpointKey);
+    if (resolved && resolved.endpoint) {
+      return resolved;
+    }
+  }
+  return null;
+}
+
+// `postplus media estimate <endpoint-key> --<same flags/--request as create>`.
+// Prices a media-generation request WITHOUT reserving credit or writing the
+// ledger: it builds the SAME canonical input the real submit builds (shared
+// buildMediaVerbInput / resolveRequestBody + assertModelledFieldValuesInRange),
+// then posts `{capability, endpointKey, input}` to the estimate boundary. The
+// dry-run flags --hosted-operation-id / --quote-confirmation-token are rejected —
+// they belong only to a spend submit.
+async function runMediaEstimate(
+  args: string[],
+  context: HostedRequestContext | undefined,
+): Promise<number | unknown> {
+  const [endpointKey, ...rest] = args;
+  if (!endpointKey || endpointKey.startsWith('--')) {
+    throw new Error(
+      'postplus media estimate requires an endpoint key. Run `postplus media schema --json` to list endpoints.',
+    );
+  }
+
+  const resolved = findMediaGenerationEndpointTarget(endpointKey);
+  if (!resolved) {
+    throw new Error(
+      `Unknown media estimate endpoint ${endpointKey}. Run \`postplus media schema --json\` to list media-generation endpoints.`,
+    );
+  }
+
+  if (rest.some(isHelp)) {
+    process.stdout.write(
+      `PostPlus CLI - media estimate ${endpointKey}\n\n  Quote-only dry run (no reserve, no ledger write). Takes the same flags/--request as media create ${endpointKey}.\n  Usage:\n    postplus media estimate ${endpointKey} ${resolved.surface === 'flags' ? '--<intent/default flags>' : '--request <input.json>'} [--json] [--output <result.json>]\n`,
+    );
+    return 0;
+  }
+
+  const endpoint = requireResolvedEndpoint(resolved, 'estimate', endpointKey);
+
+  const { input, json, outputPath, errorInputLabel } =
+    resolved.surface === 'flags'
+      ? buildEstimateFlagsInput(endpoint, endpointKey, rest)
+      : await buildEstimateRequestJsonInput(endpoint, endpointKey, rest, context);
+
+  // Same schema-driven early validation the submit path runs, so an out-of-enum
+  // value fast-fails locally before the estimate call — and the estimate prices
+  // exactly the request a subsequent submit would send.
+  assertModelledFieldValuesInRange(endpointKey, endpoint.fields, input);
+
+  return dispatchHostedCommand(
+    {
+      request: () =>
+        postHostedJson({
+          body: {
+            capability: 'media-generation',
+            endpointKey,
+            input,
+          },
+          pathName: '/api/postplus-cli/hosted/estimate',
+          skillName: resolved.skill,
+          context,
+        }),
+      errorInputLabel,
+      json,
+      outputPath,
+    },
+    context,
+  );
+}
+
+// Flags-surface input for estimate: identical flag→field mapping to the submit
+// path (runMediaVerbFlags), reusing the shared buildMediaVerbInput. Rejects the
+// spend-only control flags (operation id / quote-confirmation token).
+function buildEstimateFlagsInput(
+  endpoint: ManifestEndpoint,
+  endpointKey: string,
+  args: string[],
+): {
+  input: Record<string, unknown>;
+  json: boolean;
+  outputPath: string | null;
+  errorInputLabel: string;
+} {
+  const fields = endpoint.fields;
+  const flagToField = new Map<string, ManifestField>();
+  const booleanKeys = new Set<string>(['json']);
+  const arrayKeys = new Set<string>();
+
+  for (const field of fields) {
+    if (!field.flag) {
+      continue;
+    }
+    const key = field.flag.replace(/^--/u, '');
+    flagToField.set(key, field);
+    if (field.type === 'boolean') {
+      booleanKeys.add(key);
+    }
+    if (field.repeatable) {
+      arrayKeys.add(key);
+    }
+  }
+
+  const flags = parseFlags(args, booleanKeys, arrayKeys);
+  const controlKeys = new Set(['json', 'output', 'skill']);
+
+  for (const key of [
+    ...flags.values.keys(),
+    ...flags.booleans,
+    ...flags.arrays.keys(),
+  ]) {
+    if (!flagToField.has(key) && !controlKeys.has(key)) {
+      throw new Error(`Unknown option for media estimate: --${key}.`);
+    }
+  }
+
+  const input = buildMediaVerbInput({
+    endpointKey,
+    fields,
+    flags,
+    verb: 'estimate',
+  });
+
+  return {
+    input,
+    json: flags.booleans.has('json'),
+    outputPath: flags.values.get('output') ?? null,
+    errorInputLabel: `media-estimate-${endpointKey}`,
+  };
+}
+
+// Request-json-surface input for estimate: reads the same nested envelope the
+// submit path reads from --request, rejecting runner-managed fields.
+async function buildEstimateRequestJsonInput(
+  endpoint: ManifestEndpoint,
+  endpointKey: string,
+  args: string[],
+  context: HostedRequestContext | undefined,
+): Promise<{
+  input: Record<string, unknown>;
+  json: boolean;
+  outputPath: string | null;
+  errorInputLabel: string;
+}> {
+  const flags = parseFlags(args, new Set(['json']));
+  const allowedKeys = new Set(['json', 'output', 'request', 'skill']);
+  for (const key of [...flags.values.keys(), ...flags.booleans]) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`Unknown option for media estimate: --${key}.`);
+    }
+  }
+
+  const { body: raw, errorInputLabel } = await resolveRequestBody(
+    context,
+    flags,
+  );
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(
+      `media estimate ${endpointKey} --request must be a JSON object of media-generation input.`,
+    );
+  }
+  const input = raw as Record<string, unknown>;
+
+  for (const field of endpoint.fields) {
+    if (field.class === 'runner-managed' && Object.hasOwn(input, field.name)) {
+      throw new Error(
+        `media estimate ${endpointKey} input must not include runner-managed field "${field.name}"; the CLI mints or derives it.`,
+      );
+    }
+  }
+
+  return {
+    input,
+    json: flags.booleans.has('json'),
+    outputPath: flags.values.get('output') ?? null,
+    errorInputLabel,
+  };
 }
 
 function buildMediaVerbInput(input: {
@@ -1523,6 +1722,7 @@ function printDomainVerbHelp(domain: Exclude<HostedDomain, 'research'>): void {
               `  postplus media ${verb} <endpoint-key> --<intent/default flags> [--json] [--output <result.json>]\n`,
           )
           .join('') +
+        '  postplus media estimate <endpoint-key> --<same flags/--request as create> [--json]\n' +
         '  postplus media poll --handle <run-id> [--json] [--output <result.json>]\n'
       : '  postplus publish <operation> --request <input.json> [--json] [--output <result.json>]\n';
 

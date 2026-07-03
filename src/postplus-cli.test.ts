@@ -4687,6 +4687,113 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('estimates a flags-surface media request against /hosted/estimate with the same input and no spend fields', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedUrl: string | null = null;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      postedUrl = String(input);
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          estimateOnly: true,
+          endpointKey: 'transcription',
+          estimatedCredits: 2,
+          estimatedMillicredits: 2000,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'estimate',
+        'transcription',
+        '--audio',
+        'https://example.com/a.mp3',
+        '--duration-seconds',
+        '30',
+        '--enable-timestamps',
+      ]);
+      assert.equal(result, 0);
+      assert.equal(
+        postedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/estimate',
+      );
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.capability, 'media-generation');
+      assert.equal(body.endpointKey, 'transcription');
+      // The estimate posts the SAME canonical input a create submit would post.
+      assert.deepEqual(body.input, {
+        audio: 'https://example.com/a.mp3',
+        duration_seconds: 30,
+        enable_timestamps: true,
+        language: 'auto',
+        task: 'transcribe',
+      });
+      // A dry-run estimate carries NO spend fields: no operationId, no
+      // quote-confirmation token, no operation verb, no requestDimensions.
+      assert.equal(Object.hasOwn(body, 'operationId'), false);
+      assert.equal(Object.hasOwn(body, 'operation'), false);
+      assert.equal(Object.hasOwn(body, 'quoteConfirmationToken'), false);
+      assert.equal(Object.hasOwn(body, 'requestDimensions'), false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects spend-only flags and unknown endpoints on media estimate before any call', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'estimate',
+            'transcription',
+            '--audio',
+            'https://example.com/a.mp3',
+            '--duration-seconds',
+            '30',
+            '--quote-confirmation-token',
+            'tok',
+          ]),
+        (error: unknown) =>
+          error instanceof Error &&
+          /Unknown option for media estimate: --quote-confirmation-token/u.test(
+            error.message,
+          ),
+      );
+      await assert.rejects(
+        () => runHostedDomainCommand('media', ['estimate', 'not-an-endpoint']),
+        (error: unknown) =>
+          error instanceof Error &&
+          /Unknown media estimate endpoint not-an-endpoint/u.test(error.message),
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('polls a pending media run by handle against /hosted/capability', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);

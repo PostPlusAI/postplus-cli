@@ -93,6 +93,7 @@ Usage:
   postplus research scrape <source-key> --request <input-array.json> [--skill <skill-id>] [--output <result.json>]
   postplus media schema [--endpoint <endpoint-key>] [--json]
   postplus media <verb> <endpoint-key> --request <input.json> | --<flags> [--output <result.json>]
+  postplus media estimate <endpoint-key> --request <input.json> | --<flags> [--json]
   postplus media poll --handle <run-id> [--json] [--output <result.json>]
   postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--output <result.json>]
   postplus publish schema [--json]
