@@ -1539,7 +1539,13 @@ async function runHostedCommand(input: {
           error.message,
           `Quote confirmation challenge: ${challengePath}`,
           `Confirm: postplus quote confirm --json --challenge-file "${challengePath}"`,
-          'Then rerun the hosted command with --quote-confirmation-token <token>.',
+          // The confirmation token is server-signed against the challenged
+          // operation id. Re-running without --hosted-operation-id mints a fresh
+          // random operation id (see the operationId flag default), so the token
+          // would no longer match and the confirmation fails. The rerun MUST pin
+          // the same operation id the token is bound to.
+          'Then rerun the hosted command with the same operation id the token is bound to:',
+          `  --hosted-operation-id ${error.challenge.operationId} --quote-confirmation-token <token>`,
         ].join('\n'),
       );
     }
