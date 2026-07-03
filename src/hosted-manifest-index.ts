@@ -205,13 +205,29 @@ export function manifestTargetKeys(
 // the key is not a modelled media-generation endpoint. Used by the schema report
 // and per-endpoint `--help` to read the field-level contract.
 export function findMediaEndpoint(endpointKey: string): ManifestEndpoint | null {
+  return findMediaGenerationBinding(endpointKey)?.endpoint ?? null;
+}
+
+// The verb + input surface that owns a media-generation endpoint. The schema
+// report needs the verb to synthesize a copy-pasteable `postplus media <verb>
+// <endpoint-key> …` example, and the surface to choose the flags vs --request
+// form. Returns null for an unknown key.
+export type MediaGenerationBinding = {
+  verb: string;
+  surface: 'flags' | 'request-json';
+  endpoint: ManifestEndpoint;
+};
+
+export function findMediaGenerationBinding(
+  endpointKey: string,
+): MediaGenerationBinding | null {
   for (const entry of allManifestEntries()) {
     if (entry.domain !== 'media' || entry.capability !== 'media-generation') {
       continue;
     }
     for (const endpoint of entry.endpoints ?? []) {
       if (endpoint.endpointKey === endpointKey) {
-        return endpoint;
+        return { verb: entry.verb, surface: entry.surface, endpoint };
       }
     }
   }

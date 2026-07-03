@@ -32,9 +32,22 @@ import {
 } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import {
+  fetchHostedBalance,
+  fetchHostedRunDetail,
+  fetchHostedRunsList,
+  formatHostedBalanceReport,
+  formatHostedRunDetailReport,
+  formatHostedRunsListReport,
+  parseRunsListOptions,
+  buildRunsListPath,
+  runBalanceCommand,
+  runRunsCommand,
+} from './hosted-account-commands.js';
+import {
   runHostedDomainCommand,
   runMediaFileCommand,
 } from './hosted-domain-commands.js';
+import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import { runHostedRequest } from './hosted-lib.js';
 import { generateLocalDependencyReport } from './local-dependencies.js';
 import {
@@ -4166,6 +4179,75 @@ describe('hosted domain commands', () => {
     assert.equal(byName.has('timestamp_granularities'), false);
   });
 
+  it('synthesizes a copy-pasteable example per media endpoint (required ∪ prompt, enums at first value)', () => {
+    for (const endpointKey of ['transcription', 'video-seedance-2-text']) {
+      const report = buildHostedRequestSchemaReport({
+        domain: 'media',
+        endpointKey,
+      });
+      const endpoints = report.endpoints as Array<{
+        endpointKey: string;
+        fields: Array<{
+          name: string;
+          kind: string;
+          type: string;
+          flag: string | null;
+          repeatable?: boolean;
+          enumValues?: string[];
+          required: boolean;
+        }>;
+        example?: {
+          command: string;
+          request: Record<string, unknown>;
+          estimate: string;
+        };
+      }>;
+      const endpoint = endpoints.find((e) => e.endpointKey === endpointKey);
+      assert.ok(endpoint, `endpoint ${endpointKey} present`);
+      const example = endpoint.example;
+      assert.ok(example, `example present for ${endpointKey}`);
+
+      // Example field set = (required ∪ {prompt}) minus runner-managed.
+      const expectedFields = endpoint.fields.filter(
+        (field) =>
+          field.kind !== 'runner-managed' &&
+          (field.required || field.name === 'prompt'),
+      );
+      assert.deepEqual(
+        Object.keys(example.request).sort(),
+        expectedFields.map((field) => field.name).sort(),
+      );
+
+      // No runner-managed field is ever synthesized into the example body.
+      for (const field of endpoint.fields) {
+        if (field.kind === 'runner-managed') {
+          assert.equal(Object.hasOwn(example.request, field.name), false);
+        }
+      }
+
+      // Every enum field in the example takes its FIRST value.
+      for (const field of expectedFields) {
+        if (field.enumValues && field.enumValues.length > 0) {
+          const expected = field.repeatable
+            ? [field.enumValues[0]]
+            : field.enumValues[0];
+          assert.deepEqual(example.request[field.name], expected);
+        }
+      }
+
+      // The command is copy-pasteable in the endpoint's own surface form, and the
+      // estimate line prices the same request with no charge.
+      assert.match(
+        example.command,
+        new RegExp(`^postplus media \\w+ ${endpointKey}`, 'u'),
+      );
+      assert.match(
+        example.estimate,
+        new RegExp(`^postplus media estimate ${endpointKey}`, 'u'),
+      );
+    }
+  });
+
   it('rejects unknown hosted media schema endpoints', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
@@ -4675,6 +4757,176 @@ describe('hosted domain commands', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('estimates a flags-surface media request against /hosted/estimate with the same input and no spend fields', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedUrl: string | null = null;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (input, init) => {
+      postedUrl = String(input);
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          estimateOnly: true,
+          endpointKey: 'transcription',
+          estimatedCredits: 2,
+          estimatedMillicredits: 2000,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'estimate',
+        'transcription',
+        '--audio',
+        'https://example.com/a.mp3',
+        '--duration-seconds',
+        '30',
+        '--enable-timestamps',
+      ]);
+      assert.equal(result, 0);
+      assert.equal(
+        postedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/estimate',
+      );
+      const body = postedBody as Record<string, unknown>;
+      assert.equal(body.capability, 'media-generation');
+      assert.equal(body.endpointKey, 'transcription');
+      // The estimate posts the SAME canonical input a create submit would post.
+      assert.deepEqual(body.input, {
+        audio: 'https://example.com/a.mp3',
+        duration_seconds: 30,
+        enable_timestamps: true,
+        language: 'auto',
+        task: 'transcribe',
+      });
+      // A dry-run estimate carries NO spend fields: no operationId, no
+      // quote-confirmation token, no operation verb, no requestDimensions.
+      assert.equal(Object.hasOwn(body, 'operationId'), false);
+      assert.equal(Object.hasOwn(body, 'operation'), false);
+      assert.equal(Object.hasOwn(body, 'quoteConfirmationToken'), false);
+      assert.equal(Object.hasOwn(body, 'requestDimensions'), false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects spend-only flags and unknown endpoints on media estimate before any call', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'estimate',
+            'transcription',
+            '--audio',
+            'https://example.com/a.mp3',
+            '--duration-seconds',
+            '30',
+            '--quote-confirmation-token',
+            'tok',
+          ]),
+        (error: unknown) =>
+          error instanceof Error &&
+          /Unknown option for media estimate: --quote-confirmation-token/u.test(
+            error.message,
+          ),
+      );
+      await assert.rejects(
+        () => runHostedDomainCommand('media', ['estimate', 'not-an-endpoint']),
+        (error: unknown) =>
+          error instanceof Error &&
+          /Unknown media estimate endpoint not-an-endpoint/u.test(error.message),
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('emits a literal resume command on an async-pending media submit in both human and --json modes', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const runSubmit = async (extraArgs: string[], responseBody: unknown) => {
+      const originalFetch = globalThis.fetch;
+      const originalStderrWrite = process.stderr.write.bind(process.stderr);
+      const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+      let stderrText = '';
+      globalThis.fetch = async () =>
+        new Response(JSON.stringify(responseBody), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      process.stderr.write = ((chunk: unknown) => {
+        stderrText += String(chunk);
+        return true;
+      }) as typeof process.stderr.write;
+      process.stdout.write = (() => true) as typeof process.stdout.write;
+      try {
+        const result = await runHostedDomainCommand('media', [
+          'transcribe',
+          'transcription',
+          '--audio',
+          'https://example.com/a.mp3',
+          '--duration-seconds',
+          '30',
+          ...extraArgs,
+        ]);
+        assert.equal(result, 0);
+        return stderrText;
+      } finally {
+        globalThis.fetch = originalFetch;
+        process.stderr.write = originalStderrWrite;
+        process.stdout.write = originalStdoutWrite;
+      }
+    };
+
+    const pending = { output: { data: { id: 'run_1', status: 'processing' } } };
+
+    // Human mode: the run id is already in the stdout payload; the LITERAL resume
+    // command is emitted to stderr so it is never lost.
+    const humanStderr = await runSubmit([], pending);
+    assert.match(humanStderr, /postplus media poll --handle run_1/u);
+
+    // --json mode: same literal resume command on stderr (stdout stays pure JSON).
+    const jsonStderr = await runSubmit(['--json'], pending);
+    assert.match(jsonStderr, /postplus media poll --handle run_1/u);
+
+    // A terminal payload has nothing to resume — stay silent.
+    const terminalStderr = await runSubmit([], {
+      output: { data: { id: 'run_1', status: 'completed' } },
+    });
+    assert.doesNotMatch(terminalStderr, /resume/iu);
   });
 
   it('polls a pending media run by handle against /hosted/capability', async () => {
@@ -5869,6 +6121,334 @@ describe('hosted domain commands', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe('account read-only commands', () => {
+  it('reads the hosted balance projection with a GET and normalizes it', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Acme',
+      accountType: 'team',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let requestedUrl: string | null = null;
+    let requestedMethod: string | undefined;
+    globalThis.fetch = async (input, init) => {
+      requestedUrl = String(input);
+      requestedMethod = init?.method;
+      return new Response(
+        JSON.stringify({
+          accountId: 'account_1',
+          accountType: 'team',
+          accountName: 'Acme',
+          availableCredits: 42,
+          availableMillicredits: 42000,
+          reservedMillicredits: 1500,
+          subscriptionStatus: 'active',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      const report = await fetchHostedBalance();
+      assert.equal(
+        requestedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/balance',
+      );
+      // A balance read is a pure GET — it must never POST (no reserve, no ledger).
+      assert.equal(requestedMethod, 'GET');
+      assert.deepEqual(report, {
+        accountId: 'account_1',
+        accountType: 'team',
+        accountName: 'Acme',
+        availableCredits: 42,
+        availableMillicredits: 42000,
+        reservedMillicredits: 1500,
+        subscriptionStatus: 'active',
+      });
+      const human = formatHostedBalanceReport(report);
+      assert.match(human, /Available credits: 42/u);
+      assert.match(human, /Acme \(team\)/u);
+      assert.match(human, /Subscription: active/u);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('surfaces a hosted balance error message verbatim', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Acme',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          error: 'PostPlus CLI session is invalid or expired. Sign in again to continue.',
+          code: 'postplus_cli_auth_invalid_session',
+        }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      );
+
+    try {
+      await assert.rejects(
+        () => fetchHostedBalance(),
+        (error: unknown) =>
+          error instanceof Error &&
+          /invalid or expired/u.test(error.message),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('builds runs list query paths from filters and lists with settled cost', async () => {
+    assert.equal(
+      buildRunsListPath(parseRunsListOptions([])),
+      '/api/postplus-cli/hosted/runs',
+    );
+    assert.equal(
+      buildRunsListPath(
+        parseRunsListOptions([
+          '--status',
+          'completed',
+          '--since',
+          '2026-07-01T00:00:00Z',
+          '--limit',
+          '5',
+        ]),
+      ),
+      '/api/postplus-cli/hosted/runs?status=completed&since=2026-07-01T00%3A00%3A00Z&limit=5',
+    );
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Acme',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let requestedUrl: string | null = null;
+    let requestedMethod: string | undefined;
+    globalThis.fetch = async (input, init) => {
+      requestedUrl = String(input);
+      requestedMethod = init?.method;
+      return new Response(
+        JSON.stringify({
+          count: 1,
+          runs: [
+            {
+              id: 'run_1',
+              capability: 'media-generation',
+              status: 'completed',
+              target: 'video-seedance-2-text',
+              createdAt: '2026-07-02T10:00:00Z',
+              updatedAt: '2026-07-02T10:05:00Z',
+              finalizedMillicredits: 3200,
+              reservedMillicredits: 4000,
+              providerStatus: 'succeeded',
+              hasError: false,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      const report = await fetchHostedRunsList(
+        parseRunsListOptions(['--limit', '10']),
+      );
+      assert.equal(
+        requestedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/runs?limit=10',
+      );
+      assert.equal(requestedMethod, 'GET');
+      assert.equal(report.runs.length, 1);
+      const human = formatHostedRunsListReport(report);
+      assert.match(human, /run_1/u);
+      assert.match(human, /3200mc/u);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('reads a single run detail with settled actual cost', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Acme',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let requestedUrl: string | null = null;
+    globalThis.fetch = async (input, init) => {
+      requestedUrl = String(input);
+      assert.equal(init?.method, 'GET');
+      return new Response(
+        JSON.stringify({
+          id: 'run_1',
+          capability: 'media-generation',
+          status: 'completed',
+          target: 'video-seedance-2-text',
+          operationId: 'postplus-cli:media:media-generation:request:abc',
+          providerFamily: 'dashscope',
+          providerModelPath: 'video-generation/seedance',
+          providerStatus: 'succeeded',
+          providerTaskId: 'task_9',
+          providerUrls: { get: 'https://cdn.example.com/x.mp4' },
+          outputs: { data: { id: 'run_1' } },
+          error: null,
+          requestDimensions: { seconds: 5 },
+          createdAt: '2026-07-02T10:00:00Z',
+          updatedAt: '2026-07-02T10:05:00Z',
+          completedAt: '2026-07-02T10:05:00Z',
+          failedAt: null,
+          expiresAt: '2026-07-09T10:00:00Z',
+          finalizedMillicredits: 3200,
+          reservedMillicredits: 4000,
+          hasError: false,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      const report = await fetchHostedRunDetail('run_1');
+      assert.equal(
+        requestedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/runs/run_1',
+      );
+      assert.equal(report.finalizedMillicredits, 3200);
+      const human = formatHostedRunDetailReport(report);
+      assert.match(human, /Settled cost: 3200 millicredits \(actual\)/u);
+      assert.match(human, /This run is terminal\./u);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('emits machine-readable JSON on --json for every hosted read command (F coverage)', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Acme',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes('/hosted/balance')) {
+        return new Response(
+          JSON.stringify({
+            accountId: 'account_1',
+            accountType: 'team',
+            accountName: 'Acme',
+            availableCredits: 10,
+            availableMillicredits: 10000,
+            reservedMillicredits: 0,
+            subscriptionStatus: 'active',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.includes('/hosted/runs/')) {
+        return new Response(
+          JSON.stringify({
+            id: 'run_1',
+            capability: 'media-generation',
+            status: 'completed',
+            finalizedMillicredits: 100,
+            reservedMillicredits: 100,
+            createdAt: '2026-07-02T10:00:00Z',
+            updatedAt: '2026-07-02T10:05:00Z',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ count: 0, runs: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    // Capture stdout for each --json invocation and assert it is valid JSON, so
+    // every hosted read command is machine-readable (discover→inspect→execute).
+    const captureJsonStdout = async (
+      run: () => Promise<number>,
+    ): Promise<unknown> => {
+      const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+      let stdoutText = '';
+      process.stdout.write = ((chunk: unknown) => {
+        stdoutText += String(chunk);
+        return true;
+      }) as typeof process.stdout.write;
+      try {
+        const exitCode = await run();
+        assert.equal(exitCode, 0);
+      } finally {
+        process.stdout.write = originalStdoutWrite;
+      }
+      return JSON.parse(stdoutText);
+    };
+
+    try {
+      const balance = await captureJsonStdout(() =>
+        runBalanceCommand(['--json']),
+      );
+      assert.equal((balance as { accountId: string }).accountId, 'account_1');
+
+      const runsList = await captureJsonStdout(() =>
+        runRunsCommand(['list', '--json']),
+      );
+      assert.ok(Array.isArray((runsList as { runs: unknown[] }).runs));
+
+      const runDetail = await captureJsonStdout(() =>
+        runRunsCommand(['show', 'run_1', '--json']),
+      );
+      assert.equal((runDetail as { id: string }).id, 'run_1');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('teaches the discover→inspect→execute loop in the media schema notes (F)', () => {
+    const report = buildHostedRequestSchemaReport({ domain: 'media' });
+    const notes = (report as { notes: string[] }).notes.join('\n');
+    // discover: the schema lists selectable endpoints; inspect: --help / example;
+    // execute + price: media <verb> and the no-charge estimate.
+    assert.match(notes, /--help/u);
+    assert.match(notes, /example\.command/u);
+    assert.match(notes, /estimate/u);
+    assert.ok(
+      Array.isArray((report as { endpointKeys?: string[] }).endpointKeys),
+    );
   });
 });
 

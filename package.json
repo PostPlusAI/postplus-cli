@@ -17,6 +17,7 @@
     "build/client-compatibility.js",
     "build/command-runner.js",
     "build/doctor.js",
+    "build/hosted-account-commands.js",
     "build/hosted-domain-commands.js",
     "build/hosted-domain-commands.d.ts",
     "build/hosted-lib.js",
