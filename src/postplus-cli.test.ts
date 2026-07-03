@@ -4916,11 +4916,11 @@ describe('hosted domain commands', () => {
     // Human mode: the run id is already in the stdout payload; the LITERAL resume
     // command is emitted to stderr so it is never lost.
     const humanStderr = await runSubmit([], pending);
-    assert.match(humanStderr, /postplus media poll --handle run_1/u);
+    assert.match(humanStderr, /postplus media poll --handle 'run_1'/u);
 
     // --json mode: same literal resume command on stderr (stdout stays pure JSON).
     const jsonStderr = await runSubmit(['--json'], pending);
-    assert.match(jsonStderr, /postplus media poll --handle run_1/u);
+    assert.match(jsonStderr, /postplus media poll --handle 'run_1'/u);
 
     // A terminal payload has nothing to resume — stay silent.
     const terminalStderr = await runSubmit([], {

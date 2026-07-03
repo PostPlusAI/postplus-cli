@@ -177,7 +177,10 @@ function exampleScalarForField(field: ManifestField): unknown {
   }
   switch (field.type) {
     case 'number':
-      return field.min ?? 1;
+      if (field.min !== undefined) {
+        return field.min;
+      }
+      return field.max !== undefined ? Math.min(field.max, 1) : 1;
     case 'boolean':
       return true;
     case 'media-url':

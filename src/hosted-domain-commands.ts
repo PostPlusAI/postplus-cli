@@ -874,14 +874,14 @@ async function runMediaEstimate(
 
   if (rest.some(isHelp)) {
     process.stdout.write(
-      `PostPlus CLI - media estimate ${endpointKey}\n\n  Quote-only dry run (no reserve, no ledger write). Takes the same flags/--request as media create ${endpointKey}.\n  Usage:\n    postplus media estimate ${endpointKey} ${resolved.surface === 'flags' ? '--<intent/default flags>' : '--request <input.json>'} [--json] [--output <result.json>]\n`,
+      `PostPlus CLI - media estimate ${endpointKey}\n\n  Quote-only dry run (no reserve, no ledger write). Takes the same flags/--request as the matching media submit command for ${endpointKey}.\n  Usage:\n    postplus media estimate ${endpointKey} ${resolved.surface === 'flags' ? '--<intent/default flags>' : '--request <input.json>'} [--json] [--output <result.json>]\n`,
     );
     return 0;
   }
 
   const endpoint = requireResolvedEndpoint(resolved, 'estimate', endpointKey);
 
-  const { input, json, outputPath, errorInputLabel } =
+  const { input, json, outputPath, errorInputLabel, skillName } =
     resolved.surface === 'flags'
       ? buildEstimateFlagsInput(endpoint, endpointKey, rest)
       : await buildEstimateRequestJsonInput(endpoint, endpointKey, rest, context);
@@ -901,7 +901,7 @@ async function runMediaEstimate(
             input,
           },
           pathName: '/api/postplus-cli/hosted/estimate',
-          skillName: resolved.skill,
+          skillName: skillName ?? resolved.skill,
           context,
         }),
       errorInputLabel,
@@ -924,6 +924,7 @@ function buildEstimateFlagsInput(
   json: boolean;
   outputPath: string | null;
   errorInputLabel: string;
+  skillName: string | undefined;
 } {
   const fields = endpoint.fields;
   const flagToField = new Map<string, ManifestField>();
@@ -969,6 +970,7 @@ function buildEstimateFlagsInput(
     json: flags.booleans.has('json'),
     outputPath: flags.values.get('output') ?? null,
     errorInputLabel: `media-estimate-${endpointKey}`,
+    skillName: flags.values.get('skill'),
   };
 }
 
@@ -984,6 +986,7 @@ async function buildEstimateRequestJsonInput(
   json: boolean;
   outputPath: string | null;
   errorInputLabel: string;
+  skillName: string | undefined;
 }> {
   const flags = parseFlags(args, new Set(['json']));
   const allowedKeys = new Set(['json', 'output', 'request', 'skill']);
@@ -1017,6 +1020,7 @@ async function buildEstimateRequestJsonInput(
     json: flags.booleans.has('json'),
     outputPath: flags.values.get('output') ?? null,
     errorInputLabel,
+    skillName: flags.values.get('skill'),
   };
 }
 
@@ -1616,6 +1620,13 @@ function isTerminalRunStatus(status: string): boolean {
   return TERMINAL_RUN_STATUSES.has(status.toLowerCase());
 }
 
+// Shell-escape an argument value for a copy-pasteable command snippet: wrap in
+// single quotes and escape any embedded single quote, so spaces or shell
+// metacharacters in a run id can't break or unsafely alter a pasted command.
+function shellQuoteArg(value: string): string {
+  return `'${value.replace(/'/gu, "'\\''")}'`;
+}
+
 function extractMediaPollResume(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return null;
@@ -1638,7 +1649,7 @@ function extractMediaPollResume(payload: unknown): string | null {
   if (status && isTerminalRunStatus(status)) {
     return null;
   }
-  return `postplus media poll --handle ${id}`;
+  return `postplus media poll --handle ${shellQuoteArg(id)}`;
 }
 
 function extractResearchResume(
@@ -1660,7 +1671,7 @@ function extractResearchResume(
   if (status && isTerminalRunStatus(status)) {
     return null;
   }
-  return `postplus research ${verb} --run-handle ${runHandle}`;
+  return `postplus research ${verb} --run-handle ${shellQuoteArg(runHandle)}`;
 }
 
 async function writeQuoteConfirmationChallenge(
@@ -1832,7 +1843,7 @@ function printDomainVerbHelp(domain: Exclude<HostedDomain, 'research'>): void {
               `  postplus media ${verb} <endpoint-key> --<intent/default flags> [--json] [--output <result.json>]\n`,
           )
           .join('') +
-        '  postplus media estimate <endpoint-key> --<same flags/--request as create> [--json]\n' +
+        '  postplus media estimate <endpoint-key> --<same flags/--request as matching submit verb> [--json]\n' +
         '  postplus media poll --handle <run-id> [--json] [--output <result.json>]\n'
       : '  postplus publish <operation> --request <input.json> [--json] [--output <result.json>]\n';
 
