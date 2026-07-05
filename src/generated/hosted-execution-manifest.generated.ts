@@ -178,7 +178,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "endpoints": [
         {
           "endpointKey": "image-gpt-image-2-text",
-          "provider": "wavespeed",
+          "provider": "openai-image",
           "providerModelPath": "openai/gpt-image-2/text-to-image",
           "fields": [
             {
@@ -246,7 +246,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         },
         {
           "endpointKey": "image-gpt-image-2-edit",
-          "provider": "wavespeed",
+          "provider": "openai-image",
           "providerModelPath": "openai/gpt-image-2/edit",
           "fields": [
             {
