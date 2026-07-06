@@ -1207,9 +1207,9 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       ]
     }
   ],
-  "instagram-tools": [
+  "instagram-research": [
     {
-      "skill": "instagram-tools",
+      "skill": "instagram-research",
       "mode": "cli-runner",
       "surface": "request-json",
       "verb": "collect",
@@ -1857,25 +1857,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       ]
     }
   ],
-  "tiktok-ad-research": [
-    {
-      "skill": "tiktok-ad-research",
-      "mode": "cli-runner",
-      "surface": "request-json",
-      "verb": "collect",
-      "domain": "research",
-      "capability": "hosted-collection",
-      "collectionKeys": [
-        "tiktok-ads-top"
-      ],
-      "collections": [
-        {
-          "collectionKey": "tiktok-ads-top",
-          "actorId": "tiktok-creative-center-top-ads"
-        }
-      ]
-    }
-  ],
   "tiktok-research": [
     {
       "skill": "tiktok-research",
@@ -1885,6 +1866,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "domain": "research",
       "capability": "hosted-collection",
       "collectionKeys": [
+        "tiktok-ads-top",
         "tiktok-comments",
         "tiktok-profiles",
         "tiktok-related-videos",
@@ -1892,6 +1874,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "tiktok-videos"
       ],
       "collections": [
+        {
+          "collectionKey": "tiktok-ads-top",
+          "actorId": "tiktok-creative-center-top-ads"
+        },
         {
           "collectionKey": "tiktok-comments",
           "actorId": "clockworks/tiktok-comments-scraper"
