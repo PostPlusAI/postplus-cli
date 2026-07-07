@@ -129,6 +129,63 @@ export const HOSTED_EXECUTION_MANIFESTS = {
           "datasetId": "gd_lkaxegm826bjpoo9m5"
         }
       ]
+    },
+    {
+      "skill": "facebook-research",
+      "mode": "cli-runner",
+      "surface": "request-json",
+      "verb": "collect",
+      "domain": "research",
+      "capability": "hosted-collection",
+      "collectionKeys": [
+        "facebook-ads-library",
+        "facebook-comments",
+        "facebook-events",
+        "facebook-groups",
+        "facebook-marketplace",
+        "facebook-pages",
+        "facebook-posts",
+        "facebook-reels",
+        "facebook-search"
+      ],
+      "collections": [
+        {
+          "collectionKey": "facebook-ads-library",
+          "actorId": "curious_coder/facebook-ads-library-scraper"
+        },
+        {
+          "collectionKey": "facebook-comments",
+          "actorId": "apify/facebook-comments-scraper"
+        },
+        {
+          "collectionKey": "facebook-events",
+          "actorId": "apify/facebook-events-scraper"
+        },
+        {
+          "collectionKey": "facebook-groups",
+          "actorId": "apify/facebook-groups-scraper"
+        },
+        {
+          "collectionKey": "facebook-marketplace",
+          "actorId": "apify/facebook-marketplace-scraper"
+        },
+        {
+          "collectionKey": "facebook-pages",
+          "actorId": "apify/facebook-pages-scraper"
+        },
+        {
+          "collectionKey": "facebook-posts",
+          "actorId": "apify/facebook-posts-scraper"
+        },
+        {
+          "collectionKey": "facebook-reels",
+          "actorId": "apify/facebook-reels-scraper"
+        },
+        {
+          "collectionKey": "facebook-search",
+          "actorId": "apify/facebook-search-scraper"
+        }
+      ]
     }
   ],
   "google-trends-research": [
@@ -1247,6 +1304,25 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         {
           "collectionKey": "instagram-search",
           "actorId": "apify/instagram-search-scraper"
+        }
+      ]
+    }
+  ],
+  "pinterest-search": [
+    {
+      "skill": "pinterest-search",
+      "mode": "cli-runner",
+      "surface": "request-json",
+      "verb": "collect",
+      "domain": "research",
+      "capability": "hosted-collection",
+      "collectionKeys": [
+        "pinterest-search"
+      ],
+      "collections": [
+        {
+          "collectionKey": "pinterest-search",
+          "actorId": "easyapi/pinterest-search-scraper"
         }
       ]
     }
