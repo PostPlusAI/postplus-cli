@@ -6325,7 +6325,7 @@ describe('account read-only commands', () => {
           status: 'completed',
           target: 'video-seedance-2-text',
           operationId: 'postplus-cli:media:media-generation:request:abc',
-          providerFamily: 'dashscope',
+          providerFamily: 'moyu',
           providerModelPath: 'video-generation/seedance',
           providerStatus: 'succeeded',
           providerTaskId: 'task_9',
