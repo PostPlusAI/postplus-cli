@@ -624,7 +624,7 @@ async function runMediaFileUpload(
         const storageReference = readStorageReferenceValue(output);
         await putHostedMediaBytes(signedUpload, absolutePath);
 
-        return await postHostedJson({
+        const uploadResult = await postHostedJson({
           body: {
             capability: 'media-file',
             operation: 'upload',
@@ -643,6 +643,20 @@ async function runMediaFileUpload(
           skillName: flags.values.get('skill') ?? null,
           context,
         });
+
+        // Surface the Supabase storageReference this two-step upload already
+        // used. The provider upload response only carries the provider fetch URL
+        // (output.data.download_url); the storage reference minted at
+        // create-upload-url is dropped by the provider response, yet it is the
+        // ONLY shape that hosted verbs re-materializing bytes from storage accept
+        // (`media analyze` file_reference -> parseHostedMediaStorageReference,
+        // which rejects URLs). Compose it back in at output.storageReference,
+        // sibling to output.data.download_url, so a local-file -> analyze flow has
+        // a real handoff instead of a dead end.
+        return attachStorageReferenceToUploadResult(
+          uploadResult,
+          storageReference,
+        );
       },
       errorInputLabel: inputFile,
       json: flags.booleans.has('json'),
@@ -718,6 +732,43 @@ function readStorageReferenceValue(output: Record<string, unknown>): unknown {
     );
   }
   return storageReference;
+}
+
+// Compose the create-upload-url storageReference into the final `media-file
+// upload` result at output.storageReference. The provider upload response only
+// exposes the provider fetch URL (output.data.download_url); the Supabase
+// storage reference is otherwise lost after the two-step flow, leaving verbs
+// that re-materialize bytes from storage (media analyze file_reference) with no
+// public way to obtain it. Fail loud if the envelope shape is unexpected rather
+// than silently dropping the reference.
+function attachStorageReferenceToUploadResult(
+  payload: unknown,
+  storageReference: unknown,
+): unknown {
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    Array.isArray(payload) ||
+    !('output' in payload)
+  ) {
+    throw new Error(
+      'Hosted media upload response is missing output; cannot attach storageReference.',
+    );
+  }
+  const record = payload as Record<string, unknown>;
+  const output = record.output;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error(
+      'Hosted media upload output is not an object; cannot attach storageReference.',
+    );
+  }
+  return {
+    ...record,
+    output: {
+      ...(output as Record<string, unknown>),
+      storageReference,
+    },
+  };
 }
 
 async function putHostedMediaBytes(

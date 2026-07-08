@@ -5617,11 +5617,15 @@ describe('hosted domain commands', () => {
         const requestBody = JSON.parse(String(init?.body));
         hostedBodies.push(requestBody);
         if (requestBody.operation === 'upload') {
+          // Faithful to production: the provider upload response nests the fetch
+          // URL under `data` and does NOT carry storageReference. The CLI itself
+          // composes storageReference back in at output.storageReference.
           return new Response(
             JSON.stringify({
               output: {
-                download_url: 'https://uploads.example.com/clip.mp4',
-                storageReference,
+                data: {
+                  download_url: 'https://uploads.example.com/clip.mp4',
+                },
               },
             }),
             { status: 200, headers: { 'content-type': 'application/json' } },
@@ -5698,7 +5702,7 @@ describe('hosted domain commands', () => {
 
       const output = JSON.parse(await readFile(outputPath, 'utf8'));
       assert.equal(
-        output.output.download_url,
+        output.output.data.download_url,
         'https://uploads.example.com/clip.mp4',
       );
       assert.deepEqual(output.output.storageReference, storageReference);
