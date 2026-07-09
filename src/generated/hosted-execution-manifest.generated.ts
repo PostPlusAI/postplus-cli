@@ -427,14 +427,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": false
             },
             {
-              "name": "enable_web_search",
-              "class": "default",
-              "flag": "--enable-web-search",
-              "type": "boolean",
-              "default": false,
-              "required": false
-            },
-            {
               "name": "output_format",
               "class": "default",
               "flag": "--output-format",
@@ -499,14 +491,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               ],
               "canonicalize": "image-resolution-tier",
               "default": "1k",
-              "required": false
-            },
-            {
-              "name": "enable_web_search",
-              "class": "default",
-              "flag": "--enable-web-search",
-              "type": "boolean",
-              "default": false,
               "required": false
             },
             {
