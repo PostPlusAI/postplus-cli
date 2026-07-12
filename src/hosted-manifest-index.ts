@@ -201,6 +201,29 @@ export function manifestTargetKeys(
   return [...keys].sort();
 }
 
+// Sorted endpoint keys of the given capability whose manifest fields expose the
+// given flag. Used by the unknown-flag rejection to hint which sibling endpoints
+// DO accept a flag the selected endpoint rejected (e.g. `--reference-image` is
+// declared only on edit endpoints, so a text-endpoint submit can name them
+// instead of reading as "this CLI has no such capability").
+export function capabilityEndpointsWithFlag(
+  capability: string,
+  flag: string,
+): string[] {
+  const keys = new Set<string>();
+  for (const entry of allManifestEntries()) {
+    if (entry.capability !== capability) {
+      continue;
+    }
+    for (const endpoint of entry.endpoints ?? []) {
+      if (endpoint.fields.some((field) => field.flag === flag)) {
+        keys.add(endpoint.endpointKey);
+      }
+    }
+  }
+  return [...keys].sort();
+}
+
 // Resolves the endpoint contract for a media-generation endpointKey, or null when
 // the key is not a modelled media-generation endpoint. Used by the schema report
 // and per-endpoint `--help` to read the field-level contract.

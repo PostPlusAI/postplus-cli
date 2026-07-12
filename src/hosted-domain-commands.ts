@@ -16,6 +16,7 @@ import {
   type ManifestField,
   type ResolvedVerbTarget,
   buildVerbTargetIndex,
+  capabilityEndpointsWithFlag,
 } from './hosted-manifest-index.js';
 import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import {
@@ -286,14 +287,25 @@ async function runMediaVerbFlags(args: {
   ]);
 
   // Reject unknown flags. This is how runner-managed fields (no flag) and typos
-  // are caught locally before any hosted call.
+  // are caught locally before any hosted call. When the flag IS declared on
+  // sibling endpoints of the same capability, name them — otherwise the bare
+  // rejection reads as "the CLI has no such capability" (e.g. --reference-image
+  // on a text endpoint, when only edit endpoints accept it).
   for (const key of [
     ...flags.values.keys(),
     ...flags.booleans,
     ...flags.arrays.keys(),
   ]) {
     if (!flagToField.has(key) && !controlKeys.has(key)) {
-      throw new Error(`Unknown option for media ${verb}: --${key}.`);
+      const siblings = capabilityEndpointsWithFlag(
+        resolved.capability,
+        `--${key}`,
+      ).filter((siblingKey) => siblingKey !== endpointKey);
+      throw new Error(
+        siblings.length > 0
+          ? `Unknown option for media ${verb}: --${key}. Endpoint ${endpointKey} does not accept it; it is supported by: ${siblings.join(', ')}.`
+          : `Unknown option for media ${verb}: --${key}.`,
+      );
     }
   }
 

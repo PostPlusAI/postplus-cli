@@ -5900,6 +5900,68 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('names sibling endpoints that accept a flag rejected by the selected endpoint', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      // --reference-image is declared only on edit endpoints; a text-endpoint
+      // submit must point at them instead of a bare unknown-option rejection.
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'image-gpt-image-2-text',
+            '--prompt',
+            'a hero shot',
+            '--reference-image',
+            'https://example.com/ref.png',
+          ]),
+        (error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          assert.match(
+            message,
+            /^Unknown option for media create: --reference-image\. Endpoint image-gpt-image-2-text does not accept it; it is supported by: /u,
+          );
+          assert.match(message, /image-gpt-image-2-edit/u);
+          assert.doesNotMatch(message, /image-gpt-image-2-text.*supported by.*image-gpt-image-2-text/u);
+          return true;
+        },
+      );
+
+      // A flag no endpoint declares stays a bare unknown-option rejection.
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'image-gpt-image-2-text',
+            '--prompt',
+            'a hero shot',
+            '--refrence-image',
+            'https://example.com/ref.png',
+          ]),
+        (error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          assert.equal(
+            message,
+            'Unknown option for media create: --refrence-image.',
+          );
+          return true;
+        },
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('early-validates image resolution/quality enums locally before any hosted call', async () => {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
