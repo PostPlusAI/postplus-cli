@@ -1523,6 +1523,17 @@ async function runHostedSchema(
   return 0;
 }
 
+// Hosted capability POSTs can legitimately hold the connection for minutes:
+// some media-generation endpoints (e.g. gpt-image-2) complete synchronously at
+// the Web boundary instead of returning a pending run handle. Aborting such a
+// request client-side is a FALSE failure — the boundary keeps executing,
+// charges the reservation, and the finished asset is discarded (observed live
+// 2026-07-13: a 121.6s gpt-image-2 render was killed by the previous 120s
+// timeout ~2s before completion; the user was charged 20 credits for an image
+// nobody received). This bound is a hang safety net, not a latency budget —
+// keep it well above the slowest synchronous endpoint's real completion time.
+const HOSTED_CAPABILITY_POST_TIMEOUT_MS = 600_000;
+
 async function postHostedJson(input: {
   body: unknown;
   pathName: string;
@@ -1542,7 +1553,7 @@ async function postHostedJson(input: {
         pathName: input.pathName,
         skillName: input.skillName,
         skillsReleaseId: input.context.skillsReleaseId ?? null,
-        timeoutMs: 120000,
+        timeoutMs: HOSTED_CAPABILITY_POST_TIMEOUT_MS,
       })
     : await sendAuthedCloudRequest({
         auth: await resolveFreshRemoteAuth(),
@@ -1551,7 +1562,7 @@ async function postHostedJson(input: {
         pathName: input.pathName,
         retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
         skillName: input.skillName,
-        timeoutMs: 120000,
+        timeoutMs: HOSTED_CAPABILITY_POST_TIMEOUT_MS,
       });
 
   const payload = await readJsonResponse(response);
