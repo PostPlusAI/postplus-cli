@@ -412,6 +412,20 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": true
             },
             {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "9:16",
+                "16:9",
+                "1:1",
+                "4:5"
+              ],
+              "default": "1:1",
+              "required": false
+            },
+            {
               "name": "resolution",
               "class": "default",
               "flag": "--resolution",
@@ -479,6 +493,20 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": true
             },
             {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "9:16",
+                "16:9",
+                "1:1",
+                "4:5"
+              ],
+              "default": "1:1",
+              "required": false
+            },
+            {
               "name": "resolution",
               "class": "default",
               "flag": "--resolution",
@@ -538,6 +566,20 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": true
             },
             {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "9:16",
+                "16:9",
+                "1:1",
+                "4:5"
+              ],
+              "default": "1:1",
+              "required": false
+            },
+            {
               "name": "resolution",
               "class": "default",
               "flag": "--resolution",
@@ -594,6 +636,20 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": true
             },
             {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "9:16",
+                "16:9",
+                "1:1",
+                "4:5"
+              ],
+              "default": "1:1",
+              "required": false
+            },
+            {
               "name": "resolution",
               "class": "default",
               "flag": "--resolution",
@@ -648,6 +704,20 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--prompt",
               "type": "string",
               "required": true
+            },
+            {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "9:16",
+                "16:9",
+                "1:1",
+                "4:5"
+              ],
+              "default": "1:1",
+              "required": false
             },
             {
               "name": "resolution",
@@ -714,6 +784,18 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": true
             },
             {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "9:16",
+                "16:9",
+                "4:5"
+              ],
+              "required": false
+            },
+            {
               "name": "resolution",
               "class": "default",
               "flag": "--resolution",
@@ -778,6 +860,18 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": true
             },
             {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "9:16",
+                "16:9",
+                "4:5"
+              ],
+              "required": false
+            },
+            {
               "name": "resolution",
               "class": "default",
               "flag": "--resolution",
@@ -840,6 +934,18 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "media-url",
               "repeatable": true,
               "required": true
+            },
+            {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "9:16",
+                "16:9",
+                "4:5"
+              ],
+              "required": false
             },
             {
               "name": "resolution",
