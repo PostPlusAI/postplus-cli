@@ -9,7 +9,12 @@ import {
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { setLocalSession } from './local-state.js';
 
-export const CLI_AUTH_LOGIN_TIMEOUT_MS = 30 * 60 * 1000;
+// Fallback TOTAL POLLING BUDGET for the browser-login handoff loop — how long
+// `waitForCloudAuthLogin` keeps polling when the server's `expiresAt` cannot be
+// parsed. It is NOT a per-request timeout (each poll POST carries the 15s
+// authed-request default); the old *_TIMEOUT_MS name misread as one
+// (2026-07-13 timeout audit rename).
+export const CLI_AUTH_LOGIN_POLL_BUDGET_MS = 30 * 60 * 1000;
 
 export type AuthLoginReport = {
   accountId: string;
@@ -186,7 +191,7 @@ async function waitForCloudAuthLogin(input: {
   const expiresAtMs = Date.parse(input.expiresAt);
   const deadlineMs = Number.isFinite(expiresAtMs)
     ? expiresAtMs
-    : Date.now() + CLI_AUTH_LOGIN_TIMEOUT_MS;
+    : Date.now() + CLI_AUTH_LOGIN_POLL_BUDGET_MS;
   const pollIntervalMs = Math.max(1000, input.pollIntervalSeconds * 1000);
 
   while (Date.now() < deadlineMs) {

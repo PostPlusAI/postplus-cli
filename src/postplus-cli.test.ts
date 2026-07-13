@@ -16,7 +16,7 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 import {
-  CLI_AUTH_LOGIN_TIMEOUT_MS,
+  CLI_AUTH_LOGIN_POLL_BUDGET_MS,
   openCloudAuthVerificationUrlIfConfigured,
   pollCloudAuthLogin,
   startCloudAuthLogin,
@@ -2145,8 +2145,8 @@ process.exit(1);
 });
 
 describe('cloud auth handoff', () => {
-  it('keeps the CLI login window at 30 minutes', () => {
-    assert.equal(CLI_AUTH_LOGIN_TIMEOUT_MS, 30 * 60 * 1000);
+  it('keeps the CLI login fallback poll budget at 30 minutes', () => {
+    assert.equal(CLI_AUTH_LOGIN_POLL_BUDGET_MS, 30 * 60 * 1000);
   });
 
   it('prints auth login help without starting browser sign-in', async () => {

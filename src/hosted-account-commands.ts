@@ -11,6 +11,14 @@ import { formatPostPlusCompatibilityError } from './client-compatibility.js';
 // execution-before budget signal (balance) and the execution-after visibility
 // (runs list/show) that let an agent stop guessing about spend and lost handles.
 
+// These reads GATE spend decisions (an agent checks balance/runs right before
+// a 120s hosted spend POST), so they must not be flakier than the spend they
+// guard: with the 15s authed-request default, a slow-but-working network made
+// the budget signal fail before the spend it was protecting (2026-07-13
+// timeout audit). 30s keeps the fast-fail character of a read while doubling
+// the headroom; the spend ceiling stays 120s.
+const ACCOUNT_DIAGNOSTICS_REQUEST_TIMEOUT_MS = 30_000;
+
 // Shared GET envelope for the bin path: resolve fresh session auth from disk,
 // issue a single 401-refresh retry, and surface a compatibility or product error
 // verbatim instead of collapsing it to a generic message.
@@ -20,6 +28,7 @@ async function getAuthedJson(pathName: string): Promise<unknown> {
     method: 'GET',
     pathName,
     retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
+    timeoutMs: ACCOUNT_DIAGNOSTICS_REQUEST_TIMEOUT_MS,
   });
 
   const payload = await readJsonResponse(response);
