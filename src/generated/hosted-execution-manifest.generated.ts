@@ -785,7 +785,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "aspect_ratio",
-              "class": "default",
+              "class": "intent",
               "flag": "--aspect-ratio",
               "type": "string",
               "enumValues": [
@@ -861,7 +861,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "aspect_ratio",
-              "class": "default",
+              "class": "intent",
               "flag": "--aspect-ratio",
               "type": "string",
               "enumValues": [
@@ -937,7 +937,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "aspect_ratio",
-              "class": "default",
+              "class": "intent",
               "flag": "--aspect-ratio",
               "type": "string",
               "enumValues": [

@@ -5865,6 +5865,65 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('keeps Nano Pro edit aspect ratio optional and rejects unverified square requests locally', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const postedBodies: unknown[] = [];
+    globalThis.fetch = async (_input, init) => {
+      postedBodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'image-nano-banana-pro-edit-1k',
+        '--prompt',
+        'reframe the product photo',
+        '--reference-image',
+        'https://example.com/ref.png',
+      ]);
+      assert.equal(result, 0);
+      const body = postedBodies[0] as Record<string, unknown>;
+      assert.deepEqual(body.input, {
+        images: ['https://example.com/ref.png'],
+        output_format: 'png',
+        prompt: 'reframe the product photo',
+        resolution: '1k',
+      });
+
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'image-nano-banana-pro-edit-1k',
+            '--prompt',
+            'reframe the product photo',
+            '--reference-image',
+            'https://example.com/ref.png',
+            '--aspect-ratio',
+            '1:1',
+          ]),
+        /image-nano-banana-pro-edit-1k aspect_ratio must be one of 9:16, 16:9, 4:5; received "1:1"\./u,
+      );
+      assert.equal(postedBodies.length, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('rejects runner-managed asset-state flags on the image create verb', async () => {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
