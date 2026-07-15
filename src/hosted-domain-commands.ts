@@ -50,6 +50,11 @@ function buildPublishVerbIndex(): Map<string, ResolvedVerbTarget> {
 type ParsedFlags = {
   values: Map<string, string>;
   booleans: Set<string>;
+  // Explicit `--flag true|false` values. Presence without a value stays in
+  // `booleans` (= true); an explicit value records here so a default-true
+  // boolean field (e.g. seedance --generate-audio) can be switched OFF —
+  // parity the retired request-json surface had via `"generate_audio": false`.
+  booleanValues: Map<string, boolean>;
   arrays: Map<string, string[]>;
 };
 
@@ -1263,8 +1268,9 @@ function buildMediaVerbInput(input: {
     }
 
     if (field.type === 'boolean') {
-      if (input.flags.booleans.has(key)) {
-        record[field.name] = true;
+      const explicit = input.flags.booleanValues.get(key);
+      if (explicit !== undefined) {
+        record[field.name] = explicit;
       } else if (typeof field.default === 'boolean') {
         record[field.name] = field.default;
       }
@@ -1986,6 +1992,7 @@ function parseFlags(
 ): ParsedFlags {
   const values = new Map<string, string>();
   const booleans = new Set<string>();
+  const booleanValues = new Map<string, boolean>();
   const arrays = new Map<string, string[]>();
 
   for (let index = 0; index < args.length; index += 1) {
@@ -1995,7 +2002,18 @@ function parseFlags(
     }
     const key = arg.slice(2);
     if (booleanFlags.has(key)) {
+      // Optional explicit value: `--flag true|false`. Bare presence = true.
+      const next = args[index + 1];
+      if (next === 'true' || next === 'false') {
+        booleanValues.set(key, next === 'true');
+        if (next === 'true') {
+          booleans.add(key);
+        }
+        index += 1;
+        continue;
+      }
       booleans.add(key);
+      booleanValues.set(key, true);
       continue;
     }
     const value = args[index + 1];
@@ -2012,7 +2030,7 @@ function parseFlags(
     index += 1;
   }
 
-  return { arrays, booleans, values };
+  return { arrays, booleanValues, booleans, values };
 }
 
 function requireFlag(flags: ParsedFlags, key: string): string {
@@ -2147,7 +2165,12 @@ function formatFlagsUsage(fields: readonly ManifestField[]): string {
     if (field.class === 'runner-managed' || !field.flag) {
       continue;
     }
-    const token = `${field.flag} <${field.name}>`;
+    // Boolean flags: bare presence = true, optional explicit `true|false` value
+    // (the only way to switch a default-true boolean off).
+    const token =
+      field.type === 'boolean'
+        ? `${field.flag} [true|false]`
+        : `${field.flag} <${field.name}>`;
     parts.push(field.required ? token : `[${token}]`);
   }
   return parts.join(' ');

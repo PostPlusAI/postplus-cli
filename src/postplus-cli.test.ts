@@ -5174,6 +5174,76 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('switches a default-true boolean off with an explicit --generate-audio false', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const postedInputs: Array<Record<string, unknown>> = [];
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      postedInputs.push(body.input as Record<string, unknown>);
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      // Explicit false: the only way to disable Seedance native audio now that
+      // the request-json envelope is retired (registry default is true).
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          'create',
+          'video-seedance-2-text',
+          '--prompt',
+          'silent clip',
+          '--generate-audio',
+          'false',
+        ]),
+        0,
+      );
+      assert.equal(postedInputs[0]?.generate_audio, false);
+
+      // Bare presence keeps the published presence-equals-true grammar.
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          'create',
+          'video-seedance-2-text',
+          '--prompt',
+          'audible clip',
+          '--generate-audio',
+        ]),
+        0,
+      );
+      assert.equal(postedInputs[1]?.generate_audio, true);
+
+      // A non-boolean token after a boolean flag stays a positional error.
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'video-seedance-2-text',
+            '--prompt',
+            'clip',
+            '--generate-audio',
+            'banana',
+          ]),
+        /Unexpected positional argument: banana/,
+      );
+      assert.equal(postedInputs.length, 2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('rejects --request and --request-dimensions as unknown flags on the seedance create verb before any hosted call', async () => {
     // flags surface: runner-managed fields (requestDimensions & co.) have no flag
     // and there is no whole-body --request escape hatch anymore, so the agent has
