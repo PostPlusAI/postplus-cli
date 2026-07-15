@@ -4330,7 +4330,9 @@ describe('hosted domain commands', () => {
     assert.doesNotMatch(stdout, /--operationId/u);
   });
 
-  it('prints a per-endpoint request-json --help with enum sets, ranges, and defaults', async () => {
+  it('prints a per-endpoint flags --help with enum sets, ranges, and defaults', async () => {
+    // seedance moved from request-json to the flags surface; the per-endpoint help
+    // must still render the manifest enum sets, numeric ranges, and defaults.
     const { stdout } = await execFileAsync(process.execPath, [
       '--import',
       'tsx',
@@ -4342,18 +4344,18 @@ describe('hosted domain commands', () => {
     ]);
 
     assert.match(stdout, /media create video-seedance-2-text/u);
-    assert.match(stdout, /Surface: request-json/u);
+    assert.match(stdout, /Surface: flags/u);
     assert.match(
       stdout,
-      /\(json\) aspect_ratio {2}\[string; optional; one of \{21:9, 16:9, 4:3, 1:1, 3:4, 9:16\}\]/u,
+      /--aspect-ratio {2}\[string; optional; one of \{21:9, 16:9, 4:3, 1:1, 3:4, 9:16\}\]/u,
     );
     assert.match(
       stdout,
-      /\(json\) resolution {2}\[string; optional; one of \{480p, 720p, 1080p\}; default 720p\]/u,
+      /--resolution {2}\[string; optional; one of \{480p, 720p, 1080p\}; default 720p\]/u,
     );
     assert.match(
       stdout,
-      /\(json\) duration {2}\[number; optional; range 4\.\.15; default 5\]/u,
+      /--duration {2}\[number; optional; range 4\.\.15; default 5\]/u,
     );
     assert.match(
       stdout,
@@ -5058,20 +5060,7 @@ describe('hosted domain commands', () => {
     );
   });
 
-  it('submits a manifest-driven seedance request (request-json) with derived billing dimensions', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(
-      requestPath,
-      JSON.stringify({
-        prompt: 'a blue sticky note slides across a white desk',
-        resolution: '720p',
-        duration: 5,
-        aspect_ratio: '9:16',
-      }),
-    );
-
+  it('submits a manifest-driven seedance request (flags) with derived billing dimensions', async () => {
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -5100,8 +5089,14 @@ describe('hosted domain commands', () => {
       const result = await runHostedDomainCommand('media', [
         'create',
         'video-seedance-2-text',
-        '--request',
-        requestPath,
+        '--prompt',
+        'a blue sticky note slides across a white desk',
+        '--resolution',
+        '720p',
+        '--duration',
+        '5',
+        '--aspect-ratio',
+        '9:16',
       ]);
       assert.equal(result, 0);
       const body = postedBody as Record<string, unknown>;
@@ -5112,11 +5107,13 @@ describe('hosted domain commands', () => {
         String(body.operationId),
         /^postplus-cli:media:media-generation:request:/u,
       );
+      // agent flags plus the remaining manifest default (generate_audio) filled in.
       assert.deepEqual(body.input, {
         prompt: 'a blue sticky note slides across a white desk',
         resolution: '720p',
         duration: 5,
         aspect_ratio: '9:16',
+        generate_audio: true,
       });
       // Billing dimensions are derived solely at the Web boundary; the CLI sends
       // only the payload (with input defaults filled above), no requestDimensions.
@@ -5137,17 +5134,6 @@ describe('hosted domain commands', () => {
       userId: 'user_1',
     });
 
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    // Agent supplies only the prompt — no resolution/duration.
-    await writeFile(
-      requestPath,
-      JSON.stringify({
-        prompt: 'a blue sticky note slides across a white desk',
-      }),
-    );
-
     const originalFetch = globalThis.fetch;
     let postedBody: unknown = null;
     globalThis.fetch = async (input, init) => {
@@ -5163,39 +5149,36 @@ describe('hosted domain commands', () => {
     };
 
     try {
+      // Agent supplies only the prompt — no resolution/duration.
       const result = await runHostedDomainCommand('media', [
         'create',
         'video-seedance-2-text',
-        '--request',
-        requestPath,
+        '--prompt',
+        'a blue sticky note slides across a white desk',
       ]);
       assert.equal(result, 0);
       const body = postedBody as Record<string, unknown>;
-      // request-json passes the body through, so omitted fields are not filled
-      // into input...
+      // The flags surface fills the manifest defaults into input, so the billing
+      // dimensions (duration/resolution) are derived from the manifest defaults...
       assert.deepEqual(body.input, {
         prompt: 'a blue sticky note slides across a white desk',
+        resolution: '720p',
+        duration: 5,
+        generate_audio: true,
       });
       // ...and billing dimensions are derived solely at the Web boundary, so the
-      // CLI request-json body carries no requestDimensions.
+      // CLI body carries no requestDimensions.
       assert.equal(Object.hasOwn(body, 'requestDimensions'), false);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it('rejects a runner-managed field in the seedance request-json body before any hosted call', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(
-      requestPath,
-      JSON.stringify({
-        prompt: 'a blue sticky note slides across a white desk',
-        requestDimensions: { duration: 99 },
-      }),
-    );
-
+  it('rejects --request and --request-dimensions as unknown flags on the seedance create verb before any hosted call', async () => {
+    // flags surface: runner-managed fields (requestDimensions & co.) have no flag
+    // and there is no whole-body --request escape hatch anymore, so the agent has
+    // no way to carry runner-managed input at all — both spellings must be
+    // rejected locally as unknown options before any hosted call.
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
     globalThis.fetch = async () => {
@@ -5207,34 +5190,33 @@ describe('hosted domain commands', () => {
     };
 
     try {
-      await assert.rejects(
-        () =>
-          runHostedDomainCommand('media', [
-            'create',
-            'video-seedance-2-text',
-            '--request',
-            requestPath,
-          ]),
-        /must not include runner-managed field "requestDimensions"/u,
-      );
+      for (const flag of ['--request', '--request-dimensions']) {
+        await assert.rejects(
+          () =>
+            runHostedDomainCommand('media', [
+              'create',
+              'video-seedance-2-text',
+              '--prompt',
+              'a blue sticky note slides across a white desk',
+              flag,
+              'agent-supplied',
+            ]),
+          new RegExp(
+            `Unknown option for media create: ${flag.replace(/[-]/gu, '[-]')}\\.`,
+            'u',
+          ),
+        );
+      }
       assert.equal(fetchCalls, 0);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it('fast-fails an out-of-enum seedance resolution (request-json) before any hosted call (#475)', async () => {
-    // The #475 repro: the request-json surface previously did NO enum validation, so
-    // an invalid resolution sailed to the provider and surfaced as a generic internal
-    // failure. It must now fast-fail locally as a field-level error before any call.
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(
-      requestPath,
-      JSON.stringify({ prompt: 'a cinematic product reveal', resolution: '999p' }),
-    );
-
+  it('fast-fails an out-of-enum seedance resolution (flags) before any hosted call (#475)', async () => {
+    // The #475 repro: an invalid resolution previously sailed to the provider and
+    // surfaced as a generic internal failure. It must fast-fail locally as a
+    // field-level error before any call.
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
     globalThis.fetch = async () => {
@@ -5251,8 +5233,10 @@ describe('hosted domain commands', () => {
           runHostedDomainCommand('media', [
             'create',
             'video-seedance-2-text',
-            '--request',
-            requestPath,
+            '--prompt',
+            'a cinematic product reveal',
+            '--resolution',
+            '999p',
           ]),
         /video-seedance-2-text resolution must be one of 480p, 720p, 1080p; received "999p"\./u,
       );
@@ -5262,15 +5246,7 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('fast-fails an out-of-range seedance duration (request-json) before any hosted call (#475)', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(
-      requestPath,
-      JSON.stringify({ prompt: 'a cinematic product reveal', duration: 99 }),
-    );
-
+  it('fast-fails an out-of-range seedance duration (flags) before any hosted call (#475)', async () => {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
     globalThis.fetch = async () => {
@@ -5287,8 +5263,10 @@ describe('hosted domain commands', () => {
           runHostedDomainCommand('media', [
             'create',
             'video-seedance-2-text',
-            '--request',
-            requestPath,
+            '--prompt',
+            'a cinematic product reveal',
+            '--duration',
+            '99',
           ]),
         /video-seedance-2-text duration must be an integer from 4 to 15; received 99\./u,
       );
@@ -5298,17 +5276,9 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('accepts a mixed-case seedance resolution (request-json) by canonicalizing before the enum check (#475)', async () => {
+  it('accepts a mixed-case seedance resolution (flags) by canonicalizing before the enum check (#475)', async () => {
     // "720P" is not literally in the {480p,720p,1080p} enum but the manifest
     // canonicalize hint lowercases it, mirroring the Web boundary, so it must pass.
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(
-      requestPath,
-      JSON.stringify({ prompt: 'a cinematic product reveal', resolution: '720P' }),
-    );
-
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -5333,11 +5303,14 @@ describe('hosted domain commands', () => {
       const result = await runHostedDomainCommand('media', [
         'create',
         'video-seedance-2-text',
-        '--request',
-        requestPath,
+        '--prompt',
+        'a cinematic product reveal',
+        '--resolution',
+        '720P',
       ]);
       assert.equal(result, 0);
-      // The CLI passes the raw body through; the Web boundary canonicalizes it.
+      // The CLI passes the raw flag value through (the Web boundary canonicalizes
+      // the outbound body); local validation only canonicalizes for the check.
       const body = postedBody as Record<string, unknown>;
       assert.equal((body.input as Record<string, unknown>).resolution, '720P');
     } finally {
@@ -5345,31 +5318,10 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('fast-fails an out-of-enum voice language and accepts the exact-cased one (request-json) (#475)', async () => {
+  it('fast-fails an out-of-enum voice language and accepts the exact-cased one (flags) (#475)', async () => {
     // voice `language` is NOT canonicalized (no hint) — it matches the provider's
     // exact Title-cased enum, so "english" fails while "English" passes. This is the
     // canonicalization-faithfulness guarantee in the other direction.
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const rejectPath = resolve(requestDir, 'reject.json');
-    const acceptPath = resolve(requestDir, 'accept.json');
-    await writeFile(
-      rejectPath,
-      JSON.stringify({
-        text: 'hello there',
-        voice_description: 'a warm narrator',
-        language: 'english',
-      }),
-    );
-    await writeFile(
-      acceptPath,
-      JSON.stringify({
-        text: 'hello there',
-        voice_description: 'a warm narrator',
-        language: 'English',
-      }),
-    );
-
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -5398,8 +5350,12 @@ describe('hosted domain commands', () => {
           runHostedDomainCommand('media', [
             'create',
             'voice-design',
-            '--request',
-            rejectPath,
+            '--text',
+            'hello there',
+            '--voice-description',
+            'a warm narrator',
+            '--language',
+            'english',
           ]),
         /voice-design language must be one of .*English.*; received "english"\./u,
       );
@@ -5408,8 +5364,12 @@ describe('hosted domain commands', () => {
       const result = await runHostedDomainCommand('media', [
         'create',
         'voice-design',
-        '--request',
-        acceptPath,
+        '--text',
+        'hello there',
+        '--voice-description',
+        'a warm narrator',
+        '--language',
+        'English',
       ]);
       assert.equal(result, 0);
       assert.equal(fetchCalls, 1);
@@ -5607,6 +5567,8 @@ describe('hosted domain commands', () => {
       sizeBytes: fileBytes.length,
       storagePath: 'users/user-1/hosted-media/inputs/clip.mp4',
     };
+    const mediaReference =
+      'postplus-media://uploads/user_1/hosted-media/inputs/upload-test-op/0f8a1c2d-clip.mp4';
     const originalFetch = globalThis.fetch;
     const hostedBodies: unknown[] = [];
     let putBytes: Buffer | null = null;
@@ -5634,6 +5596,7 @@ describe('hosted domain commands', () => {
         return new Response(
           JSON.stringify({
             output: {
+              mediaReference,
               signedUpload: {
                 expiresInSeconds: 600,
                 method: 'PUT',
@@ -5706,6 +5669,9 @@ describe('hosted domain commands', () => {
         'https://uploads.example.com/clip.mp4',
       );
       assert.deepEqual(output.output.storageReference, storageReference);
+      // The persistent postplus-media:// reference minted by create-upload-url is
+      // composed into the final result beside storageReference/download_url.
+      assert.equal(output.output.mediaReference, mediaReference);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -6176,19 +6142,10 @@ describe('hosted domain commands', () => {
   it('writes quote confirmation challenges beside hosted command outputs', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
     const outputPath = resolve(requestDir, 'result.json');
     const challenge = buildLargeCreditChallenge({
       requiredTierMillicredits: 100_000,
     });
-    await writeFile(
-      requestPath,
-      JSON.stringify({
-        duration: 5,
-        prompt: 'demo',
-        resolution: '720p',
-      }),
-    );
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -6220,8 +6177,12 @@ describe('hosted domain commands', () => {
           runHostedDomainCommand('media', [
             'create',
             'video-seedance-2-text',
-            '--request',
-            requestPath,
+            '--prompt',
+            'demo',
+            '--resolution',
+            '720p',
+            '--duration',
+            '5',
             '--output',
             outputPath,
           ]),
@@ -6843,20 +6804,22 @@ describe('hosted lib / bin request parity', () => {
       ],
     },
     {
-      name: 'media create (request-json surface) video-seedance-2-text',
+      name: 'media create (flags surface) video-seedance-2-text',
       domain: 'media',
       baseArgs: [
         'create',
         'video-seedance-2-text',
+        '--prompt',
+        'a blue sticky note slides across a white desk',
+        '--resolution',
+        '720p',
+        '--duration',
+        '5',
+        '--aspect-ratio',
+        '9:16',
         '--hosted-operation-id',
         PARITY_OP_ID,
       ],
-      requestJson: {
-        prompt: 'a blue sticky note slides across a white desk',
-        resolution: '720p',
-        duration: 5,
-        aspect_ratio: '9:16',
-      },
     },
     {
       name: 'research collect google-trends-fast',
@@ -6980,10 +6943,11 @@ describe('hosted lib / bin request parity', () => {
         args: [
           'create',
           'video-seedance-2-text',
+          '--prompt',
+          'parity payload',
           '--hosted-operation-id',
           PARITY_OP_ID,
         ],
-        requestJson: { prompt: 'parity payload' },
         auth: PARITY_AUTH,
         skillsReleaseId: PARITY_RELEASE_ID,
       });
@@ -7057,10 +7021,11 @@ describe('hosted lib / bin request parity', () => {
             args: [
               'create',
               'video-seedance-2-text',
+              '--prompt',
+              'parity error',
               '--hosted-operation-id',
               PARITY_OP_ID,
             ],
-            requestJson: { prompt: 'parity error' },
             auth: PARITY_AUTH,
             skillsReleaseId: PARITY_RELEASE_ID,
           }),

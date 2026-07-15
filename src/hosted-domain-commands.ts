@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import {
@@ -9,6 +11,7 @@ import {
   sendAuthedCloudRequest,
 } from './authed-cloud-request.js';
 import { formatPostPlusCompatibilityError } from './client-compatibility.js';
+import { HOSTED_MEDIA_REFERENCE_URI_PREFIX } from './generated/hosted-field-validation-core.generated.js';
 import { assertModelledFieldValuesInRange } from './hosted-field-validation.js';
 import {
   type HostedDomain,
@@ -551,6 +554,9 @@ export async function runMediaFileCommand(
   if (subcommand === 'upload') {
     return runMediaFileUpload(rest, context);
   }
+  if (subcommand === 'download') {
+    return runMediaFileDownload(rest, context);
+  }
   printMediaFileHelp();
   return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
 }
@@ -634,6 +640,7 @@ async function runMediaFileUpload(
         const output = readHostedUploadOutput(payload);
         const signedUpload = readSignedUpload(output);
         const storageReference = readStorageReferenceValue(output);
+        const mediaReference = readMediaReferenceValue(output);
         await putHostedMediaBytes(signedUpload, absolutePath);
 
         const uploadResult = await postHostedJson({
@@ -656,19 +663,21 @@ async function runMediaFileUpload(
           context,
         });
 
-        // Surface the Supabase storageReference this two-step upload already
-        // used. The provider upload response only carries the provider fetch URL
-        // (output.data.download_url); the storage reference minted at
-        // create-upload-url is dropped by the provider response, yet it is the
-        // ONLY shape that hosted verbs re-materializing bytes from storage accept
-        // (`media analyze` file_reference -> parseHostedMediaStorageReference,
-        // which rejects URLs). Compose it back in at output.storageReference,
-        // sibling to output.data.download_url, so a local-file -> analyze flow has
-        // a real handoff instead of a dead end.
-        return attachStorageReferenceToUploadResult(
-          uploadResult,
+        // Surface the storage handoff this two-step upload already minted.
+        // The provider upload response only carries the provider fetch URL
+        // (output.data.download_url, a signed URL that EXPIRES); the
+        // create-upload-url response also minted (a) the Supabase
+        // storageReference — the only shape hosted verbs re-materializing bytes
+        // from storage accept (`media analyze` file_reference) — and (b) the
+        // persistent `postplus-media://` mediaReference, which never expires and
+        // is accepted by media-generation media fields and `media-file download
+        // --reference`. Compose both back in as siblings of
+        // output.data.download_url so the upload has durable handoffs instead of
+        // a dead end once the signed URL lapses.
+        return attachStorageHandoffToUploadResult(uploadResult, {
+          mediaReference,
           storageReference,
-        );
+        });
       },
       errorInputLabel: inputFile,
       json: flags.booleans.has('json'),
@@ -676,6 +685,124 @@ async function runMediaFileUpload(
     },
     context,
   );
+}
+
+/**
+ * `media-file download`: fetch produced/uploaded media bytes to a local file.
+ * `--reference <postplus-media://...>` exchanges the persistent reference for a
+ * fresh signed read URL via the uncharged hosted `create-read-url` operation
+ * (works long after the original signed URL expired); `--url <https://...>`
+ * fetches a still-fresh provider or signed URL directly. Exactly one source is
+ * required. Note: for most provider families the historical `runs show`
+ * providerUrls are provider-side temporary URLs — download while fresh, or
+ * upload-derived media via `--reference`.
+ */
+async function runMediaFileDownload(
+  args: string[],
+  context: HostedRequestContext | undefined,
+): Promise<number | unknown> {
+  const flags = parseFlags(args, new Set(['json']));
+  const allowedKeys = new Set([
+    'hosted-operation-id',
+    'json',
+    'output',
+    'output-file',
+    'reference',
+    'skill',
+    'url',
+  ]);
+  for (const key of [...flags.values.keys(), ...flags.booleans]) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`Unknown option for media-file download: --${key}.`);
+    }
+  }
+
+  const reference = flags.values.get('reference') ?? null;
+  const directUrl = flags.values.get('url') ?? null;
+  if ((reference === null) === (directUrl === null)) {
+    throw new Error(
+      'media-file download requires exactly one of --reference <postplus-media://...> or --url <https://...>.',
+    );
+  }
+  if (reference !== null && !reference.startsWith(HOSTED_MEDIA_REFERENCE_URI_PREFIX)) {
+    throw new Error(
+      `media-file download --reference must start with ${HOSTED_MEDIA_REFERENCE_URI_PREFIX}.`,
+    );
+  }
+  if (directUrl !== null && !/^https:\/\//iu.test(directUrl)) {
+    throw new Error('media-file download --url must be a remote HTTPS URL.');
+  }
+  const outputFile = requireFlag(flags, 'output-file');
+  const absoluteOutput = path.resolve(outputFile);
+  const outputPath = flags.values.get('output') ?? null;
+  const hostedOperationId = flags.values.get('hosted-operation-id') ?? null;
+
+  return dispatchHostedCommand(
+    {
+      request: async () => {
+        let downloadUrl = directUrl;
+        if (reference !== null) {
+          const payload = await postHostedJson({
+            body: {
+              capability: 'media-file',
+              operation: 'create-read-url',
+              file: { mediaReference: reference },
+              operationId:
+                hostedOperationId ??
+                `postplus-cli:media-file:create-read-url:${randomUUID()}`,
+            },
+            pathName: '/api/postplus-cli/hosted/capability',
+            skillName: flags.values.get('skill') ?? null,
+            context,
+          });
+          const output = readHostedUploadOutput(payload);
+          const signedUrl = output.signedUrl;
+          if (typeof signedUrl !== 'string' || !signedUrl.trim()) {
+            throw new Error(
+              'Hosted media create-read-url response is missing signedUrl.',
+            );
+          }
+          downloadUrl = signedUrl.trim();
+        }
+        const sizeBytes = await fetchMediaBytesToFile(
+          downloadUrl as string,
+          absoluteOutput,
+        );
+        return {
+          output: {
+            downloadedTo: absoluteOutput,
+            sizeBytes,
+            source: reference ?? downloadUrl,
+          },
+        };
+      },
+      errorInputLabel: reference ?? (directUrl as string),
+      json: flags.booleans.has('json'),
+      outputPath,
+    },
+    context,
+  );
+}
+
+async function fetchMediaBytesToFile(
+  url: string,
+  absoluteOutput: string,
+): Promise<number> {
+  await mkdir(path.dirname(absoluteOutput), { recursive: true });
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(120000),
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(
+      `Hosted media download failed with status ${response.status}.`,
+    );
+  }
+  await pipeline(
+    Readable.fromWeb(response.body as import('node:stream/web').ReadableStream),
+    createWriteStream(absoluteOutput),
+  );
+  const written = await stat(absoluteOutput);
+  return written.size;
 }
 
 type SignedUpload = {
@@ -746,16 +873,28 @@ function readStorageReferenceValue(output: Record<string, unknown>): unknown {
   return storageReference;
 }
 
-// Compose the create-upload-url storageReference into the final `media-file
-// upload` result at output.storageReference. The provider upload response only
-// exposes the provider fetch URL (output.data.download_url); the Supabase
-// storage reference is otherwise lost after the two-step flow, leaving verbs
-// that re-materialize bytes from storage (media analyze file_reference) with no
-// public way to obtain it. Fail loud if the envelope shape is unexpected rather
-// than silently dropping the reference.
-function attachStorageReferenceToUploadResult(
+function readMediaReferenceValue(output: Record<string, unknown>): string {
+  const mediaReference = output.mediaReference;
+  if (
+    typeof mediaReference !== 'string' ||
+    !mediaReference.startsWith(HOSTED_MEDIA_REFERENCE_URI_PREFIX)
+  ) {
+    throw new Error(
+      `Hosted media upload response is missing the persistent ${HOSTED_MEDIA_REFERENCE_URI_PREFIX} mediaReference.`,
+    );
+  }
+  return mediaReference;
+}
+
+// Compose the create-upload-url storage handoff (storageReference +
+// mediaReference) into the final `media-file upload` result. The provider
+// upload response only exposes the provider fetch URL (output.data.download_url);
+// both durable identities minted at create-upload-url are otherwise lost after
+// the two-step flow. Fail loud if the envelope shape is unexpected rather than
+// silently dropping the handoff.
+function attachStorageHandoffToUploadResult(
   payload: unknown,
-  storageReference: unknown,
+  handoff: { mediaReference: string; storageReference: unknown },
 ): unknown {
   if (
     !payload ||
@@ -764,21 +903,22 @@ function attachStorageReferenceToUploadResult(
     !('output' in payload)
   ) {
     throw new Error(
-      'Hosted media upload response is missing output; cannot attach storageReference.',
+      'Hosted media upload response is missing output; cannot attach the storage handoff.',
     );
   }
   const record = payload as Record<string, unknown>;
   const output = record.output;
   if (!output || typeof output !== 'object' || Array.isArray(output)) {
     throw new Error(
-      'Hosted media upload output is not an object; cannot attach storageReference.',
+      'Hosted media upload output is not an object; cannot attach the storage handoff.',
     );
   }
   return {
     ...record,
     output: {
       ...(output as Record<string, unknown>),
-      storageReference,
+      mediaReference: handoff.mediaReference,
+      storageReference: handoff.storageReference,
     },
   };
 }
@@ -806,6 +946,12 @@ function printMediaFileHelp(): void {
 
 Usage:
   postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
+  postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--json] [--output <result.json>]
+
+The upload result carries output.mediaReference (persistent postplus-media://
+reference, never expires): reuse it in media-generation media fields and in
+media-file download --reference. output.data.download_url is a signed URL that
+expires.
 `);
 }
 

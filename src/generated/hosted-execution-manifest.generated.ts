@@ -1379,7 +1379,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "seedance-submitter",
       "mode": "cli-runner",
-      "surface": "request-json",
+      "surface": "flags",
       "verb": "create",
       "domain": "media",
       "capability": "media-generation",
@@ -1400,21 +1400,21 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--prompt",
               "type": "string",
               "required": true
             },
             {
               "name": "image",
               "class": "intent",
-              "flag": null,
+              "flag": "--image",
               "type": "media-url",
               "required": true
             },
             {
               "name": "resolution",
               "class": "default",
-              "flag": null,
+              "flag": "--resolution",
               "type": "string",
               "enumValues": [
                 "480p",
@@ -1427,7 +1427,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "duration",
               "class": "default",
-              "flag": null,
+              "flag": "--duration",
               "type": "number",
               "default": 5,
               "required": false,
@@ -1471,14 +1471,14 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--prompt",
               "type": "string",
               "required": true
             },
             {
               "name": "resolution",
               "class": "default",
-              "flag": null,
+              "flag": "--resolution",
               "type": "string",
               "enumValues": [
                 "480p",
@@ -1491,7 +1491,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "aspect_ratio",
               "class": "intent",
-              "flag": null,
+              "flag": "--aspect-ratio",
               "type": "string",
               "enumValues": [
                 "21:9",
@@ -1506,7 +1506,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "duration",
               "class": "default",
-              "flag": null,
+              "flag": "--duration",
               "type": "number",
               "default": 5,
               "required": false,
@@ -1516,7 +1516,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "reference_images",
               "class": "intent",
-              "flag": null,
+              "flag": "--reference-image",
               "type": "media-url",
               "repeatable": true,
               "required": false
@@ -1524,7 +1524,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "reference_videos",
               "class": "intent",
-              "flag": null,
+              "flag": "--reference-video",
               "type": "media-url",
               "repeatable": true,
               "required": false
@@ -1532,7 +1532,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "reference_audios",
               "class": "intent",
-              "flag": null,
+              "flag": "--reference-audio",
               "type": "media-url",
               "repeatable": true,
               "required": false
@@ -1540,7 +1540,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "generate_audio",
               "class": "default",
-              "flag": null,
+              "flag": "--generate-audio",
               "type": "boolean",
               "default": true,
               "required": false
@@ -1582,21 +1582,21 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--prompt",
               "type": "string",
               "required": true
             },
             {
               "name": "image",
               "class": "intent",
-              "flag": null,
+              "flag": "--image",
               "type": "media-url",
               "required": true
             },
             {
               "name": "resolution",
               "class": "default",
-              "flag": null,
+              "flag": "--resolution",
               "type": "string",
               "enumValues": [
                 "480p",
@@ -1610,7 +1610,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "duration",
               "class": "default",
-              "flag": null,
+              "flag": "--duration",
               "type": "number",
               "default": 5,
               "required": false,
@@ -1654,21 +1654,21 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--prompt",
               "type": "string",
               "required": true
             },
             {
               "name": "image",
               "class": "intent",
-              "flag": null,
+              "flag": "--image",
               "type": "media-url",
               "required": true
             },
             {
               "name": "resolution",
               "class": "default",
-              "flag": null,
+              "flag": "--resolution",
               "type": "string",
               "enumValues": [
                 "480p",
@@ -1681,7 +1681,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "duration",
               "class": "default",
-              "flag": null,
+              "flag": "--duration",
               "type": "number",
               "default": 5,
               "required": false,
@@ -1725,14 +1725,14 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--prompt",
               "type": "string",
               "required": true
             },
             {
               "name": "resolution",
               "class": "default",
-              "flag": null,
+              "flag": "--resolution",
               "type": "string",
               "enumValues": [
                 "480p",
@@ -1745,7 +1745,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "aspect_ratio",
               "class": "intent",
-              "flag": null,
+              "flag": "--aspect-ratio",
               "type": "string",
               "enumValues": [
                 "21:9",
@@ -1760,7 +1760,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "duration",
               "class": "default",
-              "flag": null,
+              "flag": "--duration",
               "type": "number",
               "default": 5,
               "required": false,
@@ -1770,7 +1770,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "reference_images",
               "class": "intent",
-              "flag": null,
+              "flag": "--reference-image",
               "type": "media-url",
               "repeatable": true,
               "required": false
@@ -1778,7 +1778,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "generate_audio",
               "class": "default",
-              "flag": null,
+              "flag": "--generate-audio",
               "type": "boolean",
               "default": true,
               "required": false
@@ -1820,14 +1820,14 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--prompt",
               "type": "string",
               "required": true
             },
             {
               "name": "resolution",
               "class": "default",
-              "flag": null,
+              "flag": "--resolution",
               "type": "string",
               "enumValues": [
                 "480p",
@@ -1841,7 +1841,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "aspect_ratio",
               "class": "intent",
-              "flag": null,
+              "flag": "--aspect-ratio",
               "type": "string",
               "enumValues": [
                 "21:9",
@@ -1856,7 +1856,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "duration",
               "class": "default",
-              "flag": null,
+              "flag": "--duration",
               "type": "number",
               "default": 5,
               "required": false,
@@ -1866,7 +1866,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "reference_images",
               "class": "intent",
-              "flag": null,
+              "flag": "--reference-image",
               "type": "media-url",
               "repeatable": true,
               "required": false
@@ -1874,7 +1874,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "reference_videos",
               "class": "intent",
-              "flag": null,
+              "flag": "--reference-video",
               "type": "media-url",
               "repeatable": true,
               "required": false
@@ -1882,7 +1882,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "reference_audios",
               "class": "intent",
-              "flag": null,
+              "flag": "--reference-audio",
               "type": "media-url",
               "repeatable": true,
               "required": false
@@ -1890,7 +1890,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "generate_audio",
               "class": "default",
-              "flag": null,
+              "flag": "--generate-audio",
               "type": "boolean",
               "default": true,
               "required": false
@@ -2048,7 +2048,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "video-batch-runner",
       "mode": "cli-runner",
-      "surface": "request-json",
+      "surface": "flags",
       "verb": "create",
       "domain": "media",
       "capability": "media-generation",
@@ -2069,14 +2069,14 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--prompt",
               "type": "string",
               "required": true
             },
             {
               "name": "aspect_ratio",
               "class": "intent",
-              "flag": null,
+              "flag": "--aspect-ratio",
               "type": "string",
               "enumValues": [
                 "16:9",
@@ -2088,7 +2088,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "duration",
               "class": "default",
-              "flag": null,
+              "flag": "--duration",
               "type": "number",
               "default": 5,
               "required": false,
@@ -2098,7 +2098,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "sound",
               "class": "default",
-              "flag": null,
+              "flag": "--sound",
               "type": "boolean",
               "default": false,
               "required": false
@@ -2138,21 +2138,21 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--prompt",
               "type": "string",
               "required": true
             },
             {
               "name": "image",
               "class": "intent",
-              "flag": null,
+              "flag": "--image",
               "type": "media-url",
               "required": true
             },
             {
               "name": "duration",
               "class": "default",
-              "flag": null,
+              "flag": "--duration",
               "type": "number",
               "default": 5,
               "required": false,
@@ -2162,7 +2162,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "sound",
               "class": "default",
-              "flag": null,
+              "flag": "--sound",
               "type": "boolean",
               "default": false,
               "required": false
@@ -2202,14 +2202,14 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--prompt",
               "type": "string",
               "required": true
             },
             {
               "name": "aspect_ratio",
               "class": "intent",
-              "flag": null,
+              "flag": "--aspect-ratio",
               "type": "string",
               "enumValues": [
                 "16:9",
@@ -2221,7 +2221,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "duration",
               "class": "default",
-              "flag": null,
+              "flag": "--duration",
               "type": "number",
               "default": 5,
               "required": false,
@@ -2231,7 +2231,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "sound",
               "class": "default",
-              "flag": null,
+              "flag": "--sound",
               "type": "boolean",
               "default": false,
               "required": false
@@ -2271,21 +2271,21 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--prompt",
               "type": "string",
               "required": true
             },
             {
               "name": "image",
               "class": "intent",
-              "flag": null,
+              "flag": "--image",
               "type": "media-url",
               "required": true
             },
             {
               "name": "duration",
               "class": "default",
-              "flag": null,
+              "flag": "--duration",
               "type": "number",
               "default": 5,
               "required": false,
@@ -2295,7 +2295,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "sound",
               "class": "default",
-              "flag": null,
+              "flag": "--sound",
               "type": "boolean",
               "default": false,
               "required": false
@@ -2335,21 +2335,21 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "image",
               "class": "intent",
-              "flag": null,
+              "flag": "--image",
               "type": "media-url",
               "required": true
             },
             {
               "name": "audio",
               "class": "intent",
-              "flag": null,
+              "flag": "--audio",
               "type": "media-url",
               "required": true
             },
             {
               "name": "resolution",
               "class": "default",
-              "flag": null,
+              "flag": "--resolution",
               "type": "string",
               "default": "720p",
               "required": false
@@ -2357,21 +2357,21 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "seed",
               "class": "intent",
-              "flag": null,
+              "flag": "--seed",
               "type": "number",
               "required": false
             },
             {
               "name": "prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--prompt",
               "type": "string",
               "required": false
             },
             {
               "name": "mask_image",
               "class": "intent",
-              "flag": null,
+              "flag": "--mask-image",
               "type": "media-url",
               "required": false
             },
@@ -2409,42 +2409,42 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "image",
               "class": "intent",
-              "flag": null,
+              "flag": "--image",
               "type": "media-url",
               "required": true
             },
             {
               "name": "video",
               "class": "intent",
-              "flag": null,
+              "flag": "--video",
               "type": "media-url",
               "required": true
             },
             {
               "name": "character_orientation",
               "class": "intent",
-              "flag": null,
+              "flag": "--character-orientation",
               "type": "string",
               "required": true
             },
             {
               "name": "prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--prompt",
               "type": "string",
               "required": false
             },
             {
               "name": "negative_prompt",
               "class": "intent",
-              "flag": null,
+              "flag": "--negative-prompt",
               "type": "string",
               "required": false
             },
             {
               "name": "keep_original_sound",
               "class": "intent",
-              "flag": null,
+              "flag": "--keep-original-sound",
               "type": "boolean",
               "required": false
             },
@@ -2577,7 +2577,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "voice-batch-runner",
       "mode": "cli-runner",
-      "surface": "request-json",
+      "surface": "flags",
       "verb": "create",
       "domain": "media",
       "capability": "media-generation",
@@ -2594,21 +2594,21 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "text",
               "class": "intent",
-              "flag": null,
+              "flag": "--text",
               "type": "string",
               "required": true
             },
             {
               "name": "voice_description",
               "class": "intent",
-              "flag": null,
+              "flag": "--voice-description",
               "type": "string",
               "required": true
             },
             {
               "name": "language",
               "class": "default",
-              "flag": null,
+              "flag": "--language",
               "type": "string",
               "enumValues": [
                 "auto",
@@ -2660,28 +2660,28 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             {
               "name": "text",
               "class": "intent",
-              "flag": null,
+              "flag": "--text",
               "type": "string",
               "required": true
             },
             {
               "name": "audio",
               "class": "intent",
-              "flag": null,
+              "flag": "--audio",
               "type": "media-url",
               "required": true
             },
             {
               "name": "reference_text",
               "class": "intent",
-              "flag": null,
+              "flag": "--reference-text",
               "type": "string",
               "required": false
             },
             {
               "name": "language",
               "class": "default",
-              "flag": null,
+              "flag": "--language",
               "type": "string",
               "enumValues": [
                 "auto",

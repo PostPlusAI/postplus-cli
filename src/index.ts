@@ -96,6 +96,7 @@ Usage:
   postplus media estimate <endpoint-key> --request <input.json> | --<flags> [--json]
   postplus media poll --handle <run-id> [--json] [--output <result.json>]
   postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--output <result.json>]
+  postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--output <result.json>]
   postplus publish schema [--json]
   postplus publish <operation> --request <input.json> [--output <result.json>]
   postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <millicredits>]

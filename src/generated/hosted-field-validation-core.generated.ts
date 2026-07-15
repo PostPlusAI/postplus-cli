@@ -33,6 +33,15 @@ export type CanonicalizableField = {
   canonicalize?: 'lowercase' | 'image-resolution-tier';
 };
 
+// Persistent hosted-media reference URI scheme, shared by the Web boundary
+// (admission ownership check + send-state signed-URL exchange) and the CLI
+// (media-file upload output, media-file download). Shape:
+// `postplus-media://<bucket>/<percent-encoded storage path>`. The storage
+// object has no TTL, so unlike a signed download_url the reference never
+// expires; media-generation media-url fields accept it wherever they accept a
+// remote HTTPS URL.
+export const HOSTED_MEDIA_REFERENCE_URI_PREFIX = 'postplus-media://';
+
 // k-tier normalization for image resolution ("4K" -> "4k").
 export function canonicalizeImageResolution(value: string): string {
   const trimmed = value.trim();
