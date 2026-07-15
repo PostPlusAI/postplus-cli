@@ -1370,7 +1370,17 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "collections": [
         {
           "collectionKey": "pinterest-search",
-          "actorId": "easyapi/pinterest-search-scraper"
+          "actorId": "easyapi/pinterest-search-scraper",
+          "inputFields": [
+            {
+              "name": "limit",
+              "type": "number",
+              "required": false,
+              "integer": true,
+              "min": 20,
+              "default": 20
+            }
+          ]
         }
       ]
     }
