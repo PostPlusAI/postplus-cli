@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -793,7 +793,12 @@ async function fetchMediaBytesToFile(
   url: string,
   absoluteOutput: string,
 ): Promise<number> {
-  await mkdir(path.dirname(absoluteOutput), { recursive: true });
+  const outputDirectory = path.dirname(absoluteOutput);
+  const temporaryOutput = path.join(
+    outputDirectory,
+    `.${path.basename(absoluteOutput)}.postplus-download-${randomUUID()}.tmp`,
+  );
+  await mkdir(outputDirectory, { recursive: true });
   const response = await fetch(url, {
     signal: AbortSignal.timeout(120000),
   });
@@ -802,12 +807,19 @@ async function fetchMediaBytesToFile(
       `Hosted media download failed with status ${response.status}.`,
     );
   }
-  await pipeline(
-    Readable.fromWeb(response.body as import('node:stream/web').ReadableStream),
-    createWriteStream(absoluteOutput),
-  );
-  const written = await stat(absoluteOutput);
-  return written.size;
+  try {
+    await pipeline(
+      Readable.fromWeb(
+        response.body as import('node:stream/web').ReadableStream,
+      ),
+      createWriteStream(temporaryOutput, { flags: 'wx' }),
+    );
+    const written = await stat(temporaryOutput);
+    await rename(temporaryOutput, absoluteOutput);
+    return written.size;
+  } finally {
+    await rm(temporaryOutput, { force: true });
+  }
 }
 
 type SignedUpload = {
@@ -2008,6 +2020,8 @@ function parseFlags(
         booleanValues.set(key, next === 'true');
         if (next === 'true') {
           booleans.add(key);
+        } else {
+          booleans.delete(key);
         }
         index += 1;
         continue;

@@ -3969,6 +3969,21 @@ describe('skill management commands', () => {
 
 describe('hosted domain commands', () => {
   it('documents the thin public hosted command contracts', async () => {
+    const { stdout: topLevelHelp } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'help',
+    ]);
+    assert.match(
+      topLevelHelp,
+      /postplus media-file download .* \[--json\] \[--output <result\.json>\]/u,
+    );
+    assert.match(
+      topLevelHelp,
+      /postplus media-file upload .* \[--json\] \[--output <result\.json>\]/u,
+    );
+
     const { stdout: researchHelp } = await execFileAsync(process.execPath, [
       '--import',
       'tsx',
@@ -5742,6 +5757,125 @@ describe('hosted domain commands', () => {
       // The persistent postplus-media:// reference minted by create-upload-url is
       // composed into the final result beside storageReference/download_url.
       assert.equal(output.output.mediaReference, mediaReference);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('media-file download resolves a persistent reference and honors the last repeated boolean value', async () => {
+    const downloadDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-cli-download-'),
+    );
+    tempDirs.push(downloadDir);
+    const mediaPath = resolve(downloadDir, 'clip.mp4');
+    const resultPath = resolve(downloadDir, 'result.json');
+    const mediaReference =
+      'postplus-media://uploads/user_1/hosted-media/outputs/clip.mp4';
+    const mediaBytes = Buffer.from('downloaded-media-bytes');
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+    let stdoutText = '';
+    let hostedBody: Record<string, unknown> | null = null;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url === 'https://postplus.test/api/postplus-cli/hosted/capability') {
+        hostedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(
+          JSON.stringify({
+            output: { signedUrl: 'https://download.test/signed-clip' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === 'https://download.test/signed-clip') {
+        return new Response(mediaBytes, { status: 200 });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    };
+    process.stdout.write = ((chunk: unknown) => {
+      stdoutText += String(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+
+    try {
+      const result = await runMediaFileCommand([
+        'download',
+        '--reference',
+        mediaReference,
+        '--output-file',
+        mediaPath,
+        '--output',
+        resultPath,
+        '--json',
+        '--json',
+        'false',
+      ]);
+      assert.equal(result, 0);
+      assert.equal(stdoutText, '');
+      assert.deepEqual(await readFile(mediaPath), mediaBytes);
+      const requestBody = hostedBody as Record<string, unknown>;
+      assert.equal(requestBody.capability, 'media-file');
+      assert.deepEqual(requestBody.file, { mediaReference });
+      assert.equal(requestBody.operation, 'create-read-url');
+      assert.match(
+        String(requestBody.operationId),
+        /^postplus-cli:media-file:create-read-url:/u,
+      );
+      const output = JSON.parse(await readFile(resultPath, 'utf8'));
+      assert.equal(output.output.downloadedTo, mediaPath);
+      assert.equal(output.output.sizeBytes, mediaBytes.length);
+      assert.equal(output.output.source, mediaReference);
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stdout.write = originalStdoutWrite;
+    }
+  });
+
+  it('media-file download preserves an existing destination when streaming fails', async () => {
+    const downloadDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-cli-download-'),
+    );
+    tempDirs.push(downloadDir);
+    const mediaPath = resolve(downloadDir, 'clip.mp4');
+    const originalBytes = Buffer.from('existing-complete-media');
+    await writeFile(mediaPath, originalBytes);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Buffer.from('partial-replacement'));
+          controller.error(new Error('mock download stream failed'));
+        },
+      });
+      return new Response(body, { status: 200 });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runMediaFileCommand([
+            'download',
+            '--url',
+            'https://download.test/failing-clip',
+            '--output-file',
+            mediaPath,
+          ]),
+        /mock download stream failed/u,
+      );
+      assert.deepEqual(await readFile(mediaPath), originalBytes);
+      assert.deepEqual(await readdir(downloadDir), ['clip.mp4']);
     } finally {
       globalThis.fetch = originalFetch;
     }
