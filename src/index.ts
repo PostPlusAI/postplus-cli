@@ -96,9 +96,9 @@ Usage:
   postplus media schema [--endpoint <endpoint-key>] [--json]
   postplus media <verb> <endpoint-key> --request <input.json> | --<flags> [--output <result.json>]
   postplus media estimate <endpoint-key> --request <input.json> | --<flags> [--json]
-  postplus media poll --handle <run-id> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json] [--output <result.json>]
+  postplus media poll --handle <run-id> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--debug] [--json] [--output <result.json>]
   postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
-  postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--json] [--output <result.json>]
+  postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
   postplus publish schema [--json]
   postplus publish <operation> --request <input.json> [--output <result.json>]
   postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <millicredits>]
@@ -305,7 +305,9 @@ async function runQuoteCommand(rest: string[]): Promise<number> {
     return 1;
   }
 
-  const ceilingMillicredits = resolveQuoteAutoConfirmCeiling(parsed.autoConfirmUnder);
+  const ceilingMillicredits = resolveQuoteAutoConfirmCeiling(
+    parsed.autoConfirmUnder,
+  );
 
   try {
     writeJson(
@@ -574,7 +576,10 @@ async function main(): Promise<void> {
       )) as number;
       return;
     case 'media':
-      process.exitCode = (await runHostedDomainCommand('media', rest)) as number;
+      process.exitCode = (await runHostedDomainCommand(
+        'media',
+        rest,
+      )) as number;
       return;
     case 'media-file':
       process.exitCode = (await runMediaFileCommand(rest)) as number;
@@ -622,7 +627,9 @@ async function main(): Promise<void> {
             return;
           }
           if (authRest.length > 0) {
-            process.stderr.write(`Unknown auth login option: ${authRest[0]}\n\n`);
+            process.stderr.write(
+              `Unknown auth login option: ${authRest[0]}\n\n`,
+            );
             printAuthHelp();
             process.exitCode = 1;
             return;

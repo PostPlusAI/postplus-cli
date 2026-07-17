@@ -1,4 +1,5 @@
 import { buildPostPlusClientCompatibilityHeaders } from './client-compatibility.js';
+import { fetchWithNetworkDiagnostics } from './network-diagnostics.js';
 
 const DEFAULT_AUTHED_REQUEST_TIMEOUT_MS = 15_000;
 
@@ -16,6 +17,7 @@ export type AuthedCloudRequestInput = {
    * application/json` and the serialized body; when omitted neither is sent.
    */
   body?: unknown;
+  debug?: boolean;
   skillName?: string | null;
   /**
    * In-process override for the skills release id header. When provided (the
@@ -78,14 +80,22 @@ async function issueAuthedCloudRequest(
 
   const requestUrl = new URL(input.pathName, normalizeBaseUrl(auth.apiBaseUrl));
 
-  return fetch(requestUrl, {
-    method: input.method ?? 'GET',
-    headers,
-    ...(hasBody ? { body: JSON.stringify(input.body) } : {}),
-    signal: AbortSignal.timeout(
-      input.timeoutMs ?? DEFAULT_AUTHED_REQUEST_TIMEOUT_MS,
-    ),
-  });
+  return fetchWithNetworkDiagnostics(
+    requestUrl,
+    {
+      method: input.method ?? 'GET',
+      headers,
+      ...(hasBody ? { body: JSON.stringify(input.body) } : {}),
+      signal: AbortSignal.timeout(
+        input.timeoutMs ?? DEFAULT_AUTHED_REQUEST_TIMEOUT_MS,
+      ),
+    },
+    {
+      ...(input.debug !== undefined ? { debug: input.debug } : {}),
+      label: 'cloud',
+      redirectPolicy: 'error',
+    },
+  );
 }
 
 function normalizeBaseUrl(apiBaseUrl: string): string {

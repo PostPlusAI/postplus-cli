@@ -27,13 +27,14 @@ import {
 } from './auth-validate.js';
 import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import {
-  POSTPLUS_CLI_UPDATE_COMMAND,
   POSTPLUS_CLIENT_COMPATIBILITY_HEADERS,
+  POSTPLUS_CLI_UPDATE_COMMAND,
   POSTPLUS_UPDATE_COMMAND,
   formatPostPlusClientUpgradeError,
 } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import {
+  buildRunsListPath,
   fetchHostedBalance,
   fetchHostedRunDetail,
   fetchHostedRunsList,
@@ -41,7 +42,6 @@ import {
   formatHostedRunDetailReport,
   formatHostedRunsListReport,
   parseRunsListOptions,
-  buildRunsListPath,
   runBalanceCommand,
   runRunsCommand,
 } from './hosted-account-commands.js';
@@ -49,8 +49,8 @@ import {
   runHostedDomainCommand,
   runMediaFileCommand,
 } from './hosted-domain-commands.js';
-import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import { runHostedRequest } from './hosted-lib.js';
+import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import { generateLocalDependencyReport } from './local-dependencies.js';
 import {
   readLocalConfig,
@@ -5172,7 +5172,9 @@ describe('hosted domain commands', () => {
         () => runHostedDomainCommand('media', ['estimate', 'not-an-endpoint']),
         (error: unknown) =>
           error instanceof Error &&
-          /Unknown media estimate endpoint not-an-endpoint/u.test(error.message),
+          /Unknown media estimate endpoint not-an-endpoint/u.test(
+            error.message,
+          ),
       );
       assert.equal(fetchCalls, 0);
     } finally {
@@ -5181,6 +5183,9 @@ describe('hosted domain commands', () => {
   });
 
   it('emits a literal resume command on an async-pending media submit in both human and --json modes', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-resume-'));
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'generation result.json');
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -5235,6 +5240,15 @@ describe('hosted domain commands', () => {
     // --json mode: same literal resume command on stderr (stdout stays pure JSON).
     const jsonStderr = await runSubmit(['--json'], pending);
     assert.match(jsonStderr, /postplus media poll --handle 'run_1'/u);
+
+    // When the submit result was projected to a file, resume the same file so
+    // a completed poll atomically replaces the stale processing projection.
+    const outputStderr = await runSubmit(['--output', outputPath], pending);
+    assert.ok(
+      outputStderr.includes(
+        `postplus media poll --handle 'run_1' --output '${outputPath}'`,
+      ),
+    );
 
     // A terminal payload has nothing to resume — stay silent.
     const terminalStderr = await runSubmit([], {
@@ -5309,6 +5323,185 @@ describe('hosted domain commands', () => {
       assert.equal('quoteConfirmationToken' in body, false);
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('surfaces the media poll host and nested transport cause without leaking request paths', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const networkCause = Object.assign(
+      new Error('getaddrinfo ENOTFOUND postplus.test'),
+      {
+        code: 'ENOTFOUND',
+        hostname: 'postplus.test',
+        syscall: 'getaddrinfo',
+      },
+    );
+    globalThis.fetch = async () => {
+      throw new TypeError('fetch failed', { cause: networkCause });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'poll',
+            '--handle',
+            'private-run-handle',
+            '--wait-seconds',
+            '0',
+          ]),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(
+            error.message,
+            /code=postplus_cli_cloud_transport_failed, method=POST, host=postplus\.test/u,
+          );
+          assert.match(error.message, /TypeError: fetch failed/u);
+          assert.match(
+            error.message,
+            /code=ENOTFOUND.*syscall=getaddrinfo.*hostname=postplus\.test/u,
+          );
+          assert.doesNotMatch(error.message, /hosted\/capability/u);
+          assert.doesNotMatch(error.message, /private-run-handle/u);
+          return true;
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('keeps poll debug diagnostics on stderr while atomically replacing the result JSON', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-poll-'));
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'generation-result.json');
+    await writeFile(outputPath, '{"status":"processing"}\n');
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const payload = {
+      output: { data: { id: 'run_1', status: 'completed' } },
+    };
+    const originalFetch = globalThis.fetch;
+    const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+    let stderrText = '';
+    let stdoutText = '';
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    process.stderr.write = ((chunk: unknown) => {
+      stderrText += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+    process.stdout.write = ((chunk: unknown) => {
+      stdoutText += String(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'poll',
+        '--handle',
+        'run_1',
+        '--wait-seconds',
+        '0',
+        '--debug',
+        '--json',
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 0);
+      assert.deepEqual(JSON.parse(stdoutText), payload);
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), payload);
+      assert.deepEqual(await readdir(requestDir), ['generation-result.json']);
+      assert.match(
+        stderrText,
+        /cloud request method=POST target=https:\/\/postplus\.test\/api\/postplus-cli\/hosted\/capability/u,
+      );
+      assert.match(stderrText, /cloud response status=200/u);
+      assert.doesNotMatch(stdoutText, /postplus debug/u);
+      assert.doesNotMatch(stderrText, /cli-session-token/u);
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalStderrWrite;
+      process.stdout.write = originalStdoutWrite;
+    }
+  });
+
+  it('fast-fails authenticated redirects without exposing their target outside debug stderr', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    let fetchCalls = 0;
+    let stderrText = '';
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location:
+            'https://redirect.test/private/run_1?token=secret-redirect-token',
+        },
+      });
+    };
+    process.stderr.write = ((chunk: unknown) => {
+      stderrText += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand(
+            'media',
+            ['poll', '--handle', 'run_1', '--wait-seconds', '0', '--debug'],
+            {
+              auth: {
+                apiBaseUrl: 'https://postplus.test',
+                cliSessionToken: 'cli-session-token',
+              },
+            },
+          ),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(
+            error.message,
+            /method=POST, host=postplus\.test\): Unexpected HTTP 302 redirect\./u,
+          );
+          assert.doesNotMatch(error.message, /redirect\.test/u);
+          assert.doesNotMatch(error.message, /private\/run_1/u);
+          assert.doesNotMatch(error.message, /secret-redirect-token/u);
+          return true;
+        },
+      );
+      assert.equal(fetchCalls, 1);
+      assert.match(
+        stderrText,
+        /redirect status=302 .* to=https:\/\/redirect\.test\/private\/run_1/u,
+      );
+      assert.doesNotMatch(stderrText, /secret-redirect-token/u);
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalStderrWrite;
     }
   });
 
@@ -5393,7 +5586,9 @@ describe('hosted domain commands', () => {
     globalThis.fetch = async () => {
       fetchCalls += 1;
       return new Response(
-        JSON.stringify({ output: { data: { id: 'run_1', status: 'processing' } } }),
+        JSON.stringify({
+          output: { data: { id: 'run_1', status: 'processing' } },
+        }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     };
@@ -6444,8 +6639,7 @@ describe('hosted domain commands', () => {
     );
     tempDirs.push(downloadDir);
     const mediaPath = resolve(downloadDir, 'image.png');
-    const mediaReference =
-      'postplus-media://uploads/user_1/private/image.png';
+    const mediaReference = 'postplus-media://uploads/user_1/private/image.png';
 
     await setLocalSession({
       accountId: 'account_1',
@@ -6509,8 +6703,7 @@ describe('hosted domain commands', () => {
     );
     tempDirs.push(downloadDir);
     const mediaPath = resolve(downloadDir, 'image.png');
-    const mediaReference =
-      'postplus-media://uploads/user_1/private/image.png';
+    const mediaReference = 'postplus-media://uploads/user_1/private/image.png';
 
     await setLocalSession({
       accountId: 'account_1',
@@ -6547,14 +6740,13 @@ describe('hosted domain commands', () => {
         mediaReference,
         '--output-file',
         mediaPath,
+        '--output',
+        resolve(downloadDir, 'download-result.json'),
       ]);
 
       assert.equal(result, 1);
       assert.match(stderrText, /Provider network rejected the read request/u);
-      assert.match(
-        stderrText,
-        /code=postplus_cli_hosted_media_read_failed/u,
-      );
+      assert.match(stderrText, /code=postplus_cli_hosted_media_read_failed/u);
       assert.match(stderrText, /operationId=read-op-123/u);
       assert.doesNotMatch(
         stderrText,
@@ -6605,6 +6797,194 @@ describe('hosted domain commands', () => {
       );
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('media-file download follows at most five HTTPS redirects', async () => {
+    const downloadDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-cli-download-'),
+    );
+    tempDirs.push(downloadDir);
+    const mediaPath = resolve(downloadDir, 'image.png');
+    const mediaBytes = Buffer.from('redirected-image');
+    const requestedUrls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      requestedUrls.push(String(input));
+      if (requestedUrls.length <= 5) {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: `https://download.test/private/step-${requestedUrls.length}?token=secret-${requestedUrls.length}`,
+          },
+        });
+      }
+      return new Response(mediaBytes, { status: 200 });
+    };
+
+    try {
+      const result = await runMediaFileCommand([
+        'download',
+        '--url',
+        'https://download.test/private/start?token=secret-start',
+        '--output-file',
+        mediaPath,
+        '--output',
+        resolve(downloadDir, 'redirect-result.json'),
+      ]);
+      assert.equal(result, 0);
+      assert.equal(requestedUrls.length, 6);
+      assert.deepEqual(await readFile(mediaPath), mediaBytes);
+
+      let redirectCalls = 0;
+      globalThis.fetch = async () => {
+        redirectCalls += 1;
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: `https://download.test/private/overflow-${redirectCalls}?token=overflow-secret`,
+          },
+        });
+      };
+      await assert.rejects(
+        () =>
+          runMediaFileCommand([
+            'download',
+            '--url',
+            'https://download.test/private/start?token=secret-start',
+            '--output-file',
+            resolve(downloadDir, 'overflow.png'),
+          ]),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(error.message, /Redirect limit exceeded \(5\)/u);
+          assert.doesNotMatch(error.message, /overflow-secret/u);
+          assert.doesNotMatch(error.message, /private\/overflow/u);
+          return true;
+        },
+      );
+      assert.equal(redirectCalls, 6);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('media-file download refuses redirects that leave HTTPS', async () => {
+    const downloadDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-cli-download-'),
+    );
+    tempDirs.push(downloadDir);
+    const mediaPath = resolve(downloadDir, 'image.png');
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location:
+            'http://insecure.test/private/image.png?token=secret-redirect-token',
+        },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runMediaFileCommand([
+            'download',
+            '--url',
+            'https://download.test/private/start?token=secret-start',
+            '--output-file',
+            mediaPath,
+          ]),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(
+            error.message,
+            /Refused media redirect to non-HTTPS host=insecure\.test/u,
+          );
+          assert.doesNotMatch(error.message, /secret-redirect-token/u);
+          assert.doesNotMatch(error.message, /private\/image\.png/u);
+          return true;
+        },
+      );
+      assert.equal(fetchCalls, 1);
+      await assert.rejects(() => readFile(mediaPath), { code: 'ENOENT' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('media-file download emits a bounded redacted 503 body only on debug stderr', async () => {
+    const downloadDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-cli-download-'),
+    );
+    tempDirs.push(downloadDir);
+    const mediaPath = resolve(downloadDir, 'image.png');
+    const originalFetch = globalThis.fetch;
+    const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+    let stderrText = '';
+    let stdoutText = '';
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          message: 'storage temporarily unavailable',
+          mediaReference:
+            'postplus-media://results/user/private/storage-object',
+          signedUrl:
+            'https://storage.test/private/object.png?token=signed-secret',
+          token: 'response-secret-token',
+        }),
+        {
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    process.stderr.write = ((chunk: unknown) => {
+      stderrText += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+    process.stdout.write = ((chunk: unknown) => {
+      stdoutText += String(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+
+    try {
+      await assert.rejects(() =>
+        runMediaFileCommand([
+          'download',
+          '--url',
+          'https://storage.test/private/object.png?token=request-secret',
+          '--output-file',
+          mediaPath,
+          '--debug',
+          '--json',
+        ]),
+      );
+      assert.equal(stdoutText, '');
+      assert.match(
+        stderrText,
+        /media-download response status=503 Service Unavailable/u,
+      );
+      assert.match(stderrText, /storage temporarily unavailable/u);
+      assert.match(stderrText, /"token":"\[redacted\]"/u);
+      assert.match(
+        stderrText,
+        /https:\/\/storage\.test\/\[redacted-path\]\?\[redacted\]/u,
+      );
+      assert.doesNotMatch(stderrText, /private\/object\.png/u);
+      assert.match(stderrText, /\[redacted-media-reference\]/u);
+      assert.doesNotMatch(stderrText, /request-secret/u);
+      assert.doesNotMatch(stderrText, /signed-secret/u);
+      assert.doesNotMatch(stderrText, /response-secret-token/u);
+      assert.doesNotMatch(stdoutText, /postplus debug/u);
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalStderrWrite;
+      process.stdout.write = originalStdoutWrite;
     }
   });
 
@@ -6881,13 +7261,17 @@ describe('hosted domain commands', () => {
             'https://example.com/ref.png',
           ]),
         (error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           assert.match(
             message,
             /^Unknown option for media create: --reference-image\. Endpoint image-gpt-image-2-text does not accept it; it is supported by: /u,
           );
           assert.match(message, /image-gpt-image-2-edit/u);
-          assert.doesNotMatch(message, /image-gpt-image-2-text.*supported by.*image-gpt-image-2-text/u);
+          assert.doesNotMatch(
+            message,
+            /image-gpt-image-2-text.*supported by.*image-gpt-image-2-text/u,
+          );
           return true;
         },
       );
@@ -6904,7 +7288,8 @@ describe('hosted domain commands', () => {
             'https://example.com/ref.png',
           ]),
         (error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           assert.equal(
             message,
             'Unknown option for media create: --refrence-image.',
@@ -7222,7 +7607,8 @@ describe('account read-only commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          error: 'PostPlus CLI session is invalid or expired. Sign in again to continue.',
+          error:
+            'PostPlus CLI session is invalid or expired. Sign in again to continue.',
           code: 'postplus_cli_auth_invalid_session',
         }),
         { status: 401, headers: { 'content-type': 'application/json' } },
@@ -7232,8 +7618,7 @@ describe('account read-only commands', () => {
       await assert.rejects(
         () => fetchHostedBalance(),
         (error: unknown) =>
-          error instanceof Error &&
-          /invalid or expired/u.test(error.message),
+          error instanceof Error && /invalid or expired/u.test(error.message),
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -7670,7 +8055,8 @@ describe('hosted lib / bin request parity', () => {
         url: String(input),
         method: String(init?.method),
         headers: headerEntries,
-        body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+        body:
+          init?.body === undefined ? undefined : JSON.parse(String(init.body)),
       };
       return new Response(JSON.stringify({ ok: true, parity: true }), {
         status: 200,
@@ -7864,10 +8250,10 @@ describe('hosted lib / bin request parity', () => {
   it('returns the parsed hosted payload in-process (no exit code, no file)', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({ output: { data: { id: 'run_parity' } } }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
+      new Response(JSON.stringify({ output: { data: { id: 'run_parity' } } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
     try {
       const payload = await runHostedRequest({
         domain: 'media',

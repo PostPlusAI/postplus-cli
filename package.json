@@ -32,6 +32,7 @@
     "build/index.js",
     "build/local-dependencies.js",
     "build/local-state.js",
+    "build/network-diagnostics.js",
     "build/quote-confirmation.js",
     "build/skill-catalog.js",
     "build/skill-management.js",

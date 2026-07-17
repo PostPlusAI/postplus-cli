@@ -25,6 +25,12 @@ import {
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import {
+  fetchWithNetworkDiagnostics,
+  formatNetworkErrorChain,
+  isNetworkFailure,
+  readTargetHost,
+} from './network-diagnostics.js';
+import {
   type LargeCreditQuoteConfirmationChallenge,
   readLargeCreditQuoteConfirmationChallenge,
 } from './quote-confirmation.js';
@@ -94,7 +100,10 @@ async function resolveRequestBody(
     return { body: context.requestJson, errorInputLabel: 'requestJson' };
   }
   const requestPath = requireFlag(flags, 'request');
-  return { body: await readJsonFile(requestPath), errorInputLabel: requestPath };
+  return {
+    body: await readJsonFile(requestPath),
+    errorInputLabel: requestPath,
+  };
 }
 
 class HostedQuoteConfirmationRequiredError extends Error {
@@ -708,9 +717,10 @@ async function runMediaFileDownload(
   args: string[],
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
-  const flags = parseFlags(args, new Set(['json']));
+  const flags = parseFlags(args, new Set(['debug', 'json']));
   const allowedKeys = new Set([
     'hosted-operation-id',
+    'debug',
     'json',
     'output',
     'output-file',
@@ -731,7 +741,10 @@ async function runMediaFileDownload(
       'media-file download requires exactly one of --reference <postplus-media://...> or --url <https://...>.',
     );
   }
-  if (reference !== null && !reference.startsWith(HOSTED_MEDIA_REFERENCE_URI_PREFIX)) {
+  if (
+    reference !== null &&
+    !reference.startsWith(HOSTED_MEDIA_REFERENCE_URI_PREFIX)
+  ) {
     throw new Error(
       `media-file download --reference must start with ${HOSTED_MEDIA_REFERENCE_URI_PREFIX}.`,
     );
@@ -743,6 +756,7 @@ async function runMediaFileDownload(
   const absoluteOutput = path.resolve(outputFile);
   const outputPath = flags.values.get('output') ?? null;
   const hostedOperationId = flags.values.get('hosted-operation-id') ?? null;
+  const debug = flags.booleans.has('debug');
 
   return dispatchHostedCommand(
     {
@@ -766,6 +780,7 @@ async function runMediaFileDownload(
               pathName: '/api/postplus-cli/hosted/capability',
               skillName: flags.values.get('skill') ?? null,
               context,
+              debug,
             });
           } catch (error) {
             if (!isNetworkFailure(error)) {
@@ -791,6 +806,7 @@ async function runMediaFileDownload(
         const sizeBytes = await fetchMediaBytesToFile(
           downloadUrl as string,
           absoluteOutput,
+          debug,
         );
         return {
           output: {
@@ -811,6 +827,7 @@ async function runMediaFileDownload(
 async function fetchMediaBytesToFile(
   url: string,
   absoluteOutput: string,
+  debug: boolean,
 ): Promise<number> {
   const outputDirectory = path.dirname(absoluteOutput);
   const temporaryOutput = path.join(
@@ -821,9 +838,15 @@ async function fetchMediaBytesToFile(
   let response: Response;
 
   try {
-    response = await fetch(url, {
-      signal: AbortSignal.timeout(120000),
-    });
+    response = await fetchWithNetworkDiagnostics(
+      url,
+      { signal: AbortSignal.timeout(120000) },
+      {
+        debug,
+        label: 'media-download',
+        redirectPolicy: 'follow-https',
+      },
+    );
   } catch (error) {
     throw new HostedMediaDownloadError({
       cause: error,
@@ -902,7 +925,7 @@ class HostedMediaDownloadError extends Error {
   }) {
     const targetHost = readTargetHost(input.targetUrl);
     const detail =
-      input.detail ?? formatDownloadErrorChain(input.cause ?? 'unknown error');
+      input.detail ?? formatNetworkErrorChain(input.cause ?? 'unknown error');
     super(
       `Hosted media download failed (code=postplus_cli_hosted_media_download_failed, stage=${input.stage}, host=${targetHost}): ${detail}`,
       input.cause === undefined ? undefined : { cause: input.cause },
@@ -911,92 +934,6 @@ class HostedMediaDownloadError extends Error {
     this.stage = input.stage;
     this.targetHost = targetHost;
   }
-}
-
-function readTargetHost(url: string): string {
-  try {
-    return new URL(url).host || 'unknown';
-  } catch {
-    return 'invalid-url';
-  }
-}
-
-function isNetworkFailure(error: unknown): boolean {
-  const seen = new Set<object>();
-  let current: unknown = error;
-
-  while (current && typeof current === 'object' && !seen.has(current)) {
-    seen.add(current);
-    const name = readErrorField(current, 'name');
-    const message = readErrorField(current, 'message');
-    const code = readErrorField(current, 'code');
-
-    if (
-      name === 'AbortError' ||
-      name === 'TimeoutError' ||
-      /fetch failed|terminated/iu.test(message ?? '') ||
-      /^(?:EAI_AGAIN|ECONN|ENET|ENOTFOUND|ETIMEDOUT|UND_ERR_|ERR_TLS|CERT_)/u.test(
-        code ?? '',
-      )
-    ) {
-      return true;
-    }
-
-    current = 'cause' in current ? current.cause : null;
-  }
-
-  return false;
-}
-
-function formatDownloadErrorChain(error: unknown): string {
-  const summaries: string[] = [];
-  const seen = new Set<object>();
-  let current: unknown = error;
-
-  while (current !== null && current !== undefined && summaries.length < 4) {
-    if (typeof current === 'object') {
-      if (seen.has(current)) {
-        break;
-      }
-      seen.add(current);
-    }
-
-    summaries.push(formatDownloadError(current));
-    current =
-      current && typeof current === 'object' && 'cause' in current
-        ? current.cause
-        : null;
-  }
-
-  return summaries.join(' <- caused by ');
-}
-
-function formatDownloadError(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return sanitizeDiagnosticText(String(error));
-  }
-
-  const metadata = ['code', 'errno', 'syscall', 'hostname']
-    .map((field) => {
-      const value = readErrorField(error, field);
-      return value ? `${field}=${sanitizeDiagnosticText(value)}` : null;
-    })
-    .filter((value): value is string => value !== null)
-    .join(' ');
-  const message = sanitizeDiagnosticText(error.message || 'no message');
-
-  return `${error.name || 'Error'}${metadata ? ` ${metadata}` : ''}: ${message}`;
-}
-
-function readErrorField(error: object, field: string): string | null {
-  const value = (error as Record<string, unknown>)[field];
-  return typeof value === 'string' || typeof value === 'number'
-    ? String(value)
-    : null;
-}
-
-function sanitizeDiagnosticText(value: string): string {
-  return value.replace(/https?:\/\/[^\s"'<>]+/giu, '[redacted-url]');
 }
 
 type SignedUpload = {
@@ -1140,7 +1077,7 @@ function printMediaFileHelp(): void {
 
 Usage:
   postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
-  postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--json] [--output <result.json>]
+  postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
 
 The upload result carries output.mediaReference (persistent postplus-media://
 reference, never expires): reuse it in media-generation media fields and in
@@ -1187,7 +1124,8 @@ function submitMediaGenerationRequest(params: {
       errorInputLabel: params.errorInputLabel,
       json: params.json,
       outputPath: params.outputPath,
-      asyncResume: extractMediaPollResume,
+      asyncResume: (payload) =>
+        extractMediaPollResume(payload, params.outputPath),
     },
     params.context,
   );
@@ -1224,7 +1162,7 @@ async function runMediaPoll(
   args: string[],
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
-  const flags = parseFlags(args, new Set(['json']));
+  const flags = parseFlags(args, new Set(['debug', 'json']));
   const handle = requireFlag(flags, 'handle');
   const outputPath = flags.values.get('output') ?? null;
   const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
@@ -1240,6 +1178,7 @@ async function runMediaPoll(
       pathName: '/api/postplus-cli/hosted/capability',
       skillName: null,
       context,
+      debug: flags.booleans.has('debug'),
     });
 
   return dispatchHostedCommand(
@@ -1399,7 +1338,12 @@ async function runMediaEstimate(
   const { input, json, outputPath, errorInputLabel, skillName } =
     resolved.surface === 'flags'
       ? buildEstimateFlagsInput(endpoint, endpointKey, rest)
-      : await buildEstimateRequestJsonInput(endpoint, endpointKey, rest, context);
+      : await buildEstimateRequestJsonInput(
+          endpoint,
+          endpointKey,
+          rest,
+          context,
+        );
 
   // Same schema-driven early validation the submit path runs, so an out-of-enum
   // value fast-fails locally before the estimate call — and the estimate prices
@@ -1995,6 +1939,7 @@ async function runHostedSchema(
 
 async function postHostedJson(input: {
   body: unknown;
+  debug?: boolean;
   pathName: string;
   skillName: string | null;
   // When present (the hosted-lib path) the POST uses the injected auth +
@@ -2008,6 +1953,7 @@ async function postHostedJson(input: {
     ? await sendAuthedCloudRequest({
         auth: input.context.auth,
         body: input.body,
+        ...(input.debug !== undefined ? { debug: input.debug } : {}),
         method: 'POST',
         pathName: input.pathName,
         skillName: input.skillName,
@@ -2017,6 +1963,7 @@ async function postHostedJson(input: {
     : await sendAuthedCloudRequest({
         auth: await resolveFreshRemoteAuth(),
         body: input.body,
+        ...(input.debug !== undefined ? { debug: input.debug } : {}),
         method: 'POST',
         pathName: input.pathName,
         retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
@@ -2190,7 +2137,10 @@ function readMediaPollRun(payload: unknown): {
   };
 }
 
-function extractMediaPollResume(payload: unknown): string | null {
+function extractMediaPollResume(
+  payload: unknown,
+  outputPath: string | null,
+): string | null {
   const { id, status } = readMediaPollRun(payload);
   if (!id) {
     return null;
@@ -2198,7 +2148,9 @@ function extractMediaPollResume(payload: unknown): string | null {
   if (status && isTerminalRunStatus(status)) {
     return null;
   }
-  return `postplus media poll --handle ${shellQuoteArg(id)}`;
+  return `postplus media poll --handle ${shellQuoteArg(id)}${
+    outputPath ? ` --output ${shellQuoteArg(outputPath)}` : ''
+  }`;
 }
 
 function extractResearchResume(
@@ -2314,8 +2266,22 @@ async function writeResult(
     process.stdout.write(text);
   }
   if (outputPath) {
-    await mkdir(path.dirname(path.resolve(outputPath)), { recursive: true });
-    await writeFile(outputPath, text);
+    const absoluteOutput = path.resolve(outputPath);
+    const outputDirectory = path.dirname(absoluteOutput);
+    const temporaryOutput = path.join(
+      outputDirectory,
+      `.${path.basename(absoluteOutput)}.postplus-result-${randomUUID()}.tmp`,
+    );
+    await mkdir(outputDirectory, { recursive: true });
+    try {
+      await writeFile(temporaryOutput, text, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      await rename(temporaryOutput, absoluteOutput);
+    } finally {
+      await rm(temporaryOutput, { force: true }).catch(() => {});
+    }
   }
 }
 
@@ -2407,7 +2373,7 @@ function printDomainVerbHelp(domain: Exclude<HostedDomain, 'research'>): void {
           )
           .join('') +
         '  postplus media estimate <endpoint-key> --<same flags/--request as matching submit verb> [--json]\n' +
-        '  postplus media poll --handle <run-id> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json] [--output <result.json>]\n' +
+        '  postplus media poll --handle <run-id> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--debug] [--json] [--output <result.json>]\n' +
         '    (poll waits in-command: re-checks every 8s until terminal or the 45s default budget ends; --wait-seconds 0 = single check)\n'
       : '  postplus publish <operation> --request <input.json> [--json] [--output <result.json>]\n';
 
