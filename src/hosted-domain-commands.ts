@@ -22,6 +22,7 @@ import {
   buildVerbTargetIndex,
   capabilityEndpointsWithFlag,
 } from './hosted-manifest-index.js';
+import { requireHostedBaseUrl } from './hosted-release.js';
 import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import {
   type LargeCreditQuoteConfirmationChallenge,
@@ -748,19 +749,36 @@ async function runMediaFileDownload(
       request: async () => {
         let downloadUrl = directUrl;
         if (reference !== null) {
-          const payload = await postHostedJson({
-            body: {
-              capability: 'media-file',
-              operation: 'create-read-url',
-              file: { mediaReference: reference },
-              operationId:
-                hostedOperationId ??
-                `postplus-cli:media-file:create-read-url:${randomUUID()}`,
-            },
-            pathName: '/api/postplus-cli/hosted/capability',
-            skillName: flags.values.get('skill') ?? null,
-            context,
-          });
+          const cloudBaseUrl =
+            context?.auth.apiBaseUrl ?? (await requireHostedBaseUrl());
+          let payload: unknown;
+
+          try {
+            payload = await postHostedJson({
+              body: {
+                capability: 'media-file',
+                operation: 'create-read-url',
+                file: { mediaReference: reference },
+                operationId:
+                  hostedOperationId ??
+                  `postplus-cli:media-file:create-read-url:${randomUUID()}`,
+              },
+              pathName: '/api/postplus-cli/hosted/capability',
+              skillName: flags.values.get('skill') ?? null,
+              context,
+            });
+          } catch (error) {
+            if (!isNetworkFailure(error)) {
+              throw error;
+            }
+
+            throw new HostedMediaDownloadError({
+              cause: error,
+              stage: 'resolve-read-url',
+              targetUrl: cloudBaseUrl,
+            });
+          }
+
           const output = readHostedUploadOutput(payload);
           const signedUrl = output.signedUrl;
           if (typeof signedUrl !== 'string' || !signedUrl.trim()) {
@@ -800,27 +818,177 @@ async function fetchMediaBytesToFile(
     `.${path.basename(absoluteOutput)}.postplus-download-${randomUUID()}.tmp`,
   );
   await mkdir(outputDirectory, { recursive: true });
-  const response = await fetch(url, {
-    signal: AbortSignal.timeout(120000),
-  });
-  if (!response.ok || !response.body) {
-    throw new Error(
-      `Hosted media download failed with status ${response.status}.`,
-    );
-  }
+  let response: Response;
+
   try {
-    await pipeline(
-      Readable.fromWeb(
-        response.body as import('node:stream/web').ReadableStream,
-      ),
-      createWriteStream(temporaryOutput, { flags: 'wx' }),
-    );
-    const written = await stat(temporaryOutput);
-    await rename(temporaryOutput, absoluteOutput);
+    response = await fetch(url, {
+      signal: AbortSignal.timeout(120000),
+    });
+  } catch (error) {
+    throw new HostedMediaDownloadError({
+      cause: error,
+      stage: 'fetch-bytes',
+      targetUrl: url,
+    });
+  }
+
+  if (!response.ok || !response.body) {
+    throw new HostedMediaDownloadError({
+      detail: `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}; response body ${response.body ? 'present' : 'missing'}`,
+      stage: 'receive-response',
+      targetUrl: url,
+    });
+  }
+
+  try {
+    try {
+      await pipeline(
+        Readable.fromWeb(
+          response.body as import('node:stream/web').ReadableStream,
+        ),
+        createWriteStream(temporaryOutput, { flags: 'wx' }),
+      );
+    } catch (error) {
+      throw new HostedMediaDownloadError({
+        cause: error,
+        stage: 'stream-bytes',
+        targetUrl: url,
+      });
+    }
+
+    let written;
+    try {
+      written = await stat(temporaryOutput);
+      await rename(temporaryOutput, absoluteOutput);
+    } catch (error) {
+      throw new HostedMediaDownloadError({
+        cause: error,
+        stage: 'commit-output',
+        targetUrl: url,
+      });
+    }
+
     return written.size;
   } finally {
     await rm(temporaryOutput, { force: true });
   }
+}
+
+type HostedMediaDownloadStage =
+  | 'commit-output'
+  | 'fetch-bytes'
+  | 'receive-response'
+  | 'resolve-read-url'
+  | 'stream-bytes';
+
+class HostedMediaDownloadError extends Error {
+  readonly code = 'postplus_cli_hosted_media_download_failed';
+  readonly stage: HostedMediaDownloadStage;
+  readonly targetHost: string;
+
+  constructor(input: {
+    cause?: unknown;
+    detail?: string;
+    stage: HostedMediaDownloadStage;
+    targetUrl: string;
+  }) {
+    const targetHost = readTargetHost(input.targetUrl);
+    const detail =
+      input.detail ?? formatDownloadErrorChain(input.cause ?? 'unknown error');
+    super(
+      `Hosted media download failed (code=postplus_cli_hosted_media_download_failed, stage=${input.stage}, host=${targetHost}): ${detail}`,
+      input.cause === undefined ? undefined : { cause: input.cause },
+    );
+    this.name = 'HostedMediaDownloadError';
+    this.stage = input.stage;
+    this.targetHost = targetHost;
+  }
+}
+
+function readTargetHost(url: string): string {
+  try {
+    return new URL(url).host || 'unknown';
+  } catch {
+    return 'invalid-url';
+  }
+}
+
+function isNetworkFailure(error: unknown): boolean {
+  const seen = new Set<object>();
+  let current: unknown = error;
+
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const name = readErrorField(current, 'name');
+    const message = readErrorField(current, 'message');
+    const code = readErrorField(current, 'code');
+
+    if (
+      name === 'AbortError' ||
+      name === 'TimeoutError' ||
+      /fetch failed|terminated/iu.test(message ?? '') ||
+      /^(?:EAI_AGAIN|ECONN|ENET|ENOTFOUND|ETIMEDOUT|UND_ERR_|ERR_TLS|CERT_)/u.test(
+        code ?? '',
+      )
+    ) {
+      return true;
+    }
+
+    current = 'cause' in current ? current.cause : null;
+  }
+
+  return false;
+}
+
+function formatDownloadErrorChain(error: unknown): string {
+  const summaries: string[] = [];
+  const seen = new Set<object>();
+  let current: unknown = error;
+
+  while (current !== null && current !== undefined && summaries.length < 4) {
+    if (typeof current === 'object') {
+      if (seen.has(current)) {
+        break;
+      }
+      seen.add(current);
+    }
+
+    summaries.push(formatDownloadError(current));
+    current =
+      current && typeof current === 'object' && 'cause' in current
+        ? current.cause
+        : null;
+  }
+
+  return summaries.join(' <- caused by ');
+}
+
+function formatDownloadError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return sanitizeDiagnosticText(String(error));
+  }
+
+  const metadata = ['code', 'errno', 'syscall', 'hostname']
+    .map((field) => {
+      const value = readErrorField(error, field);
+      return value ? `${field}=${sanitizeDiagnosticText(value)}` : null;
+    })
+    .filter((value): value is string => value !== null)
+    .join(' ');
+  const message = sanitizeDiagnosticText(error.message || 'no message');
+
+  return `${error.name || 'Error'}${metadata ? ` ${metadata}` : ''}: ${message}`;
+}
+
+function readErrorField(error: object, field: string): string | null {
+  const value = (error as Record<string, unknown>)[field];
+  return typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : null;
+}
+
+function sanitizeDiagnosticText(value: string): string {
+  return value.replace(/https?:\/\/[^\s"'<>]+/giu, '[redacted-url]');
 }
 
 type SignedUpload = {

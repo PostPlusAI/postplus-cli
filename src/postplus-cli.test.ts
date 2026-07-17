@@ -6352,10 +6352,242 @@ describe('hosted domain commands', () => {
             '--output-file',
             mediaPath,
           ]),
-        /mock download stream failed/u,
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(
+            error.message,
+            /stage=stream-bytes, host=download\.test/u,
+          );
+          assert.match(error.message, /mock download stream failed/u);
+          assert.doesNotMatch(error.message, /failing-clip/u);
+          return true;
+        },
       );
       assert.deepEqual(await readFile(mediaPath), originalBytes);
       assert.deepEqual(await readdir(downloadDir), ['clip.mp4']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('media-file download reports the byte-fetch stage, host, and nested network cause without leaking the signed URL', async () => {
+    const downloadDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-cli-download-'),
+    );
+    tempDirs.push(downloadDir);
+    const mediaPath = resolve(downloadDir, 'image.png');
+    const signedUrl =
+      'https://download.test/private/image.png?token=secret-download-token';
+    const originalFetch = globalThis.fetch;
+    const networkCause = Object.assign(
+      new Error(`connect ECONNRESET ${signedUrl}`),
+      {
+        code: 'ECONNRESET',
+        hostname: 'download.test',
+        syscall: 'read',
+      },
+    );
+
+    globalThis.fetch = async () => {
+      throw new TypeError('fetch failed', { cause: networkCause });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runMediaFileCommand([
+            'download',
+            '--url',
+            signedUrl,
+            '--output-file',
+            mediaPath,
+          ]),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(
+            error.message,
+            /stage=fetch-bytes, host=download\.test/u,
+          );
+          assert.match(error.message, /TypeError: fetch failed/u);
+          assert.match(
+            error.message,
+            /code=ECONNRESET.*syscall=read.*hostname=download\.test/u,
+          );
+          assert.doesNotMatch(error.message, /secret-download-token/u);
+          assert.doesNotMatch(error.message, /private\/image\.png/u);
+          assert.doesNotMatch(error.message, /https:\/\//u);
+          return true;
+        },
+      );
+      await assert.rejects(() => readFile(mediaPath), { code: 'ENOENT' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('media-file download reports read-url resolution failures separately from byte fetching', async () => {
+    const downloadDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-cli-download-'),
+    );
+    tempDirs.push(downloadDir);
+    const mediaPath = resolve(downloadDir, 'image.png');
+    const mediaReference =
+      'postplus-media://uploads/user_1/private/image.png';
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const networkCause = Object.assign(
+      new Error('getaddrinfo ENOTFOUND postplus.test'),
+      {
+        code: 'ENOTFOUND',
+        hostname: 'postplus.test',
+        syscall: 'getaddrinfo',
+      },
+    );
+
+    globalThis.fetch = async () => {
+      throw new TypeError('fetch failed', { cause: networkCause });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runMediaFileCommand([
+            'download',
+            '--reference',
+            mediaReference,
+            '--output-file',
+            mediaPath,
+          ]),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(
+            error.message,
+            /stage=resolve-read-url, host=postplus\.test/u,
+          );
+          assert.match(error.message, /TypeError: fetch failed/u);
+          assert.match(
+            error.message,
+            /code=ENOTFOUND.*syscall=getaddrinfo.*hostname=postplus\.test/u,
+          );
+          assert.doesNotMatch(error.message, /postplus-media:\/\//u);
+          return true;
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('media-file download preserves structured read-url product errors even when their message mentions network failure', async () => {
+    const downloadDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-cli-download-'),
+    );
+    tempDirs.push(downloadDir);
+    const mediaPath = resolve(downloadDir, 'image.png');
+    const mediaReference =
+      'postplus-media://uploads/user_1/private/image.png';
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    let stderrText = '';
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          code: 'postplus_cli_hosted_media_read_failed',
+          layer: 'hosted-capability',
+          message: 'Provider network rejected the read request.',
+          operationId: 'read-op-123',
+        }),
+        { status: 503, headers: { 'content-type': 'application/json' } },
+      );
+    process.stderr.write = ((chunk: unknown) => {
+      stderrText += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const result = await runMediaFileCommand([
+        'download',
+        '--reference',
+        mediaReference,
+        '--output-file',
+        mediaPath,
+      ]);
+
+      assert.equal(result, 1);
+      assert.match(stderrText, /Provider network rejected the read request/u);
+      assert.match(
+        stderrText,
+        /code=postplus_cli_hosted_media_read_failed/u,
+      );
+      assert.match(stderrText, /operationId=read-op-123/u);
+      assert.doesNotMatch(
+        stderrText,
+        /postplus_cli_hosted_media_download_failed/u,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalStderrWrite;
+    }
+  });
+
+  it('media-file download reports HTTP response failures without exposing URL paths or query parameters', async () => {
+    const downloadDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-cli-download-'),
+    );
+    tempDirs.push(downloadDir);
+    const mediaPath = resolve(downloadDir, 'image.png');
+    const signedUrl =
+      'https://download.test/private/image.png?token=secret-download-token';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response('temporarily unavailable', {
+        status: 503,
+        statusText: 'Service Unavailable',
+      });
+
+    try {
+      await assert.rejects(
+        () =>
+          runMediaFileCommand([
+            'download',
+            '--url',
+            signedUrl,
+            '--output-file',
+            mediaPath,
+          ]),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(
+            error.message,
+            /stage=receive-response, host=download\.test/u,
+          );
+          assert.match(error.message, /HTTP 503 Service Unavailable/u);
+          assert.doesNotMatch(error.message, /secret-download-token/u);
+          assert.doesNotMatch(error.message, /private\/image\.png/u);
+          return true;
+        },
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
