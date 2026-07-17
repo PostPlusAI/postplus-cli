@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { setTimeout as sleepMs } from 'node:timers/promises';
 
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import {
@@ -1026,6 +1027,23 @@ function submitMediaGenerationRequest(params: {
 // The body carries only the status quadruple; submit-only fields (input,
 // requestDimensions, quoteConfirmationToken) are never sent. Mirrors the
 // `research collect --run-handle` polling branch.
+//
+// Bounded wait: video/audio renders take minutes, and an agent caller has no
+// sleep primitive of its own — a single-shot poll forced it to hammer this verb
+// in a tight model loop (production thread 1d744908, 2026-07-16: ~35 polls at
+// ~6s apart for one 3.5-minute render, each with a narrated "still processing"
+// line). So one invocation now waits INSIDE the command: it re-checks the
+// status boundary every --poll-interval-seconds (default 8) until the run is
+// terminal or the --wait-seconds budget (default 45, max 600) is spent, then
+// returns the latest payload either way. Each check is the same short read-only
+// HTTP request — nothing holds a connection open, and a payload without a
+// readable run status returns immediately rather than looping blind.
+// `--wait-seconds 0` restores the legacy single status check.
+const MEDIA_POLL_DEFAULT_WAIT_SECONDS = 45;
+const MEDIA_POLL_MAX_WAIT_SECONDS = 600;
+const MEDIA_POLL_DEFAULT_INTERVAL_SECONDS = 8;
+const MEDIA_POLL_MAX_INTERVAL_SECONDS = 60;
+
 async function runMediaPoll(
   args: string[],
   context: HostedRequestContext | undefined,
@@ -1033,27 +1051,82 @@ async function runMediaPoll(
   const flags = parseFlags(args, new Set(['json']));
   const handle = requireFlag(flags, 'handle');
   const outputPath = flags.values.get('output') ?? null;
+  const waitBudgetMs = resolvePositiveSecondsFlag(flags, 'wait-seconds', {
+    allowZero: true,
+    defaultSeconds: MEDIA_POLL_DEFAULT_WAIT_SECONDS,
+    maxSeconds: MEDIA_POLL_MAX_WAIT_SECONDS,
+  });
+  const pollIntervalMs = resolvePositiveSecondsFlag(
+    flags,
+    'poll-interval-seconds',
+    {
+      allowZero: false,
+      defaultSeconds: MEDIA_POLL_DEFAULT_INTERVAL_SECONDS,
+      maxSeconds: MEDIA_POLL_MAX_INTERVAL_SECONDS,
+    },
+  );
+
+  const pollOnce = () =>
+    postHostedJson({
+      body: {
+        capability: 'media-generation',
+        handle,
+        operation: 'status',
+        operationId: `postplus-cli:media:media-generation:status:${randomUUID()}`,
+      },
+      pathName: '/api/postplus-cli/hosted/capability',
+      skillName: null,
+      context,
+    });
 
   return dispatchHostedCommand(
     {
-      request: () =>
-        postHostedJson({
-          body: {
-            capability: 'media-generation',
-            handle,
-            operation: 'status',
-            operationId: `postplus-cli:media:media-generation:status:${randomUUID()}`,
-          },
-          pathName: '/api/postplus-cli/hosted/capability',
-          skillName: null,
-          context,
-        }),
+      request: async () => {
+        const startedAt = Date.now();
+        while (true) {
+          const payload = await pollOnce();
+          const { status } = readMediaPollRun(payload);
+          if (!status || isTerminalRunStatus(status)) {
+            return payload;
+          }
+          const remainingMs = waitBudgetMs - (Date.now() - startedAt);
+          if (remainingMs <= 0) {
+            return payload;
+          }
+          await sleepMs(Math.min(pollIntervalMs, remainingMs));
+        }
+      },
       errorInputLabel: 'media-poll-handle',
       json: flags.booleans.has('json'),
       outputPath,
     },
     context,
   );
+}
+
+// Parse a `--<key> <seconds>` duration flag (decimals allowed) into
+// milliseconds, fail-fast on anything outside its domain.
+function resolvePositiveSecondsFlag(
+  flags: ParsedFlags,
+  key: string,
+  domain: { allowZero: boolean; defaultSeconds: number; maxSeconds: number },
+): number {
+  const raw = flags.values.get(key);
+  if (raw === undefined) {
+    return domain.defaultSeconds * 1000;
+  }
+  const seconds = Number(raw);
+  const minimum = domain.allowZero ? 0 : Number.MIN_VALUE;
+  if (
+    !Number.isFinite(seconds) ||
+    seconds < minimum ||
+    seconds > domain.maxSeconds
+  ) {
+    throw new Error(
+      `--${key} must be a number between ${domain.allowZero ? 0 : '0 (exclusive)'} and ${domain.maxSeconds}.`,
+    );
+  }
+  return Math.round(seconds * 1000);
 }
 
 // Resolve a media-generation endpoint by key across ALL media verbs (create /
@@ -1854,25 +1927,41 @@ function shellQuoteArg(value: string): string {
   return `'${value.replace(/'/gu, "'\\''")}'`;
 }
 
-function extractMediaPollResume(payload: unknown): string | null {
+// Read the `{ id, status }` run projection out of a media-generation payload
+// (`output.data`). Shared by the submit resume hint and the poll wait loop; a
+// payload without the projection yields nulls so callers fail safe (no resume
+// hint, no blind wait loop).
+function readMediaPollRun(payload: unknown): {
+  id: string | null;
+  status: string | null;
+} {
+  const none = { id: null, status: null };
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return null;
+    return none;
   }
   const output = (payload as Record<string, unknown>).output;
   if (!output || typeof output !== 'object' || Array.isArray(output)) {
-    return null;
+    return none;
   }
   const data = (output as Record<string, unknown>).data;
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    return null;
+    return none;
   }
   const record = data as Record<string, unknown>;
-  const id =
-    typeof record.id === 'string' && record.id.trim() ? record.id : null;
+  return {
+    id: typeof record.id === 'string' && record.id.trim() ? record.id : null,
+    status:
+      typeof record.status === 'string' && record.status.trim()
+        ? record.status
+        : null,
+  };
+}
+
+function extractMediaPollResume(payload: unknown): string | null {
+  const { id, status } = readMediaPollRun(payload);
   if (!id) {
     return null;
   }
-  const status = typeof record.status === 'string' ? record.status : null;
   if (status && isTerminalRunStatus(status)) {
     return null;
   }
@@ -2085,7 +2174,8 @@ function printDomainVerbHelp(domain: Exclude<HostedDomain, 'research'>): void {
           )
           .join('') +
         '  postplus media estimate <endpoint-key> --<same flags/--request as matching submit verb> [--json]\n' +
-        '  postplus media poll --handle <run-id> [--json] [--output <result.json>]\n'
+        '  postplus media poll --handle <run-id> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json] [--output <result.json>]\n' +
+        '    (poll waits in-command: re-checks every 8s until terminal or the 45s default budget ends; --wait-seconds 0 = single check)\n'
       : '  postplus publish <operation> --request <input.json> [--json] [--output <result.json>]\n';
 
   process.stdout.write(`PostPlus CLI - ${domain} commands

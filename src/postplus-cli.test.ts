@@ -4963,7 +4963,9 @@ describe('hosted domain commands', () => {
     const originalFetch = globalThis.fetch;
     let postedUrl: string | null = null;
     let postedBody: unknown = null;
+    let fetchCalls = 0;
     globalThis.fetch = async (input, init) => {
+      fetchCalls += 1;
       postedUrl = String(input);
       postedBody = JSON.parse(String(init?.body));
       return new Response(
@@ -4982,10 +4984,15 @@ describe('hosted domain commands', () => {
         'poll',
         '--handle',
         'run_1',
+        '--wait-seconds',
+        '0',
         '--output',
         outputPath,
       ]);
       assert.equal(result, 0);
+      // --wait-seconds 0 is the single-shot legacy check: exactly one status
+      // request even though the run is still processing.
+      assert.equal(fetchCalls, 1);
       assert.equal(
         postedUrl,
         'https://postplus.test/api/postplus-cli/hosted/capability',
@@ -5023,6 +5030,182 @@ describe('hosted domain commands', () => {
       await assert.rejects(
         () => runHostedDomainCommand('media', ['poll']),
         /Missing required option --handle\./u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('keeps polling a media run inside one invocation until the run is terminal', async () => {
+    const originalFetch = globalThis.fetch;
+    const statuses = ['processing', 'processing', 'completed'];
+    let fetchCalls = 0;
+    const operationIds: string[] = [];
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      operationIds.push(String(body.operationId));
+      const status = statuses[Math.min(fetchCalls, statuses.length - 1)];
+      fetchCalls += 1;
+      return new Response(
+        JSON.stringify({ output: { data: { id: 'run_1', status } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      // Lib path (context-injected auth) returns the payload directly. Tiny
+      // interval keeps the loop real but the test fast.
+      const payload = (await runHostedDomainCommand(
+        'media',
+        [
+          'poll',
+          '--handle',
+          'run_1',
+          '--wait-seconds',
+          '5',
+          '--poll-interval-seconds',
+          '0.05',
+        ],
+        {
+          auth: {
+            apiBaseUrl: 'https://postplus.test',
+            cliSessionToken: 'cli-session-token',
+          },
+        },
+      )) as { output: { data: { status: string } } };
+      assert.equal(fetchCalls, 3);
+      assert.equal(payload.output.data.status, 'completed');
+      // Every status check is an independent read: fresh operationId each time,
+      // so the wait loop can never collide with reserve idempotency.
+      assert.equal(new Set(operationIds).size, 3);
+      for (const operationId of operationIds) {
+        assert.match(
+          operationId,
+          /^postplus-cli:media:media-generation:status:/u,
+        );
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('returns the latest still-processing payload once the poll wait budget is spent', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(
+        JSON.stringify({ output: { data: { id: 'run_1', status: 'processing' } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      const payload = (await runHostedDomainCommand(
+        'media',
+        [
+          'poll',
+          '--handle',
+          'run_1',
+          '--wait-seconds',
+          '0.12',
+          '--poll-interval-seconds',
+          '0.05',
+        ],
+        {
+          auth: {
+            apiBaseUrl: 'https://postplus.test',
+            cliSessionToken: 'cli-session-token',
+          },
+        },
+      )) as { output: { data: { status: string } } };
+      // Bounded: it re-checked at least once, then surfaced the honest
+      // still-processing payload instead of waiting forever.
+      assert.ok(fetchCalls >= 2);
+      assert.equal(payload.output.data.status, 'processing');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not sleep when the first media poll check is already terminal', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(
+        JSON.stringify({ output: { data: { id: 'run_1', status: 'failed' } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      const startedAt = Date.now();
+      const payload = (await runHostedDomainCommand(
+        'media',
+        ['poll', '--handle', 'run_1'],
+        {
+          auth: {
+            apiBaseUrl: 'https://postplus.test',
+            cliSessionToken: 'cli-session-token',
+          },
+        },
+      )) as { output: { data: { status: string } } };
+      assert.equal(fetchCalls, 1);
+      assert.equal(payload.output.data.status, 'failed');
+      // Default 45s budget must not be spent on a terminal run: no interval
+      // sleep may have happened.
+      assert.ok(Date.now() - startedAt < 5000);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fast-fails out-of-domain media poll wait flags before any hosted call', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'poll',
+            '--handle',
+            'run_1',
+            '--wait-seconds',
+            '-1',
+          ]),
+        /--wait-seconds must be a number between 0 and 600\./u,
+      );
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'poll',
+            '--handle',
+            'run_1',
+            '--wait-seconds',
+            'abc',
+          ]),
+        /--wait-seconds must be a number between 0 and 600\./u,
+      );
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'poll',
+            '--handle',
+            'run_1',
+            '--poll-interval-seconds',
+            '0',
+          ]),
+        /--poll-interval-seconds must be a number between 0 \(exclusive\) and 60\./u,
       );
       assert.equal(fetchCalls, 0);
     } finally {
