@@ -833,6 +833,10 @@ async function fetchMediaBytesToFile(
   }
 
   if (!response.ok || !response.body) {
+    // Release the pooled connection undici keeps reserved for the unread error
+    // body (this code also runs on the long-lived in-process hosted-lib path);
+    // a cancel() rejection must never mask the classified download error.
+    await response.body?.cancel().catch(() => {});
     throw new HostedMediaDownloadError({
       detail: `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}; response body ${response.body ? 'present' : 'missing'}`,
       stage: 'receive-response',
@@ -870,7 +874,11 @@ async function fetchMediaBytesToFile(
 
     return written.size;
   } finally {
-    await rm(temporaryOutput, { force: true });
+    // Best-effort cleanup: after a successful rename the temp file is gone
+    // (`force` suppresses ENOENT), so a rejection here can only happen while a
+    // stage-classified download error is already propagating — never let the
+    // cleanup rejection replace that error.
+    await rm(temporaryOutput, { force: true }).catch(() => {});
   }
 }
 
@@ -1321,16 +1329,20 @@ function resolvePositiveSecondsFlag(
   }
   const seconds = Number(raw);
   const minimum = domain.allowZero ? 0 : Number.MIN_VALUE;
+  const milliseconds = Math.round(seconds * 1000);
   if (
     !Number.isFinite(seconds) ||
     seconds < minimum ||
-    seconds > domain.maxSeconds
+    seconds > domain.maxSeconds ||
+    // Sub-millisecond positive values (e.g. 0.0004) round to 0ms and would
+    // escape the exclusive-zero domain (0ms poll interval = unthrottled loop).
+    (!domain.allowZero && milliseconds === 0)
   ) {
     throw new Error(
       `--${key} must be a number between ${domain.allowZero ? 0 : '0 (exclusive)'} and ${domain.maxSeconds}.`,
     );
   }
-  return Math.round(seconds * 1000);
+  return milliseconds;
 }
 
 // Resolve a media-generation endpoint by key across ALL media verbs (create /

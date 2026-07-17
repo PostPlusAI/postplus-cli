@@ -5504,6 +5504,19 @@ describe('hosted domain commands', () => {
           ]),
         /--poll-interval-seconds must be a number between 0 \(exclusive\) and 60\./u,
       );
+      // Sub-millisecond positive intervals round to 0ms and must be rejected
+      // like 0 itself (0ms would mean an unthrottled polling loop).
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'poll',
+            '--handle',
+            'run_1',
+            '--poll-interval-seconds',
+            '0.0004',
+          ]),
+        /--poll-interval-seconds must be a number between 0 \(exclusive\) and 60\./u,
+      );
       assert.equal(fetchCalls, 0);
     } finally {
       globalThis.fetch = originalFetch;
@@ -6480,6 +6493,8 @@ describe('hosted domain commands', () => {
             /code=ENOTFOUND.*syscall=getaddrinfo.*hostname=postplus\.test/u,
           );
           assert.doesNotMatch(error.message, /postplus-media:\/\//u);
+          assert.doesNotMatch(error.message, /uploads\/user_1/u);
+          assert.doesNotMatch(error.message, /private\/image\.png/u);
           return true;
         },
       );
