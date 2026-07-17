@@ -4610,6 +4610,74 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('keeps polling a research collect run handle inside one invocation until terminal', async () => {
+    const originalFetch = globalThis.fetch;
+    const statuses = ['RUNNING', 'RUNNING', 'SUCCEEDED'];
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      const status = statuses[Math.min(fetchCalls, statuses.length - 1)];
+      fetchCalls += 1;
+      return new Response(
+        JSON.stringify({ runHandle: 'run_h', status, output: null }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      const payload = (await runHostedDomainCommand(
+        'research',
+        [
+          'collect',
+          '--run-handle',
+          'run_h',
+          '--wait-seconds',
+          '5',
+          '--poll-interval-seconds',
+          '0.05',
+        ],
+        {
+          auth: {
+            apiBaseUrl: 'https://postplus.test',
+            cliSessionToken: 'cli-session-token',
+          },
+        },
+      )) as { status: string };
+      assert.equal(fetchCalls, 3);
+      assert.equal(payload.status, 'SUCCEEDED');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('honors --wait-seconds 0 as a single research scrape status check', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(
+        JSON.stringify({ runHandle: 'run_h', status: 'RUNNING', output: null }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      const payload = (await runHostedDomainCommand(
+        'research',
+        ['scrape', '--run-handle', 'run_h', '--wait-seconds', '0'],
+        {
+          auth: {
+            apiBaseUrl: 'https://postplus.test',
+            cliSessionToken: 'cli-session-token',
+          },
+        },
+      )) as { status: string };
+      assert.equal(fetchCalls, 1);
+      assert.equal(payload.status, 'RUNNING');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('rejects an unknown research collect collection key', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);

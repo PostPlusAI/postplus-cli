@@ -1039,10 +1039,10 @@ function submitMediaGenerationRequest(params: {
 // HTTP request — nothing holds a connection open, and a payload without a
 // readable run status returns immediately rather than looping blind.
 // `--wait-seconds 0` restores the legacy single status check.
-const MEDIA_POLL_DEFAULT_WAIT_SECONDS = 45;
-const MEDIA_POLL_MAX_WAIT_SECONDS = 600;
-const MEDIA_POLL_DEFAULT_INTERVAL_SECONDS = 8;
-const MEDIA_POLL_MAX_INTERVAL_SECONDS = 60;
+const HOSTED_RUN_DEFAULT_WAIT_SECONDS = 45;
+const HOSTED_RUN_MAX_WAIT_SECONDS = 600;
+const HOSTED_RUN_DEFAULT_INTERVAL_SECONDS = 8;
+const HOSTED_RUN_MAX_INTERVAL_SECONDS = 60;
 
 async function runMediaPoll(
   args: string[],
@@ -1051,20 +1051,7 @@ async function runMediaPoll(
   const flags = parseFlags(args, new Set(['json']));
   const handle = requireFlag(flags, 'handle');
   const outputPath = flags.values.get('output') ?? null;
-  const waitBudgetMs = resolvePositiveSecondsFlag(flags, 'wait-seconds', {
-    allowZero: true,
-    defaultSeconds: MEDIA_POLL_DEFAULT_WAIT_SECONDS,
-    maxSeconds: MEDIA_POLL_MAX_WAIT_SECONDS,
-  });
-  const pollIntervalMs = resolvePositiveSecondsFlag(
-    flags,
-    'poll-interval-seconds',
-    {
-      allowZero: false,
-      defaultSeconds: MEDIA_POLL_DEFAULT_INTERVAL_SECONDS,
-      maxSeconds: MEDIA_POLL_MAX_INTERVAL_SECONDS,
-    },
-  );
+  const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
 
   const pollOnce = () =>
     postHostedJson({
@@ -1081,27 +1068,76 @@ async function runMediaPoll(
 
   return dispatchHostedCommand(
     {
-      request: async () => {
-        const startedAt = Date.now();
-        while (true) {
-          const payload = await pollOnce();
-          const { status } = readMediaPollRun(payload);
-          if (!status || isTerminalRunStatus(status)) {
-            return payload;
-          }
-          const remainingMs = waitBudgetMs - (Date.now() - startedAt);
-          if (remainingMs <= 0) {
-            return payload;
-          }
-          await sleepMs(Math.min(pollIntervalMs, remainingMs));
-        }
-      },
+      request: () =>
+        pollHostedRunUntilSettled({
+          pollIntervalMs,
+          pollOnce,
+          readStatus: (payload) => readMediaPollRun(payload).status,
+          waitBudgetMs,
+        }),
       errorInputLabel: 'media-poll-handle',
       json: flags.booleans.has('json'),
       outputPath,
     },
     context,
   );
+}
+
+// Shared bounded wait loop for every resumable hosted run (`media poll
+// --handle`, `research collect/scrape --run-handle`). One invocation re-checks
+// the read-only status boundary until the run is terminal, the payload stops
+// exposing a readable status (fail safe: return it rather than loop blind), or
+// the wait budget is spent — then returns the latest payload as-is. Every check
+// is an independent short HTTP read; nothing holds a connection open.
+async function pollHostedRunUntilSettled(input: {
+  pollIntervalMs: number;
+  pollOnce: () => Promise<unknown>;
+  readStatus: (payload: unknown) => string | null;
+  waitBudgetMs: number;
+}): Promise<unknown> {
+  const startedAt = Date.now();
+  while (true) {
+    const payload = await input.pollOnce();
+    const status = input.readStatus(payload);
+    if (!status || isTerminalRunStatus(status)) {
+      return payload;
+    }
+    const remainingMs = input.waitBudgetMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) {
+      return payload;
+    }
+    await sleepMs(Math.min(input.pollIntervalMs, remainingMs));
+  }
+}
+
+// Read the top-level `status` a research collect/scrape resume payload carries
+// (the same field extractResearchResume keys terminality on).
+function readResearchRunStatus(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+  const status = (payload as Record<string, unknown>).status;
+  return typeof status === 'string' && status.trim() ? status : null;
+}
+
+// Parse the shared `--wait-seconds` / `--poll-interval-seconds` pair used by
+// every resumable hosted run verb.
+function resolveHostedRunWaitFlags(flags: ParsedFlags): {
+  pollIntervalMs: number;
+  waitBudgetMs: number;
+} {
+  return {
+    pollIntervalMs: resolvePositiveSecondsFlag(flags, 'poll-interval-seconds', {
+      allowZero: false,
+      defaultSeconds: HOSTED_RUN_DEFAULT_INTERVAL_SECONDS,
+      maxSeconds: HOSTED_RUN_MAX_INTERVAL_SECONDS,
+    }),
+    waitBudgetMs: resolvePositiveSecondsFlag(flags, 'wait-seconds', {
+      allowZero: true,
+      defaultSeconds: HOSTED_RUN_DEFAULT_WAIT_SECONDS,
+      maxSeconds: HOSTED_RUN_MAX_WAIT_SECONDS,
+    }),
+  };
 }
 
 // Parse a `--<key> <seconds>` duration flag (decimals allowed) into
@@ -1408,19 +1444,29 @@ async function runResearchCollect(
   const [first, ...rest] = args;
 
   // Polling path: `research collect --run-handle <h>`. No positional collectionKey.
+  // Same bounded in-command wait as `media poll` (see pollHostedRunUntilSettled):
+  // apify collections run 15s-2min, and an agent caller with no sleep primitive
+  // would otherwise hammer this verb in a tight model loop.
   if (!first || first.startsWith('--')) {
     const flags = parseFlags(args, new Set(['json']));
     const runHandle = requireFlag(flags, 'run-handle');
     const outputPath = flags.values.get('output') ?? null;
+    const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
 
     return dispatchHostedCommand(
       {
         request: () =>
-          postHostedJson({
-            body: { runHandle, runHandleType: 'hosted-collection' },
-            pathName: '/api/postplus-cli/hosted/collection',
-            skillName: null,
-            context,
+          pollHostedRunUntilSettled({
+            pollIntervalMs,
+            pollOnce: () =>
+              postHostedJson({
+                body: { runHandle, runHandleType: 'hosted-collection' },
+                pathName: '/api/postplus-cli/hosted/collection',
+                skillName: null,
+                context,
+              }),
+            readStatus: readResearchRunStatus,
+            waitBudgetMs,
           }),
         errorInputLabel: 'research-collect-run-handle',
         json: flags.booleans.has('json'),
@@ -1537,15 +1583,22 @@ async function runResearchScrape(
     const flags = parseFlags(args, new Set(['json']));
     const runHandle = requireFlag(flags, 'run-handle');
     const outputPath = flags.values.get('output') ?? null;
+    const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
 
     return dispatchHostedCommand(
       {
         request: () =>
-          postHostedJson({
-            body: { runHandle, runHandleType: 'public-content-collection' },
-            pathName: '/api/postplus-cli/hosted/collection',
-            skillName: null,
-            context,
+          pollHostedRunUntilSettled({
+            pollIntervalMs,
+            pollOnce: () =>
+              postHostedJson({
+                body: { runHandle, runHandleType: 'public-content-collection' },
+                pathName: '/api/postplus-cli/hosted/collection',
+                skillName: null,
+                context,
+              }),
+            readStatus: readResearchRunStatus,
+            waitBudgetMs,
           }),
         errorInputLabel: 'research-scrape-run-handle',
         json: flags.booleans.has('json'),
