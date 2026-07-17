@@ -197,7 +197,9 @@ async function runVersion(): Promise<number> {
 
 async function runSkillUpdateCommand(rest: string[]): Promise<number> {
   const options = parseSkillMutationOptions(rest, 'update');
-  const cliSelfUpdate = await runCliSelfUpdateIfOutdated();
+  const cliSelfUpdate = await runCliSelfUpdateIfOutdated({
+    continuationArgs: rest,
+  });
 
   if (cliSelfUpdate.updateAvailable) {
     return cliSelfUpdate.exitCode ?? 1;

@@ -74,9 +74,13 @@ export async function runCommand(
 export async function runInteractiveCommand(
   command: string,
   args: string[],
+  options: {
+    env?: NodeJS.ProcessEnv;
+  } = {},
 ): Promise<number> {
   return await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
+      env: options.env,
       stdio: 'inherit',
     });
 

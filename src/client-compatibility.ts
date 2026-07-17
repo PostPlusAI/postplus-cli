@@ -4,9 +4,9 @@ import { readLocalConfig, updateLocalConfig } from './local-state.js';
 
 export const POSTPLUS_CLIENT_CONTRACT_VERSION = 2;
 export const POSTPLUS_CLIENT_RUNTIME = 'postplus-cli';
-// Single source for the CLI self-update command. Lives here (the upgrade-error
-// formatter's home) so update-check.ts can import it without a cycle —
-// update-check already depends on this module for readCurrentCliVersion.
+export const POSTPLUS_UPDATE_COMMAND = 'postplus update';
+// Single source for the low-level npm self-update command. It lives beside the
+// compatibility commands so update-check.ts can import both without a cycle.
 export const POSTPLUS_CLI_UPDATE_COMMAND =
   'npm install -g @postplus/cli@latest';
 
@@ -22,12 +22,15 @@ export type PostPlusClientUpgradePayload = {
   code?: string;
   compatibility?: {
     upgrade?: {
+      command?: string;
       cli?: {
         command?: string;
+        required?: boolean;
       };
       restartAgentSession?: boolean;
       skills?: {
         command?: string;
+        required?: boolean;
       };
     };
   };
@@ -102,10 +105,8 @@ export function formatPostPlusClientUpgradeError(payload: unknown) {
     payload && typeof payload === 'object' && !Array.isArray(payload)
       ? (payload as PostPlusClientUpgradePayload)
       : {};
-  const cliCommand =
-    record.compatibility?.upgrade?.cli?.command ?? POSTPLUS_CLI_UPDATE_COMMAND;
-  const skillsCommand =
-    record.compatibility?.upgrade?.skills?.command ?? 'postplus update';
+  const updateCommand =
+    record.compatibility?.upgrade?.command?.trim() || POSTPLUS_UPDATE_COMMAND;
   const restart = record.compatibility?.upgrade?.restartAgentSession
     ? ' Then restart your agent session.'
     : '';
@@ -114,9 +115,7 @@ export function formatPostPlusClientUpgradeError(payload: unknown) {
     typeof record.error === 'string' && record.error.trim().length > 0
       ? record.error.trim()
       : 'Your PostPlus CLI or PostPlus skills are out of date.',
-    'If you are an agent, run both update commands now before retrying.',
-    `Update CLI: ${cliCommand}.`,
-    `Update skills: ${skillsCommand}.`,
+    `Run: ${updateCommand}.`,
     restart.trim(),
   ]
     .filter(Boolean)

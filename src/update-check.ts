@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 
 import {
   POSTPLUS_CLI_UPDATE_COMMAND,
+  POSTPLUS_UPDATE_COMMAND,
   readCurrentCliVersion,
 } from './client-compatibility.js';
 import {
@@ -24,6 +25,8 @@ const NPM_LATEST_URL = `https://registry.npmjs.org/${encodeURIComponent(
   NPM_PACKAGE_NAME,
 )}/latest`;
 const POSTPLUS_CLI_UPDATE_ARGS = ['install', '-g', '@postplus/cli@latest'];
+const POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION =
+  'POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION';
 
 export type UpdateStatusReport = {
   checkedAt: string | null;
@@ -140,13 +143,13 @@ export async function generateUpdateStatusReport(
         currentVersion,
         latestVersion: null,
         updateAvailable: false,
-        updateCommand: POSTPLUS_CLI_UPDATE_COMMAND,
+        updateCommand: POSTPLUS_UPDATE_COMMAND,
       },
       skills: {
         currentReleaseId: managedSkillBaseline.releaseId,
         latestReleaseId: null,
         updateAvailable: false,
-        updateCommand: 'postplus update',
+        updateCommand: POSTPLUS_UPDATE_COMMAND,
       },
       warning,
     };
@@ -167,6 +170,9 @@ export async function clearUpdateCheckCache(): Promise<void> {
 
 export async function runCliSelfUpdateIfOutdated(
   dependencies: {
+    continuationArgs?: string[];
+    currentCliEntryPath?: string;
+    environment?: NodeJS.ProcessEnv;
     fetchFn?: typeof fetch;
     runInteractiveCommand?: typeof runDefaultInteractiveCommand;
     writeOutput?: (message: string) => void;
@@ -177,7 +183,27 @@ export async function runCliSelfUpdateIfOutdated(
     dependencies.runInteractiveCommand ?? runDefaultInteractiveCommand;
   const writeOutput =
     dependencies.writeOutput ?? ((message) => process.stdout.write(message));
+  const environment = dependencies.environment ?? process.env;
   const currentVersion = await readCurrentCliVersion();
+  const continuationVersion =
+    environment[POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION]?.trim();
+
+  if (continuationVersion) {
+    if (compareVersions(currentVersion, continuationVersion) < 0) {
+      throw new Error(
+        `PostPlus CLI self-update reported ${continuationVersion}, but the continuation process is still ${currentVersion}.`,
+      );
+    }
+
+    return {
+      command: POSTPLUS_CLI_UPDATE_COMMAND,
+      currentVersion,
+      exitCode: null,
+      latestVersion: continuationVersion,
+      updateAvailable: false,
+    };
+  }
+
   const latestVersion = await fetchLatestCliVersion(fetchFn);
 
   if (compareVersions(latestVersion, currentVersion) <= 0) {
@@ -201,18 +227,46 @@ export async function runCliSelfUpdateIfOutdated(
   const exitCode = await runInteractiveCommand('npm', POSTPLUS_CLI_UPDATE_ARGS);
 
   if (exitCode === 0) {
+    const currentCliEntryPath =
+      dependencies.currentCliEntryPath ?? process.argv[1];
+
+    if (!currentCliEntryPath) {
+      throw new Error(
+        'PostPlus CLI updated, but the current CLI entry path is unavailable for continuation.',
+      );
+    }
+
     writeOutput(
       [
         `PostPlus CLI updated to ${latestVersion}.`,
-        'Re-run `postplus update` to update skills with the new CLI process.',
+        'Continuing with the updated CLI to update skills.',
         '',
       ].join('\n'),
     );
+
+    const continuationExitCode = await runInteractiveCommand(
+      process.execPath,
+      [currentCliEntryPath, 'update', ...(dependencies.continuationArgs ?? [])],
+      {
+        env: {
+          ...environment,
+          [POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION]: latestVersion,
+        },
+      },
+    );
+
+    return {
+      command: POSTPLUS_CLI_UPDATE_COMMAND,
+      currentVersion,
+      exitCode: continuationExitCode,
+      latestVersion,
+      updateAvailable: true,
+    };
   } else {
     writeOutput(
       [
         `PostPlus CLI update failed with exit code ${exitCode}.`,
-        `Fix the npm install error, then run: ${POSTPLUS_CLI_UPDATE_COMMAND}`,
+        `Fix the npm install error, then rerun: ${POSTPLUS_UPDATE_COMMAND}`,
         '',
       ].join('\n'),
     );
@@ -236,10 +290,6 @@ export function formatUpdateStatusReport(report: UpdateStatusReport): string {
       report.cli.latestVersion ? ` (latest ${report.cli.latestVersion})` : ''
     }`,
   );
-  if (report.cli.updateAvailable) {
-    lines.push(`  Update: ${report.cli.updateCommand}`);
-  }
-
   const skillMarker = report.skills.updateAvailable ? '[WARN]' : '[PASS]';
   lines.push(
     `${skillMarker} Skills: ${
@@ -248,8 +298,13 @@ export function formatUpdateStatusReport(report: UpdateStatusReport): string {
         : 'release unknown'
     }`,
   );
-  if (report.skills.updateAvailable) {
-    lines.push(`  Update: ${report.skills.updateCommand}`);
+  const updateCommands = [
+    report.cli.updateAvailable ? report.cli.updateCommand : null,
+    report.skills.updateAvailable ? report.skills.updateCommand : null,
+  ].filter((command): command is string => command !== null);
+
+  for (const command of new Set(updateCommands)) {
+    lines.push(`  Update: ${command}`);
   }
 
   lines.push(
@@ -279,14 +334,14 @@ function buildUpdateReport(input: {
       updateAvailable:
         compareVersions(input.cache.cli.latestVersion, input.currentVersion) >
         0,
-      updateCommand: POSTPLUS_CLI_UPDATE_COMMAND,
+      updateCommand: POSTPLUS_UPDATE_COMMAND,
     },
     skills: {
       currentReleaseId: input.currentSkillsReleaseId,
       latestReleaseId: input.cache.skills.latestReleaseId,
       updateAvailable:
         input.cache.skills.latestReleaseId !== input.currentSkillsReleaseId,
-      updateCommand: 'postplus update',
+      updateCommand: POSTPLUS_UPDATE_COMMAND,
     },
     warning: null,
   };

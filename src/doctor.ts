@@ -20,6 +20,7 @@ import { readSubscriptionStatusField } from './subscription-status.js';
 
 export type DoctorCheck = {
   id:
+    | 'client_compatibility'
     | 'hosted_base_url'
     | 'hosted_capabilities'
     | 'local_dependencies'
@@ -46,9 +47,9 @@ export type DoctorCheckMetadata = {
 };
 
 export type DoctorReport = {
-  // Bumped to 2 when the `degraded` check status was added so agents/automation
-  // can distinguish a known field-level coverage gap from pass/fail.
-  schemaVersion: 2;
+  // Bumped to 3 when client compatibility became distinct from remote auth so
+  // agents/automation do not prescribe login for CLI or skills version errors.
+  schemaVersion: 3;
   ok: boolean;
   requiredOk: boolean;
   checks: DoctorCheck[];
@@ -280,7 +281,7 @@ function buildDoctorReport(
   );
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     ok: checks.every((check) => check.status === 'pass'),
     requiredOk,
     checks,
@@ -307,6 +308,12 @@ async function checkRemoteAuth(input: FreshRemoteAuth): Promise<DoctorCheck> {
     };
 
     if (!response.ok) {
+      const compatibilityCheck = createClientCompatibilityFailure(payload);
+
+      if (compatibilityCheck) {
+        return compatibilityCheck;
+      }
+
       return createFail(
         'remote_auth',
         'Remote auth',
@@ -372,6 +379,12 @@ async function checkHostedCapabilities(
     };
 
     if (!response.ok) {
+      const compatibilityCheck = createClientCompatibilityFailure(payload);
+
+      if (compatibilityCheck) {
+        return compatibilityCheck;
+      }
+
       return createFail(
         'hosted_capabilities',
         'Hosted capabilities',
@@ -459,6 +472,22 @@ async function checkHostedCapabilities(
         : 'Failed to check hosted capability readiness.',
     );
   }
+}
+
+function createClientCompatibilityFailure(
+  payload: unknown,
+): DoctorCheck | null {
+  const compatibilityError = formatPostPlusCompatibilityError(payload);
+
+  if (!compatibilityError) {
+    return null;
+  }
+
+  return createFail(
+    'client_compatibility',
+    'Client compatibility',
+    compatibilityError,
+  );
 }
 
 function readHostedCapabilityEntries(

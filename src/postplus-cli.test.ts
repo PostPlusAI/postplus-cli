@@ -29,6 +29,8 @@ import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import {
   POSTPLUS_CLI_UPDATE_COMMAND,
   POSTPLUS_CLIENT_COMPATIBILITY_HEADERS,
+  POSTPLUS_UPDATE_COMMAND,
+  formatPostPlusClientUpgradeError,
 } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import {
@@ -679,7 +681,7 @@ describe('doctor and status', () => {
       assert.equal(status.schemaVersion, 1);
       assert.equal((await readLocalConfig())?.cliVersion, CURRENT_CLI_VERSION);
       assert.equal(status.ok, true);
-      assert.equal(status.doctor.schemaVersion, 2);
+      assert.equal(status.doctor.schemaVersion, 3);
       assert.equal(status.auth.ok, true);
       assert.equal(status.doctor.ok, true);
       assert.equal(status.skills.ok, true);
@@ -932,7 +934,7 @@ process.exit(1);
             currentVersion: '0.1.12',
             latestVersion: '0.1.13',
             updateAvailable: true,
-            updateCommand: 'npm install -g @postplus/cli@latest',
+            updateCommand: POSTPLUS_UPDATE_COMMAND,
           },
           skills: {
             currentReleaseId: 'abc123',
@@ -949,8 +951,8 @@ process.exit(1);
       assert.match(formatted, /subscription none/);
       assert.doesNotMatch(formatted, /subscription unknown/);
       assert.doesNotMatch(formatted, /Not ready: subscription/);
-      assert.match(formatted, /npm install -g @postplus\/cli/);
       assert.match(formatted, /postplus update/);
+      assert.doesNotMatch(formatted, /npm install -g @postplus\/cli/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1107,13 +1109,17 @@ process.exit(1);
             code: 'postplus_client_upgrade_required',
             error: 'Your PostPlus CLI or PostPlus skills are out of date.',
             compatibility: {
+              schemaVersion: 2,
               upgrade: {
+                command: 'postplus update',
                 cli: {
                   command: 'npm install -g @postplus/cli@latest',
+                  required: true,
                 },
                 restartAgentSession: true,
                 skills: {
                   command: 'postplus update',
+                  required: false,
                 },
               },
             },
@@ -1167,15 +1173,16 @@ process.exit(1);
         }),
       });
       const formatted = formatStatusReport(status);
+      const compatibilityCheck = status.doctor.checks.find(
+        (check) => check.id === 'client_compatibility',
+      );
 
       assert.equal(status.ok, false);
-      assert.match(
-        formatted,
-        /agent, run both update commands now before retrying/i,
-      );
-      assert.match(formatted, /npm install -g @postplus\/cli/);
+      assert.equal(compatibilityCheck?.label, 'Client compatibility');
       assert.match(formatted, /postplus update/);
       assert.match(formatted, /restart your agent session/i);
+      assert.doesNotMatch(formatted, /npm install -g @postplus\/cli/);
+      assert.doesNotMatch(formatted, /postplus auth login/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1260,10 +1267,97 @@ process.exit(1);
         }),
       });
       const formatted = formatStatusReport(status);
+      const compatibilityCheck = status.doctor.checks.find(
+        (check) => check.id === 'client_compatibility',
+      );
 
       assert.equal(status.ok, false);
+      assert.equal(compatibilityCheck?.label, 'Client compatibility');
       assert.match(formatted, /PostPlus Cloud is updating/);
+      assert.doesNotMatch(compatibilityCheck?.detail ?? '', /postplus update/);
       assert.doesNotMatch(formatted, /npm install -g @postplus\/cli/);
+      assert.doesNotMatch(formatted, /postplus auth login/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('classifies hosted readiness compatibility failures separately from auth', async () => {
+    await setLocalSession({
+      cliSessionToken: 'cli-session-token-value',
+      accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
+      apiBaseUrl: 'https://postplus.example.com',
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (isPublicCatalogUrl(url)) {
+        return createPublicCatalogResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
+        return createWhoamiResponse();
+      }
+
+      if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
+        return new Response(
+          JSON.stringify({
+            code: 'postplus_client_upgrade_required',
+            error: 'Your PostPlus skills are out of date.',
+            compatibility: {
+              schemaVersion: 2,
+              upgrade: {
+                command: POSTPLUS_UPDATE_COMMAND,
+                cli: {
+                  command: POSTPLUS_CLI_UPDATE_COMMAND,
+                  required: false,
+                },
+                restartAgentSession: true,
+                skills: {
+                  command: POSTPLUS_UPDATE_COMMAND,
+                  required: true,
+                },
+              },
+            },
+          }),
+          {
+            status: 426,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ error: 'unexpected url' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const report = await generateDoctorReport();
+      const formatted = formatDoctorReport(report);
+      const remoteAuthCheck = report.checks.find(
+        (check) => check.id === 'remote_auth',
+      );
+      const compatibilityCheck = report.checks.find(
+        (check) => check.id === 'client_compatibility',
+      );
+
+      assert.equal(remoteAuthCheck?.status, 'pass');
+      assert.equal(compatibilityCheck?.status, 'fail');
+      assert.equal(
+        report.checks.some((check) => check.id === 'hosted_capabilities'),
+        false,
+      );
+      assert.match(formatted, /postplus update/);
+      assert.doesNotMatch(formatted, /postplus auth login/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1272,7 +1366,7 @@ process.exit(1);
   it('keeps status usable when only task-specific local dependencies are missing', async () => {
     const status = await generateStatusReportWithDependencies({
       generateDoctor: async () => ({
-        schemaVersion: 1,
+        schemaVersion: 3,
         ok: false,
         requiredOk: true,
         checks: [
@@ -1448,7 +1542,7 @@ process.exit(1);
       const report = await generateDoctorReport();
       const formatted = formatDoctorReport(report);
 
-      assert.equal(report.schemaVersion, 2);
+      assert.equal(report.schemaVersion, 3);
       assert.equal(report.ok, false);
       assert.match(
         formatted,
@@ -1833,7 +1927,7 @@ process.exit(1);
       const report = await generateDoctorReport();
       const formatted = formatDoctorReport(report);
 
-      assert.equal(report.schemaVersion, 2);
+      assert.equal(report.schemaVersion, 3);
       assert.equal(report.ok, false);
       assert.match(formatted, /PostPlus Cloud/);
       assert.match(formatted, /postplus auth login/);
@@ -2544,10 +2638,84 @@ describe('local dependency diagnostics', () => {
 });
 
 describe('update checks', () => {
+  it('formats one user-facing compatibility recovery command', () => {
+    const formatted = formatPostPlusClientUpgradeError({
+      code: 'postplus_client_upgrade_required',
+      error: 'Your PostPlus CLI is out of date.',
+      compatibility: {
+        upgrade: {
+          command: POSTPLUS_UPDATE_COMMAND,
+          cli: {
+            command: POSTPLUS_CLI_UPDATE_COMMAND,
+            required: true,
+          },
+          restartAgentSession: true,
+          skills: {
+            command: POSTPLUS_UPDATE_COMMAND,
+            required: false,
+          },
+        },
+      },
+    });
+
+    assert.match(formatted, /Run: postplus update\./);
+    assert.match(formatted, /restart your agent session/);
+    assert.doesNotMatch(formatted, /npm install -g/);
+  });
+
+  it('uses one maintenance command for component-only compatibility payloads', () => {
+    const formatted = formatPostPlusClientUpgradeError({
+      compatibility: {
+        upgrade: {
+          cli: {
+            command: POSTPLUS_CLI_UPDATE_COMMAND,
+            required: true,
+          },
+          skills: {
+            command: POSTPLUS_UPDATE_COMMAND,
+            required: true,
+          },
+        },
+      },
+    });
+
+    assert.equal(formatted.match(/postplus update/g)?.length, 1);
+    assert.doesNotMatch(formatted, /npm install -g/);
+  });
+
+  it('propagates the updated CLI continuation exit code', async () => {
+    let callCount = 0;
+    const result = await runCliSelfUpdateIfOutdated({
+      currentCliEntryPath: '/tmp/postplus-build-index.js',
+      fetchFn: async () =>
+        new Response(JSON.stringify({ version: NEXT_CLI_VERSION }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      runInteractiveCommand: async () => {
+        callCount += 1;
+        return callCount === 1 ? 0 : 17;
+      },
+      writeOutput: () => {},
+    });
+
+    assert.equal(callCount, 2);
+    assert.equal(result.exitCode, 17);
+  });
+
   it('self-updates the CLI before any skills catalog read when npm latest is newer', async () => {
-    const calls: string[][] = [];
+    const calls: {
+      args: string[];
+      command: string;
+      env?: NodeJS.ProcessEnv;
+    }[] = [];
     const output: string[] = [];
     const result = await runCliSelfUpdateIfOutdated({
+      continuationArgs: ['--current-directory'],
+      currentCliEntryPath: '/tmp/postplus-build-index.js',
+      environment: {
+        PATH: '/tmp/postplus-test-bin',
+      },
       fetchFn: async (input) => {
         const url = String(input);
 
@@ -2558,8 +2726,8 @@ describe('update checks', () => {
           headers: { 'content-type': 'application/json' },
         });
       },
-      runInteractiveCommand: async (command, args) => {
-        calls.push([command, ...args]);
+      runInteractiveCommand: async (command, args, options = {}) => {
+        calls.push({ command, args, env: options.env });
         return 0;
       },
       writeOutput: (message) => {
@@ -2572,8 +2740,67 @@ describe('update checks', () => {
     assert.equal(result.latestVersion, NEXT_CLI_VERSION);
     assert.equal(result.exitCode, 0);
     assert.equal(result.command, POSTPLUS_CLI_UPDATE_COMMAND);
-    assert.deepEqual(calls, [['npm', 'install', '-g', '@postplus/cli@latest']]);
-    assert.match(output.join(''), /Re-run `postplus update`/);
+    assert.deepEqual(calls, [
+      {
+        command: 'npm',
+        args: ['install', '-g', '@postplus/cli@latest'],
+        env: undefined,
+      },
+      {
+        command: process.execPath,
+        args: ['/tmp/postplus-build-index.js', 'update', '--current-directory'],
+        env: {
+          PATH: '/tmp/postplus-test-bin',
+          POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION: NEXT_CLI_VERSION,
+        },
+      },
+    ]);
+    assert.match(output.join(''), /Continuing with the updated CLI/);
+    assert.doesNotMatch(output.join(''), /Re-run `postplus update`/);
+  });
+
+  it('skips npm and network checks in the updated CLI continuation', async () => {
+    let fetchCalled = false;
+    let commandCalled = false;
+    const result = await runCliSelfUpdateIfOutdated({
+      environment: {
+        POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION: CURRENT_CLI_VERSION,
+      },
+      fetchFn: async () => {
+        fetchCalled = true;
+        throw new Error('continuation must not check npm');
+      },
+      runInteractiveCommand: async () => {
+        commandCalled = true;
+        return 1;
+      },
+      writeOutput: () => {},
+    });
+
+    assert.equal(result.updateAvailable, false);
+    assert.equal(result.currentVersion, CURRENT_CLI_VERSION);
+    assert.equal(result.latestVersion, CURRENT_CLI_VERSION);
+    assert.equal(result.exitCode, null);
+    assert.equal(fetchCalled, false);
+    assert.equal(commandCalled, false);
+  });
+
+  it('fails fast when npm leaves the continuation on the old CLI version', async () => {
+    await assert.rejects(
+      () =>
+        runCliSelfUpdateIfOutdated({
+          environment: {
+            POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION: NEXT_CLI_VERSION,
+          },
+          fetchFn: async () => {
+            throw new Error('continuation must not check npm');
+          },
+          writeOutput: () => {},
+        }),
+      new RegExp(
+        `self-update reported ${NEXT_CLI_VERSION}, but the continuation process is still ${CURRENT_CLI_VERSION}`,
+      ),
+    );
   });
 
   it('continues without npm install when the CLI is already latest', async () => {
@@ -2643,9 +2870,11 @@ describe('update checks', () => {
     try {
       const report = await generateUpdateStatusReport({ force: true });
 
+      assert.equal(report.cli.updateCommand, POSTPLUS_UPDATE_COMMAND);
       assert.equal(report.skills.currentReleaseId, 'catalog-1');
       assert.equal(report.skills.latestReleaseId, 'catalog-2');
       assert.equal(report.skills.updateAvailable, true);
+      assert.equal(report.skills.updateCommand, POSTPLUS_UPDATE_COMMAND);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -2740,7 +2969,7 @@ describe('update checks', () => {
           },
         }),
         generateDoctor: async () => ({
-          schemaVersion: 1,
+          schemaVersion: 3,
           ok: true,
           requiredOk: true,
           checks: [],
