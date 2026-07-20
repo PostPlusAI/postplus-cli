@@ -578,13 +578,15 @@ export async function runMediaFileCommand(
 }
 
 /**
- * In-process-only capability envelope POST (hosted-lib path, no bin verb).
- * A trusted host runtime (eve-agent) posts a raw `/hosted/capability` body —
- * e.g. the INTERNAL `workflow` verb family, which deliberately has no CLI
- * command surface — through the SAME transport core the bin verbs use
- * (`postHostedJson`: canonical headers, structured HostedProductRequestError,
- * quote-confirmation error thrown verbatim). Requires the injected context
- * auth; there is intentionally no disk-config fallback on this entry.
+ * In-process capability envelope POST (hosted-lib path). A trusted host runtime
+ * (eve-agent) posts a raw `/hosted/capability` body — e.g. the `workflow` verb
+ * family — through the SAME transport core the bin verbs use (`postHostedJson`:
+ * canonical headers, structured HostedProductRequestError, quote-confirmation
+ * error thrown verbatim). The bin counterpart to the same `workflow` verbs is
+ * `postplus workflow` (runWorkflowCommand, disk session auth); this entry is for
+ * a host that already holds session auth and builds the envelope itself.
+ * Requires the injected context auth; there is intentionally no disk-config
+ * fallback on this entry.
  */
 export async function postHostedCapabilityEnvelope(input: {
   body: Record<string, unknown>;
@@ -1899,6 +1901,379 @@ async function runPublishOperation(
     },
     context,
   );
+}
+
+// ---------------------------------------------------------------------------
+// workflow — video-production workflow authoring / read / quote / launch over
+// the hosted `workflow` capability envelope. This is the bin counterpart to the
+// PostPlus workspace assistant's typed workflow tools: the `workflow-creation`
+// released skill drives THIS surface when it runs inside a CLI agent (Claude
+// Code / Codex) instead of the workspace assistant. Reads and authoring writes
+// are uncharged; `launch` enqueues paid provider runs and is gated client-side
+// (see runWorkflowLaunch) — the human-acknowledged ceiling the server re-quotes
+// against is the launch's binding cost bound (there is no confirmation token).
+// ---------------------------------------------------------------------------
+
+const WORKFLOW_CAPABILITY_PATH = '/api/postplus-cli/hosted/capability';
+
+function workflowOperationId(operation: string): string {
+  return `postplus-cli:workflow:${operation}:${randomUUID()}`;
+}
+
+function assertKnownWorkflowFlags(
+  flags: ParsedFlags,
+  allowed: Set<string>,
+  command: string,
+): void {
+  for (const key of [
+    ...flags.values.keys(),
+    ...flags.booleans,
+    ...flags.arrays.keys(),
+  ]) {
+    if (!allowed.has(key)) {
+      throw new Error(`Unknown option for workflow ${command}: --${key}.`);
+    }
+  }
+}
+
+function parseBoundedInt(
+  raw: string,
+  label: string,
+  min: number,
+  max: number,
+): number {
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`--${label} must be an integer between ${min} and ${max}.`);
+  }
+  return parsed;
+}
+
+function parsePositiveInt(raw: string, label: string): number {
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`--${label} must be a positive integer.`);
+  }
+  return parsed;
+}
+
+// Split a required leading `<id>` positional off a workflow subcommand's args.
+function takeWorkflowId(
+  rest: string[],
+  command: string,
+): { id: string; flagArgs: string[] } {
+  const [id, ...flagArgs] = rest;
+  if (!id || id.startsWith('--')) {
+    throw new Error(
+      `workflow ${command} requires an id: postplus workflow ${command} <id>.`,
+    );
+  }
+  return { id, flagArgs };
+}
+
+// One dispatch path for every workflow verb: build the capability envelope, POST
+// it through the SAME bin transport the other hosted commands use (disk session
+// auth + single 401 refresh + product-error taxonomy), and surface the verb's
+// `output` payload (the route wraps it in the uncharged billing envelope). No
+// quote-confirmation or async-resume handling — workflow verbs are synchronous
+// and uncharged, and launch never returns a 402 challenge.
+async function runWorkflowVerb(input: {
+  operation: string;
+  fields: Record<string, unknown>;
+  json: boolean;
+  outputPath: string | null;
+}): Promise<number> {
+  const body = {
+    capability: 'workflow',
+    operation: input.operation,
+    operationId: workflowOperationId(input.operation),
+    ...input.fields,
+  };
+  const exitCode = await dispatchHostedCommand(
+    {
+      request: async () => {
+        const payload = await postHostedJson({
+          body,
+          pathName: WORKFLOW_CAPABILITY_PATH,
+          skillName: null,
+        });
+        return payload && typeof payload === 'object' && 'output' in payload
+          ? (payload as { output: unknown }).output
+          : payload;
+      },
+      errorInputLabel: `workflow ${input.operation}`,
+      json: input.json,
+      outputPath: input.outputPath,
+    },
+    undefined,
+  );
+  return exitCode as number;
+}
+
+function readWorkflowOutputPath(flags: ParsedFlags): string | null {
+  return flags.values.get('output') ?? null;
+}
+
+async function runWorkflowList(rest: string[]): Promise<number> {
+  const flags = parseFlags(rest, new Set(['json']));
+  assertKnownWorkflowFlags(
+    flags,
+    new Set(['json', 'output', 'search', 'limit']),
+    'list',
+  );
+  const fields: Record<string, unknown> = {};
+  const search = flags.values.get('search');
+  if (search) {
+    fields.search = search;
+  }
+  const limit = flags.values.get('limit');
+  if (limit !== undefined) {
+    fields.limit = parseBoundedInt(limit, 'limit', 1, 50);
+  }
+  return runWorkflowVerb({
+    fields,
+    json: flags.booleans.has('json'),
+    operation: 'list',
+    outputPath: readWorkflowOutputPath(flags),
+  });
+}
+
+async function runWorkflowShow(rest: string[]): Promise<number> {
+  const { id: workflowId, flagArgs } = takeWorkflowId(rest, 'show');
+  const flags = parseFlags(flagArgs, new Set(['json']));
+  assertKnownWorkflowFlags(flags, new Set(['json', 'output']), 'show');
+  return runWorkflowVerb({
+    fields: { workflowId },
+    json: flags.booleans.has('json'),
+    operation: 'get',
+    outputPath: readWorkflowOutputPath(flags),
+  });
+}
+
+async function runWorkflowRuns(rest: string[]): Promise<number> {
+  // The workflow id is an OPTIONAL leading positional; omit it to list runs
+  // across every workflow in the account.
+  const [maybeId, ...maybeFlags] = rest;
+  const hasId = maybeId !== undefined && !maybeId.startsWith('--');
+  const flags = parseFlags(hasId ? maybeFlags : rest, new Set(['json']));
+  assertKnownWorkflowFlags(flags, new Set(['json', 'output', 'limit']), 'runs');
+  const fields: Record<string, unknown> = {};
+  if (hasId) {
+    fields.workflowId = maybeId;
+  }
+  const limit = flags.values.get('limit');
+  if (limit !== undefined) {
+    fields.limit = parseBoundedInt(limit, 'limit', 1, 50);
+  }
+  return runWorkflowVerb({
+    fields,
+    json: flags.booleans.has('json'),
+    operation: 'runs-list',
+    outputPath: readWorkflowOutputPath(flags),
+  });
+}
+
+async function runWorkflowRunShow(rest: string[]): Promise<number> {
+  const { id: runId, flagArgs } = takeWorkflowId(rest, 'run-show');
+  const flags = parseFlags(flagArgs, new Set(['json']));
+  assertKnownWorkflowFlags(flags, new Set(['json', 'output']), 'run-show');
+  return runWorkflowVerb({
+    fields: { runId },
+    json: flags.booleans.has('json'),
+    operation: 'runs-get',
+    outputPath: readWorkflowOutputPath(flags),
+  });
+}
+
+async function runWorkflowCreate(rest: string[]): Promise<number> {
+  const flags = parseFlags(rest, new Set(['json']));
+  assertKnownWorkflowFlags(
+    flags,
+    new Set(['json', 'output', 'name', 'description', 'template']),
+    'create',
+  );
+  const fields: Record<string, unknown> = { name: requireFlag(flags, 'name') };
+  const description = flags.values.get('description');
+  if (description) {
+    fields.description = description;
+  }
+  const template = flags.values.get('template');
+  if (template) {
+    fields.templateId = template;
+  }
+  return runWorkflowVerb({
+    fields,
+    json: flags.booleans.has('json'),
+    operation: 'create',
+    outputPath: readWorkflowOutputPath(flags),
+  });
+}
+
+// propose (edit-propose: preview + validate, persists nothing) and
+// save (version-save: persists a new immutable version) share one shape: a
+// `<workflow-id>` positional plus a `--operations <file.json>` array of edit ops.
+async function runWorkflowEdit(
+  rest: string[],
+  operation: 'edit-propose' | 'version-save',
+): Promise<number> {
+  const command = operation === 'edit-propose' ? 'propose' : 'save';
+  const { id: workflowId, flagArgs } = takeWorkflowId(rest, command);
+  const flags = parseFlags(flagArgs, new Set(['json']));
+  assertKnownWorkflowFlags(
+    flags,
+    new Set(['json', 'output', 'operations', 'base-version']),
+    command,
+  );
+  const operations = await readJsonFile(requireFlag(flags, 'operations'));
+  if (!Array.isArray(operations) || operations.length === 0) {
+    throw new Error(
+      `workflow ${command} --operations must be a non-empty JSON array of edit operations ` +
+        '(add_node / update_node / remove_node / connect_nodes).',
+    );
+  }
+  const fields: Record<string, unknown> = { operations, workflowId };
+  const baseVersion = flags.values.get('base-version');
+  if (baseVersion !== undefined) {
+    fields.baseVersionNumber = parsePositiveInt(baseVersion, 'base-version');
+  }
+  return runWorkflowVerb({
+    fields,
+    json: flags.booleans.has('json'),
+    operation,
+    outputPath: readWorkflowOutputPath(flags),
+  });
+}
+
+async function runWorkflowQuote(rest: string[]): Promise<number> {
+  const { id: workflowId, flagArgs } = takeWorkflowId(rest, 'quote');
+  const flags = parseFlags(flagArgs, new Set(['json']));
+  assertKnownWorkflowFlags(
+    flags,
+    new Set(['json', 'output', 'instances']),
+    'quote',
+  );
+  const instanceCount = parseBoundedInt(
+    requireFlag(flags, 'instances'),
+    'instances',
+    1,
+    5,
+  );
+  return runWorkflowVerb({
+    fields: { instanceCount, workflowId },
+    json: flags.booleans.has('json'),
+    operation: 'run-quote',
+    outputPath: readWorkflowOutputPath(flags),
+  });
+}
+
+// launch enqueues PAID provider runs. This is the CLI equivalent of the
+// workspace assistant's human approval card: launching is refused unless the
+// operator has quoted the cost first and confirms explicitly. `--confirm` is
+// mandatory (its presence in the command is the visible spend acknowledgement an
+// agent host surfaces to the human), and `--max-reserved-millicredits` is the
+// acknowledged ceiling — the server re-quotes atomically and aborts if the fresh
+// reservation exceeds it, so the confirmed bound stays binding.
+async function runWorkflowLaunch(rest: string[]): Promise<number> {
+  const { id: workflowId, flagArgs } = takeWorkflowId(rest, 'launch');
+  const flags = parseFlags(flagArgs, new Set(['json', 'confirm']));
+  assertKnownWorkflowFlags(
+    flags,
+    new Set([
+      'json',
+      'output',
+      'confirm',
+      'title',
+      'instances',
+      'max-reserved-millicredits',
+    ]),
+    'launch',
+  );
+  const workflowTitle = requireFlag(flags, 'title');
+  const instanceCount = parseBoundedInt(
+    requireFlag(flags, 'instances'),
+    'instances',
+    1,
+    5,
+  );
+  const maxTotalReservedMillicredits = parsePositiveInt(
+    requireFlag(flags, 'max-reserved-millicredits'),
+    'max-reserved-millicredits',
+  );
+
+  if (!flags.booleans.has('confirm')) {
+    throw new Error(
+      [
+        'Refusing to launch: launching spends real credits and needs explicit confirmation.',
+        `First quote the cost:  postplus workflow quote ${workflowId} --instances ${instanceCount}`,
+        'Then re-run launch with that quote’s reservedMillicredits as the ceiling and --confirm:',
+        `  postplus workflow launch ${workflowId} --title "${workflowTitle}" --instances ${instanceCount} --max-reserved-millicredits <reservedMillicredits> --confirm`,
+      ].join('\n'),
+    );
+  }
+
+  return runWorkflowVerb({
+    fields: {
+      instanceCount,
+      maxTotalReservedMillicredits,
+      workflowId,
+      workflowTitle,
+    },
+    json: flags.booleans.has('json'),
+    operation: 'run-launch',
+    outputPath: readWorkflowOutputPath(flags),
+  });
+}
+
+function printWorkflowHelp(): void {
+  process.stdout.write(`PostPlus CLI - workflow commands
+
+Author, read, quote, and launch video-production workflows on your account —
+the bin surface the workflow-creation skill drives inside a CLI agent. Results
+are JSON. Reads and authoring writes are free; launch spends credits.
+
+Usage:
+  postplus workflow list [--search <text>] [--limit <n>] [--json]
+  postplus workflow show <workflow-id> [--json] [--output <result.json>]
+  postplus workflow create --name <name> [--description <text>] [--template <id>] [--output <result.json>]
+  postplus workflow propose <workflow-id> --operations <ops.json> [--base-version <n>] [--output <result.json>]
+  postplus workflow save <workflow-id> --operations <ops.json> [--base-version <n>] [--output <result.json>]
+  postplus workflow quote <workflow-id> --instances <n> [--json]
+  postplus workflow launch <workflow-id> --title <exact-name> --instances <n> --max-reserved-millicredits <n> --confirm [--json]
+  postplus workflow runs [<workflow-id>] [--limit <n>] [--json]
+  postplus workflow run-show <run-id> [--json] [--output <result.json>]
+
+--operations is a JSON array of edit ops (add_node / update_node / remove_node /
+connect_nodes); the server validates and never silently repairs. launch is
+refused without --confirm: quote first, then pass the quote's reservedMillicredits
+as --max-reserved-millicredits and --confirm to acknowledge the spend.
+`);
+}
+
+export async function runWorkflowCommand(args: string[]): Promise<number> {
+  const [subcommand, ...rest] = args;
+  switch (subcommand) {
+    case 'list':
+      return runWorkflowList(rest);
+    case 'show':
+      return runWorkflowShow(rest);
+    case 'runs':
+      return runWorkflowRuns(rest);
+    case 'run-show':
+      return runWorkflowRunShow(rest);
+    case 'create':
+      return runWorkflowCreate(rest);
+    case 'propose':
+      return runWorkflowEdit(rest, 'edit-propose');
+    case 'save':
+      return runWorkflowEdit(rest, 'version-save');
+    case 'quote':
+      return runWorkflowQuote(rest);
+    case 'launch':
+      return runWorkflowLaunch(rest);
+    default:
+      printWorkflowHelp();
+      return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+  }
 }
 
 async function runHostedSchema(

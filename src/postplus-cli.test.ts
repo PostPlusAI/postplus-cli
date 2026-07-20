@@ -48,6 +48,7 @@ import {
 import {
   runHostedDomainCommand,
   runMediaFileCommand,
+  runWorkflowCommand,
 } from './hosted-domain-commands.js';
 import { runHostedRequest } from './hosted-lib.js';
 import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
@@ -7858,6 +7859,364 @@ describe('account read-only commands', () => {
     assert.ok(
       Array.isArray((report as { endpointKeys?: string[] }).endpointKeys),
     );
+  });
+});
+
+describe('workflow commands', () => {
+  const WORKFLOW_SESSION = {
+    accountId: 'account_1',
+    accountName: 'Acme',
+    accountType: 'team' as const,
+    apiBaseUrl: 'https://postplus.test',
+    cliSessionToken: 'cli-session-token',
+    sessionExpiresAt: null,
+    userEmail: 'agent@example.com',
+    userId: 'user_1',
+  };
+
+  type CapabilityCall = {
+    url: string;
+    method: string | undefined;
+    body: Record<string, unknown>;
+  };
+
+  // Stub fetch to capture the single POSTed capability envelope and mimic the
+  // /hosted/capability route, which wraps every verb result in { output }.
+  function stubCapability(
+    output: unknown,
+    options: { status?: number; errorBody?: unknown } = {},
+  ): { restore: () => void; calls: CapabilityCall[] } {
+    const status = options.status ?? 200;
+    const originalFetch = globalThis.fetch;
+    const calls: CapabilityCall[] = [];
+    globalThis.fetch = (async (input: unknown, init: RequestInit | undefined) => {
+      calls.push({
+        url: String(input),
+        method: init?.method,
+        body: init?.body
+          ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+          : {},
+      });
+      const payload =
+        status === 200
+          ? {
+              accountId: 'account_1',
+              billing: { charged: false },
+              charged: false,
+              operationId: 'op',
+              output,
+              subscriptionStatus: 'active',
+            }
+          : (options.errorBody ?? {
+              code: 'postplus_cli_hosted_capability_failed',
+              error: 'The requested workflow does not exist for this account.',
+              message: 'The requested workflow does not exist for this account.',
+            });
+      return new Response(JSON.stringify(payload), {
+        headers: { 'content-type': 'application/json' },
+        status,
+      });
+    }) as typeof globalThis.fetch;
+    return {
+      calls,
+      restore: () => {
+        globalThis.fetch = originalFetch;
+      },
+    };
+  }
+
+  async function captureWorkflowStdout(
+    run: () => Promise<number>,
+  ): Promise<{ exitCode: number; stdout: string }> {
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    let stdout = '';
+    process.stdout.write = ((chunk: unknown) => {
+      stdout += String(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      const exitCode = await run();
+      return { exitCode, stdout };
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+  }
+
+  async function captureWorkflowStreams(
+    run: () => Promise<number>,
+  ): Promise<{ exitCode: number; stderr: string }> {
+    const originalOut = process.stdout.write.bind(process.stdout);
+    const originalErr = process.stderr.write.bind(process.stderr);
+    let stderr = '';
+    process.stdout.write = (() => true) as typeof process.stdout.write;
+    process.stderr.write = ((chunk: unknown) => {
+      stderr += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const exitCode = await run();
+      return { exitCode, stderr };
+    } finally {
+      process.stdout.write = originalOut;
+      process.stderr.write = originalErr;
+    }
+  }
+
+  it('create posts the workflow capability envelope and unwraps output', async () => {
+    await setLocalSession(WORKFLOW_SESSION);
+    const stub = stubCapability({
+      name: 'Glasses ad',
+      url: '/home/workspace/workflow?w=wf-1',
+      versionNumber: 1,
+      workflowId: 'wf-1',
+    });
+    try {
+      const { exitCode, stdout } = await captureWorkflowStdout(() =>
+        runWorkflowCommand([
+          'create',
+          '--name',
+          'Glasses ad',
+          '--description',
+          'UGC unboxing',
+          '--template',
+          'video_only',
+        ]),
+      );
+      assert.equal(exitCode, 0);
+      assert.equal(stub.calls.length, 1);
+      assert.equal(
+        stub.calls[0].url,
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      assert.equal(stub.calls[0].method, 'POST');
+      const body = stub.calls[0].body;
+      assert.equal(body.capability, 'workflow');
+      assert.equal(body.operation, 'create');
+      assert.equal(body.name, 'Glasses ad');
+      // Flags map onto the server's exact field names — a rename to a field the
+      // route's strictObject rejects would 400, so pin them here.
+      assert.equal(body.description, 'UGC unboxing');
+      assert.equal(body.templateId, 'video_only');
+      assert.match(String(body.operationId), /^postplus-cli:workflow:create:/u);
+      // The route wraps the verb result in { output }; the CLI unwraps it.
+      const parsed = JSON.parse(stdout) as Record<string, unknown>;
+      assert.equal(parsed.workflowId, 'wf-1');
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('list carries search and a numeric limit', async () => {
+    await setLocalSession(WORKFLOW_SESSION);
+    const stub = stubCapability({ workflows: [] });
+    try {
+      const { exitCode } = await captureWorkflowStdout(() =>
+        runWorkflowCommand(['list', '--search', 'glasses', '--limit', '5']),
+      );
+      assert.equal(exitCode, 0);
+      const body = stub.calls[0].body;
+      assert.equal(body.operation, 'list');
+      assert.equal(body.search, 'glasses');
+      assert.equal(body.limit, 5);
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('show and run-show pass their positional id', async () => {
+    await setLocalSession(WORKFLOW_SESSION);
+    const stub = stubCapability({ workflow: {} });
+    try {
+      await captureWorkflowStdout(() => runWorkflowCommand(['show', 'wf-1']));
+      await captureWorkflowStdout(() =>
+        runWorkflowCommand(['run-show', 'run-9']),
+      );
+      assert.equal(stub.calls[0].body.operation, 'get');
+      assert.equal(stub.calls[0].body.workflowId, 'wf-1');
+      assert.equal(stub.calls[1].body.operation, 'runs-get');
+      assert.equal(stub.calls[1].body.runId, 'run-9');
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('runs lists across the account without an id, and scoped with one', async () => {
+    await setLocalSession(WORKFLOW_SESSION);
+    const stub = stubCapability({ runs: [] });
+    try {
+      await captureWorkflowStdout(() => runWorkflowCommand(['runs']));
+      await captureWorkflowStdout(() =>
+        runWorkflowCommand(['runs', 'wf-1', '--limit', '3']),
+      );
+      assert.equal(stub.calls[0].body.operation, 'runs-list');
+      assert.equal('workflowId' in stub.calls[0].body, false);
+      assert.equal(stub.calls[1].body.workflowId, 'wf-1');
+      assert.equal(stub.calls[1].body.limit, 3);
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('propose and save read the --operations JSON array', async () => {
+    await setLocalSession(WORKFLOW_SESSION);
+    const dir = await mkdtemp(resolve(tmpdir(), 'postplus-workflow-ops-'));
+    tempDirs.push(dir);
+    const opsPath = resolve(dir, 'ops.json');
+    await writeFile(
+      opsPath,
+      JSON.stringify([{ id: 'gen-1', kind: 'update_node', title: 'x' }]),
+      'utf8',
+    );
+    const stub = stubCapability({ validation: { ok: true } });
+    try {
+      await captureWorkflowStdout(() =>
+        runWorkflowCommand(['propose', 'wf-1', '--operations', opsPath]),
+      );
+      await captureWorkflowStdout(() =>
+        runWorkflowCommand([
+          'save',
+          'wf-1',
+          '--operations',
+          opsPath,
+          '--base-version',
+          '2',
+        ]),
+      );
+      assert.equal(stub.calls[0].body.operation, 'edit-propose');
+      assert.deepEqual(stub.calls[0].body.operations, [
+        { id: 'gen-1', kind: 'update_node', title: 'x' },
+      ]);
+      assert.equal(stub.calls[1].body.operation, 'version-save');
+      assert.equal(stub.calls[1].body.baseVersionNumber, 2);
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('quote passes the instance count', async () => {
+    await setLocalSession(WORKFLOW_SESSION);
+    const stub = stubCapability({ reservedMillicredits: 40000 });
+    try {
+      await captureWorkflowStdout(() =>
+        runWorkflowCommand(['quote', 'wf-1', '--instances', '2']),
+      );
+      assert.equal(stub.calls[0].body.operation, 'run-quote');
+      assert.equal(stub.calls[0].body.instanceCount, 2);
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('launch refuses without --confirm and never posts', async () => {
+    await setLocalSession(WORKFLOW_SESSION);
+    const stub = stubCapability({ submissions: [] });
+    try {
+      await assert.rejects(
+        () =>
+          runWorkflowCommand([
+            'launch',
+            'wf-1',
+            '--title',
+            'Glasses ad',
+            '--instances',
+            '1',
+            '--max-reserved-millicredits',
+            '40000',
+          ]),
+        (error: unknown) =>
+          error instanceof Error && /Refusing to launch/u.test(error.message),
+      );
+      assert.equal(stub.calls.length, 0);
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('launch requires an acknowledged ceiling', async () => {
+    await setLocalSession(WORKFLOW_SESSION);
+    await assert.rejects(
+      () =>
+        runWorkflowCommand([
+          'launch',
+          'wf-1',
+          '--title',
+          'Glasses ad',
+          '--instances',
+          '1',
+          '--confirm',
+        ]),
+      (error: unknown) =>
+        error instanceof Error &&
+        /Missing required option --max-reserved-millicredits/u.test(
+          error.message,
+        ),
+    );
+  });
+
+  it('launch with --confirm posts run-launch with the acknowledged ceiling', async () => {
+    await setLocalSession(WORKFLOW_SESSION);
+    const stub = stubCapability({
+      instanceCount: 1,
+      reservedMillicredits: 40000,
+      submissions: [{ hatchetRunId: 'h-1', runId: 'run-1' }],
+    });
+    try {
+      const { exitCode } = await captureWorkflowStdout(() =>
+        runWorkflowCommand([
+          'launch',
+          'wf-1',
+          '--title',
+          'Glasses ad',
+          '--instances',
+          '1',
+          '--max-reserved-millicredits',
+          '40000',
+          '--confirm',
+        ]),
+      );
+      assert.equal(exitCode, 0);
+      const body = stub.calls[0].body;
+      assert.equal(body.operation, 'run-launch');
+      assert.equal(body.workflowId, 'wf-1');
+      assert.equal(body.workflowTitle, 'Glasses ad');
+      assert.equal(body.instanceCount, 1);
+      assert.equal(body.maxTotalReservedMillicredits, 40000);
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('rejects unknown options and surfaces server product errors as exit 1', async () => {
+    await setLocalSession(WORKFLOW_SESSION);
+    await assert.rejects(
+      () => runWorkflowCommand(['list', '--nope', 'x']),
+      (error: unknown) =>
+        error instanceof Error &&
+        /Unknown option for workflow list/u.test(error.message),
+    );
+
+    const stub = stubCapability(null, { status: 404 });
+    try {
+      const { exitCode, stderr } = await captureWorkflowStreams(() =>
+        runWorkflowCommand(['show', 'wf-missing']),
+      );
+      assert.equal(exitCode, 1);
+      assert.ok(stderr.length > 0);
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('help exits 0 and an unknown subcommand exits 1', async () => {
+    const help = await captureWorkflowStdout(() =>
+      runWorkflowCommand(['help']),
+    );
+    assert.equal(help.exitCode, 0);
+    assert.match(help.stdout, /postplus workflow launch/u);
+    const bogus = await captureWorkflowStdout(() =>
+      runWorkflowCommand(['bogus']),
+    );
+    assert.equal(bogus.exitCode, 1);
   });
 });
 
