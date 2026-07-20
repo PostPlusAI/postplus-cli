@@ -2232,14 +2232,14 @@ the bin surface the workflow-creation skill drives inside a CLI agent. Results
 are JSON. Reads and authoring writes are free; launch spends credits.
 
 Usage:
-  postplus workflow list [--search <text>] [--limit <n>] [--json]
+  postplus workflow list [--search <text>] [--limit <n>] [--json] [--output <result.json>]
   postplus workflow show <workflow-id> [--json] [--output <result.json>]
   postplus workflow create --name <name> [--description <text>] [--template <id>] [--output <result.json>]
   postplus workflow propose <workflow-id> --operations <ops.json> [--base-version <n>] [--output <result.json>]
   postplus workflow save <workflow-id> --operations <ops.json> [--base-version <n>] [--output <result.json>]
-  postplus workflow quote <workflow-id> --instances <n> [--json]
-  postplus workflow launch <workflow-id> --title <exact-name> --instances <n> --max-reserved-millicredits <n> --confirm [--json]
-  postplus workflow runs [<workflow-id>] [--limit <n>] [--json]
+  postplus workflow quote <workflow-id> --instances <n> [--json] [--output <result.json>]
+  postplus workflow launch <workflow-id> --title <exact-name> --instances <n> --max-reserved-millicredits <n> --confirm [--json] [--output <result.json>]
+  postplus workflow runs [<workflow-id>] [--limit <n>] [--json] [--output <result.json>]
   postplus workflow run-show <run-id> [--json] [--output <result.json>]
 
 --operations is a JSON array of edit ops (add_node / update_node / remove_node /
