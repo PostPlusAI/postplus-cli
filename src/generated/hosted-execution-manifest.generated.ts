@@ -17,6 +17,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "endpointKeys": [
         "transcription"
       ],
+      "effect": "spend",
       "endpoints": [
         {
           "endpointKey": "transcription",
@@ -115,6 +116,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "facebook-post-by-url",
         "facebook-profile-posts"
       ],
+      "effect": "spend",
       "sources": [
         {
           "sourceKey": "facebook-group-posts",
@@ -148,6 +150,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "facebook-reels",
         "facebook-search"
       ],
+      "effect": "spend",
       "collections": [
         {
           "collectionKey": "facebook-ads-library",
@@ -199,6 +202,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "collectionKeys": [
         "google-trends-fast"
       ],
+      "effect": "spend",
       "collections": [
         {
           "collectionKey": "google-trends-fast",
@@ -232,6 +236,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "image-seedream-v5-lite-edit-sequential",
         "image-higgsfield-soul-text"
       ],
+      "effect": "spend",
       "endpoints": [
         {
           "endpointKey": "image-gpt-image-2-text",
@@ -1328,6 +1333,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "instagram-profiles",
         "instagram-search"
       ],
+      "effect": "spend",
       "collections": [
         {
           "collectionKey": "instagram-comments",
@@ -1367,6 +1373,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "collectionKeys": [
         "pinterest-search"
       ],
+      "effect": "spend",
       "collections": [
         {
           "collectionKey": "pinterest-search",
@@ -1401,6 +1408,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "video-seedance-2-mini-text",
         "video-seedance-2-text"
       ],
+      "effect": "spend",
       "endpoints": [
         {
           "endpointKey": "video-seedance-2-fast-image",
@@ -1947,46 +1955,60 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "capability": "social-publishing",
       "operations": [
         {
-          "operation": "analytics"
+          "operation": "analytics",
+          "effect": "read"
         },
         {
-          "operation": "channel-settings"
+          "operation": "channel-settings",
+          "effect": "read"
         },
         {
-          "operation": "create-post"
+          "operation": "create-post",
+          "effect": "write"
         },
         {
-          "operation": "delete-post"
+          "operation": "delete-post",
+          "effect": "write"
         },
         {
-          "operation": "delete-post-group"
+          "operation": "delete-post-group",
+          "effect": "write"
         },
         {
-          "operation": "list-channels"
+          "operation": "list-channels",
+          "effect": "read"
         },
         {
-          "operation": "list-posts"
+          "operation": "list-posts",
+          "effect": "read"
         },
         {
-          "operation": "missing-content"
+          "operation": "missing-content",
+          "effect": "read"
         },
         {
-          "operation": "notifications"
+          "operation": "notifications",
+          "effect": "read"
         },
         {
-          "operation": "set-release-id"
+          "operation": "set-release-id",
+          "effect": "write"
         },
         {
-          "operation": "trigger-channel-tool"
+          "operation": "trigger-channel-tool",
+          "effect": "write"
         },
         {
-          "operation": "update-post-status"
+          "operation": "update-post-status",
+          "effect": "write"
         },
         {
-          "operation": "upload-file"
+          "operation": "upload-file",
+          "effect": "write"
         },
         {
-          "operation": "upload-from-url"
+          "operation": "upload-from-url",
+          "effect": "write"
         }
       ]
     }
@@ -2007,6 +2029,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "tiktok-users",
         "tiktok-videos"
       ],
+      "effect": "spend",
       "collections": [
         {
           "collectionKey": "tiktok-ads-top",
@@ -2046,6 +2069,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "modelKeys": [
         "video-analysis"
       ],
+      "effect": "spend",
       "models": [
         {
           "modelKey": "video-analysis",
@@ -2070,6 +2094,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "video-infinitetalk",
         "video-kling-v2-6-pro-motion-control"
       ],
+      "effect": "spend",
       "endpoints": [
         {
           "endpointKey": "video-kling-v3-0-pro-text",
@@ -2498,6 +2523,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "endpointKeys": [
         "transcription-video"
       ],
+      "effect": "spend",
       "endpoints": [
         {
           "endpointKey": "transcription-video",
@@ -2595,6 +2621,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "voice-design",
         "voice-clone"
       ],
+      "effect": "spend",
       "endpoints": [
         {
           "endpointKey": "voice-design",
@@ -2749,6 +2776,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "sourceKeys": [
         "youtube-videos"
       ],
+      "effect": "spend",
       "sources": [
         {
           "sourceKey": "youtube-videos",
@@ -2768,6 +2796,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "youtube-comments",
         "youtube-video-download"
       ],
+      "effect": "spend",
       "collections": [
         {
           "collectionKey": "youtube-channel-summary",

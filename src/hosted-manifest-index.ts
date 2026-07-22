@@ -54,6 +54,10 @@ export type ManifestSource = {
 
 export type ManifestOperation = {
   operation: string;
+  // read = the Web host routes the op as GET (non-side-effecting); write =
+  // anything else. Projected from the Web SOCIAL_PUBLISHING_OPERATION_METHODS
+  // table so approval/effect gates never hand-maintain a publish read list.
+  effect?: 'read' | 'write';
 };
 
 // One execution binding from the generated manifest. media-generation entries
@@ -67,6 +71,11 @@ export type ManifestEntry = {
   verb: string;
   domain: HostedDomain;
   capability: string;
+  // Effect of the binding's SUBMIT form. The four provider-launching
+  // capabilities project `spend` (credits reserved at submit); social-publishing
+  // classifies per operation (see ManifestOperation.effect) and carries no
+  // binding-level effect.
+  effect?: 'read' | 'spend' | 'write' | 'destructive';
   endpointKeys?: readonly string[];
   modelKeys?: readonly string[];
   collectionKeys?: readonly string[];
