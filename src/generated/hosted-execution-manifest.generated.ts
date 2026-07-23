@@ -1392,6 +1392,37 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       ]
     }
   ],
+  "reddit-search": [
+    {
+      "skill": "reddit-search",
+      "mode": "cli-runner",
+      "surface": "request-json",
+      "verb": "collect",
+      "domain": "research",
+      "capability": "hosted-collection",
+      "collectionKeys": [
+        "reddit-search"
+      ],
+      "effect": "spend",
+      "collections": [
+        {
+          "collectionKey": "reddit-search",
+          "actorId": "harshmaur/reddit-scraper",
+          "inputFields": [
+            {
+              "name": "maxPostsCount",
+              "type": "number",
+              "required": false,
+              "integer": true,
+              "min": 0,
+              "max": 50000,
+              "default": 10
+            }
+          ]
+        }
+      ]
+    }
+  ],
   "seedance-submitter": [
     {
       "skill": "seedance-submitter",
