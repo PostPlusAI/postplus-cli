@@ -7143,6 +7143,98 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('rejects a local file path in a media-url field locally with the upload remedy', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      for (const badReference of [
+        '/Users/agent/product-shots/ref-a.png',
+        'ref-a.png',
+        'http://example.com/ref-a.png',
+      ]) {
+        await assert.rejects(
+          () =>
+            runHostedDomainCommand('media', [
+              'create',
+              'image-gpt-image-2-edit',
+              '--prompt',
+              'recolor the jacket to navy',
+              '--reference-image',
+              badReference,
+            ]),
+          /image-gpt-image-2-edit images must be an https:\/\/ URL, a postplus-media:\/\/ reference, or a data: URI; received ".*"\. A local file must be uploaded first: `postplus media-file upload --input-file <file>`/u,
+        );
+      }
+      // Fast-failed at flag parse: no hosted call was ever made.
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('accepts all three legal media-url schemes and submits the request', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let postedBody: unknown = null;
+    globalThis.fetch = async (_input, init) => {
+      postedBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const references = [
+        'https://example.com/ref-a.png',
+        'postplus-media://postplus-media/uploads/user_1/ref-b.png',
+        'data:image/png;base64,aGk=',
+      ];
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'image-gpt-image-2-edit',
+        '--prompt',
+        'recolor the jacket to navy',
+        ...references.flatMap((reference) => ['--reference-image', reference]),
+      ]);
+      assert.equal(result, 0);
+      const body = postedBody as Record<string, unknown>;
+      assert.deepEqual(
+        (body.input as Record<string, unknown>).images,
+        references,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('keeps Nano Pro edit aspect ratio optional and rejects unverified square requests locally', async () => {
     await setLocalSession({
       accountId: 'account_1',
