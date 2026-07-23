@@ -8,7 +8,10 @@
 // agent gets an immediate field-level error (e.g. seedance resolution "999p") instead of
 // waiting for the round-trip.
 
-import { assertModelledFieldValuesInRange as assertModelledFieldValuesInRangeCore } from './generated/hosted-field-validation-core.generated.js';
+import {
+  HOSTED_MEDIA_REFERENCE_URI_PREFIX,
+  assertModelledFieldValuesInRange as assertModelledFieldValuesInRangeCore,
+} from './generated/hosted-field-validation-core.generated.js';
 import type { ManifestField } from './hosted-manifest-index.js';
 
 export function assertModelledFieldValuesInRange(
@@ -22,4 +25,61 @@ export function assertModelledFieldValuesInRange(
     input,
     (message) => new Error(message),
   );
+}
+
+// The only reference forms the hosted media boundary can actually use: a
+// provider-fetchable HTTPS URL, the persistent hosted-media reference minted by
+// `postplus media-file upload`, or inline data-URI bytes. Everything else —
+// above all a local filesystem path — cannot be downloaded by the PostPlus
+// server, so it must fast-fail here at flag parse instead of surfacing later as
+// an async provider_network_failed terminal state (2026-07 incident: 30 edit
+// submits all failed in the background poll because a local path sailed
+// through).
+const MEDIA_URL_SCHEME_PREFIXES = [
+  'https://',
+  HOSTED_MEDIA_REFERENCE_URI_PREFIX,
+  'data:',
+] as const;
+
+function hasAllowedMediaUrlScheme(value: string): boolean {
+  return MEDIA_URL_SCHEME_PREFIXES.some((prefix) => value.startsWith(prefix));
+}
+
+function formatRejectedMediaUrlValue(value: string): string {
+  return value.length > 120 ? `${value.slice(0, 120)}…` : value;
+}
+
+// Client-side gate for `media-url` typed fields, run on the built input at the
+// same call sites as assertModelledFieldValuesInRange. The Web boundary stays
+// authoritative (it enforces the same scheme set at submit time, before any
+// reserve); this is pre-submit feedback so a local file path is rejected with
+// the upload remedy instead of a hosted round-trip.
+export function assertMediaUrlFieldSchemes(
+  endpointKey: string,
+  fields: readonly ManifestField[],
+  input: Record<string, unknown>,
+): void {
+  for (const field of fields) {
+    if (field.class === 'runner-managed' || field.type !== 'media-url') {
+      continue;
+    }
+    if (!Object.hasOwn(input, field.name)) {
+      continue;
+    }
+    const raw = input[field.name];
+    const entries = Array.isArray(raw) ? raw : [raw];
+    for (const entry of entries) {
+      if (typeof entry !== 'string' || !entry.trim()) {
+        continue;
+      }
+      const value = entry.trim();
+      if (!hasAllowedMediaUrlScheme(value)) {
+        throw new Error(
+          `${endpointKey} ${field.name} must be an https:// URL, a ${HOSTED_MEDIA_REFERENCE_URI_PREFIX} reference, or a data: URI; received "${formatRejectedMediaUrlValue(value)}". ` +
+            'A local file must be uploaded first: `postplus media-file upload --input-file <file>` returns a ' +
+            `persistent ${HOSTED_MEDIA_REFERENCE_URI_PREFIX} reference to use here.`,
+        );
+      }
+    }
+  }
 }

@@ -13,7 +13,10 @@ import {
 } from './authed-cloud-request.js';
 import { formatPostPlusCompatibilityError } from './client-compatibility.js';
 import { HOSTED_MEDIA_REFERENCE_URI_PREFIX } from './generated/hosted-field-validation-core.generated.js';
-import { assertModelledFieldValuesInRange } from './hosted-field-validation.js';
+import {
+  assertMediaUrlFieldSchemes,
+  assertModelledFieldValuesInRange,
+} from './hosted-field-validation.js';
 import {
   type HostedDomain,
   type ManifestEndpoint,
@@ -340,6 +343,9 @@ async function runMediaVerbFlags(args: {
   // stays authoritative). It runs on the built input so a mixed-case "4K"/"High"
   // passes while an out-of-enum value fast-fails locally before the hosted call.
   assertModelledFieldValuesInRange(endpointKey, fields, input);
+  // media-url fields fast-fail here on a local path / bare string; the Web
+  // boundary enforces the same scheme set at submit time.
+  assertMediaUrlFieldSchemes(endpointKey, fields, input);
 
   return submitMediaGenerationRequest({
     capability: resolved.capability,
@@ -413,6 +419,9 @@ async function runMediaVerbRequestJson(args: {
   // resolution ("999p") fast-fails locally before the hosted call while a mixed-case
   // "720P" passes.
   assertModelledFieldValuesInRange(endpointKey, endpoint.fields, input);
+  // media-url fields fast-fail here on a local path / bare string; the Web
+  // boundary enforces the same scheme set at submit time.
+  assertMediaUrlFieldSchemes(endpointKey, endpoint.fields, input);
 
   return submitMediaGenerationRequest({
     capability: resolved.capability,
@@ -1351,6 +1360,9 @@ async function runMediaEstimate(
   // value fast-fails locally before the estimate call — and the estimate prices
   // exactly the request a subsequent submit would send.
   assertModelledFieldValuesInRange(endpointKey, endpoint.fields, input);
+  // media-url fields fast-fail here on a local path / bare string; the Web
+  // boundary enforces the same scheme set at submit time.
+  assertMediaUrlFieldSchemes(endpointKey, endpoint.fields, input);
 
   return dispatchHostedCommand(
     {
