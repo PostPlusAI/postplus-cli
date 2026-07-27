@@ -4255,8 +4255,19 @@ describe('hosted domain commands', () => {
       ['media-file', 'upload', '-h'],
       ['media-file', 'download', '--help'],
       ['media-file', 'download', '-h'],
+      // Bare `help` (word) is recognized for both subcommands too.
+      ['media-file', 'upload', 'help'],
+      ['media-file', 'download', 'help'],
       // Help wins even when it trails otherwise-real flags.
       ['media-file', 'upload', '--input-file', '/tmp/x.jpg', '--help'],
+      // ...including after a value-taking flag on download.
+      [
+        'media-file',
+        'download',
+        '--reference',
+        'postplus-media://bucket/object',
+        '--help',
+      ],
     ];
     for (const invocation of invocations) {
       const { stdout } = await execFileAsync(process.execPath, [
