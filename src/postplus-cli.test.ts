@@ -4243,6 +4243,33 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('renders media-file help for subcommand-level --help/-h instead of throwing a flag error', async () => {
+    // Regression: runMediaFileUpload/runMediaFileDownload register only their
+    // own boolean flags (upload: `json`; download: `debug`, `json`), so a
+    // `--help` sitting in the subcommand args used to fall through to parseFlags
+    // and exit 1 with `Missing value for --help.`. Subcommand-level help must
+    // now print the shared media-file help and exit 0. execFileAsync rejects on
+    // any non-zero exit, so a resolved call already asserts the exit-0 contract.
+    const invocations = [
+      ['media-file', 'upload', '--help'],
+      ['media-file', 'upload', '-h'],
+      ['media-file', 'download', '--help'],
+      ['media-file', 'download', '-h'],
+      // Help wins even when it trails otherwise-real flags.
+      ['media-file', 'upload', '--input-file', '/tmp/x.jpg', '--help'],
+    ];
+    for (const invocation of invocations) {
+      const { stdout } = await execFileAsync(process.execPath, [
+        '--import',
+        'tsx',
+        'src/index.ts',
+        ...invocation,
+      ]);
+      assert.match(stdout, /postplus media-file upload --input-file/u);
+      assert.match(stdout, /postplus media-file download \(--reference/u);
+    }
+  });
+
   it('prints manifest-driven public hosted request schemas without requiring auth', async () => {
     const { stdout: researchStdout } = await execFileAsync(process.execPath, [
       '--import',

@@ -576,6 +576,21 @@ export async function runMediaFileCommand(
   context?: HostedRequestContext,
 ): Promise<number | unknown> {
   const [subcommand, ...rest] = args;
+  // `postplus media-file <upload|download> --help|-h|help`: the subcommand
+  // parsers register only their own boolean flags (upload: `json`; download:
+  // `debug`, `json`), so a `--help` sitting in `rest` is treated as an unknown
+  // value-taking flag by parseFlags and throws `Missing value for --help.`.
+  // Intercept subcommand-level help here — before dispatch — and render the
+  // shared media-file help, matching how every other hosted command handles
+  // `rest.some(isHelp)`. Not gated on rest.length so `upload --input-file x
+  // --help` still shows help rather than erroring.
+  if (
+    (subcommand === 'upload' || subcommand === 'download') &&
+    rest.some(isHelp)
+  ) {
+    printMediaFileHelp();
+    return 0;
+  }
   if (subcommand === 'upload') {
     return runMediaFileUpload(rest, context);
   }
