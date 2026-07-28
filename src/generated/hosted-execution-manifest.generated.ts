@@ -1331,7 +1331,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "instagram-hashtags",
         "instagram-posts",
         "instagram-profiles",
-        "instagram-search"
+        "instagram-search",
+        "instagram-video-download"
       ],
       "effect": "spend",
       "collections": [
@@ -1358,6 +1359,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         {
           "collectionKey": "instagram-search",
           "actorId": "apify/instagram-search-scraper"
+        },
+        {
+          "collectionKey": "instagram-video-download",
+          "actorId": "seemuapps/instagram-video-downloader"
         }
       ]
     }
