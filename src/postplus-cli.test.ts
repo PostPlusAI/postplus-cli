@@ -4770,10 +4770,87 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('emits only a checkpoint-based resume command for pending local research', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'request.json');
+    const outputPath = resolve(requestDir, 'result.json');
+    const runHandle = `signed.${'opaque-payload.'.repeat(80)}signature`;
+    await writeFile(
+      requestPath,
+      JSON.stringify({ keyword: 'portable blender' }),
+    );
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+    let stderrText = '';
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ runHandle, status: 'RUNNING' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    process.stderr.write = ((chunk: unknown) => {
+      stderrText += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+    process.stdout.write = (() => true) as typeof process.stdout.write;
+
+    try {
+      const result = await runHostedDomainCommand('research', [
+        'collect',
+        'google-trends-fast',
+        '--request',
+        requestPath,
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 0);
+      assert.equal(
+        (
+          JSON.parse(await readFile(outputPath, 'utf8')) as {
+            runHandle: string;
+          }
+        ).runHandle,
+        runHandle,
+      );
+      assert.match(
+        stderrText,
+        new RegExp(
+          `postplus research collect --resume-from '${outputPath.replace(
+            /[.*+?^${}()|[\]\\]/gu,
+            '\\$&',
+          )}'`,
+          'u',
+        ),
+      );
+      assert.doesNotMatch(stderrText, /--run-handle/u);
+      assert.equal(stderrText.includes(runHandle), false);
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalStderrWrite;
+      process.stdout.write = originalStdoutWrite;
+    }
+  });
+
   it('polls hosted research collection handles through the hosted collection route', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);
     const outputPath = resolve(requestDir, 'poll-result.json');
+    const runHandle = `signed.${'opaque-payload.'.repeat(80)}signature`;
+    await writeFile(
+      outputPath,
+      JSON.stringify({ runHandle, status: 'RUNNING' }),
+    );
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -4793,7 +4870,9 @@ describe('hosted domain commands', () => {
       return new Response(
         JSON.stringify({
           charged: false,
-          output: [{ url: 'https://www.facebook.com/facebook/' }],
+          payload: { itemCount: 1 },
+          runHandle: null,
+          status: 'SUCCEEDED',
         }),
         {
           status: 200,
@@ -4805,9 +4884,7 @@ describe('hosted domain commands', () => {
     try {
       const result = await runHostedDomainCommand('research', [
         'collect',
-        '--run-handle',
-        'hosted-collection-run-handle',
-        '--output',
+        '--resume-from',
         outputPath,
       ]);
       assert.equal(result, 0);
@@ -4816,9 +4893,14 @@ describe('hosted domain commands', () => {
         'https://postplus.test/api/postplus-cli/hosted/collection',
       );
       assert.deepEqual(postedBody, {
-        runHandle: 'hosted-collection-run-handle',
+        runHandle,
         runHandleType: 'hosted-collection',
       });
+      assert.equal(
+        (JSON.parse(await readFile(outputPath, 'utf8')) as { status: string })
+          .status,
+        'SUCCEEDED',
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -4828,6 +4910,16 @@ describe('hosted domain commands', () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);
     const outputPath = resolve(requestDir, 'poll-result.json');
+    await writeFile(
+      outputPath,
+      JSON.stringify({
+        output: {
+          pending: true,
+          runHandle: 's_public_content_snapshot',
+          status: 'pending',
+        },
+      }),
+    );
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -4859,9 +4951,7 @@ describe('hosted domain commands', () => {
     try {
       const result = await runHostedDomainCommand('research', [
         'scrape',
-        '--run-handle',
-        's_public_content_snapshot',
-        '--output',
+        '--resume-from',
         outputPath,
       ]);
       assert.equal(result, 0);
@@ -4917,13 +5007,69 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('keeps polling nested public-content state until terminal records arrive', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'scrape-result.json');
+    await writeFile(
+      outputPath,
+      JSON.stringify({
+        output: { runHandle: 's_snapshot', status: 'pending' },
+      }),
+    );
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      const responseBody =
+        fetchCalls < 3
+          ? { output: { runHandle: 's_snapshot', status: 'pending' } }
+          : { output: [{ id: 'post_1' }] };
+      return new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('research', [
+        'scrape',
+        '--resume-from',
+        outputPath,
+        '--wait-seconds',
+        '1',
+        '--poll-interval-seconds',
+        '0.01',
+      ]);
+      assert.equal(result, 0);
+      assert.equal(fetchCalls, 3);
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), {
+        output: [{ id: 'post_1' }],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('honors --wait-seconds 0 as a single research scrape status check', async () => {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
     globalThis.fetch = async () => {
       fetchCalls += 1;
       return new Response(
-        JSON.stringify({ runHandle: 'run_h', status: 'RUNNING', output: null }),
+        JSON.stringify({
+          output: { runHandle: 'run_h', status: 'pending' },
+        }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     };
@@ -4938,11 +5084,171 @@ describe('hosted domain commands', () => {
             cliSessionToken: 'cli-session-token',
           },
         },
-      )) as { status: string };
+      )) as { output: { status: string } };
       assert.equal(fetchCalls, 1);
-      assert.equal(payload.status, 'RUNNING');
+      assert.equal(payload.output.status, 'pending');
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects unsafe or invalid local research resume inputs before the network', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const invalidJsonPath = resolve(requestDir, 'invalid.json');
+    const missingHandlePath = resolve(requestDir, 'missing-handle.json');
+    const terminalPath = resolve(requestDir, 'terminal.json');
+    await writeFile(invalidJsonPath, '{');
+    await writeFile(missingHandlePath, JSON.stringify({ status: 'pending' }));
+    await writeFile(
+      terminalPath,
+      JSON.stringify({ runHandle: null, status: 'SUCCEEDED' }),
+    );
+
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      throw new Error('network must not be called');
+    };
+
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('research', [
+          'collect',
+          '--run-handle',
+          'opaque',
+        ]),
+        /Direct --run-handle is not accepted/u,
+      );
+      await assert.rejects(
+        runHostedDomainCommand('research', [
+          'collect',
+          '--resume-from',
+          missingHandlePath,
+          '--output',
+          resolve(requestDir, 'other.json'),
+        ]),
+        /do not also pass --output/u,
+      );
+      await assert.rejects(
+        runHostedDomainCommand('research', [
+          'collect',
+          '--resume-from',
+          invalidJsonPath,
+        ]),
+        /Failed to read JSON file/u,
+      );
+      await assert.rejects(
+        runHostedDomainCommand('research', [
+          'collect',
+          '--resume-from',
+          missingHandlePath,
+        ]),
+        /contains no resumable run handle/u,
+      );
+      await assert.rejects(
+        runHostedDomainCommand('research', [
+          'collect',
+          '--resume-from',
+          terminalPath,
+        ]),
+        /checkpoint is already terminal/u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('requires a durable output before a local research launch', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const collectRequestPath = resolve(requestDir, 'collect.json');
+    const scrapeRequestPath = resolve(requestDir, 'scrape.json');
+    await writeFile(collectRequestPath, JSON.stringify({ keyword: 'x' }));
+    await writeFile(
+      scrapeRequestPath,
+      JSON.stringify([{ url: 'https://x.test' }]),
+    );
+
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      throw new Error('network must not be called');
+    };
+
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('research', [
+          'collect',
+          'google-trends-fast',
+          '--request',
+          collectRequestPath,
+        ]),
+        /requires --output <result\.json>/u,
+      );
+      await assert.rejects(
+        runHostedDomainCommand('research', [
+          'scrape',
+          'facebook-profile-posts',
+          '--request',
+          scrapeRequestPath,
+        ]),
+        /requires --output <result\.json>/u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('preserves a research checkpoint when a resume returns a product error', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'result.json');
+    const checkpointText = `${JSON.stringify({
+      runHandle: 'signed-opaque-handle',
+      status: 'RUNNING',
+    })}\n`;
+    await writeFile(outputPath, checkpointText);
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          code: 'postplus_cli_hosted_provider_timeout',
+          error: 'Research status is temporarily unavailable.',
+          layer: 'hosted-collection',
+          operationId: 'op-status-1',
+          status: 504,
+        }),
+        { status: 504, headers: { 'content-type': 'application/json' } },
+      );
+
+    try {
+      const result = await runHostedDomainCommand('research', [
+        'collect',
+        '--resume-from',
+        outputPath,
+      ]);
+      assert.equal(result, 1);
+      assert.equal(await readFile(outputPath, 'utf8'), checkpointText);
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalStderrWrite;
     }
   });
 
@@ -8019,7 +8325,10 @@ describe('workflow commands', () => {
     const status = options.status ?? 200;
     const originalFetch = globalThis.fetch;
     const calls: CapabilityCall[] = [];
-    globalThis.fetch = (async (input: unknown, init: RequestInit | undefined) => {
+    globalThis.fetch = (async (
+      input: unknown,
+      init: RequestInit | undefined,
+    ) => {
       calls.push({
         url: String(input),
         method: init?.method,
@@ -8040,7 +8349,8 @@ describe('workflow commands', () => {
           : (options.errorBody ?? {
               code: 'postplus_cli_hosted_capability_failed',
               error: 'The requested workflow does not exist for this account.',
-              message: 'The requested workflow does not exist for this account.',
+              message:
+                'The requested workflow does not exist for this account.',
             });
       return new Response(JSON.stringify(payload), {
         headers: { 'content-type': 'application/json' },
@@ -8668,6 +8978,13 @@ describe('hosted lib / bin request parity', () => {
         const requestPath = resolve(requestDir, 'request.json');
         await writeFile(requestPath, JSON.stringify(parityCase.requestJson));
         binArgs.push('--request', requestPath);
+      }
+      if (parityCase.domain === 'research') {
+        const outputDir = await mkdtemp(
+          resolve(tmpdir(), 'postplus-cli-parity-output-'),
+        );
+        tempDirs.push(outputDir);
+        binArgs.push('--output', resolve(outputDir, 'result.json'));
       }
 
       const binRequest = await captureSingleHostedRequest(() =>

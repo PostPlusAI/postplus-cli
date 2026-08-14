@@ -1417,6 +1417,30 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "min": 0,
               "max": 50000,
               "default": 10
+            },
+            {
+              "name": "maxCommentsCount",
+              "type": "number",
+              "required": false,
+              "integer": true,
+              "min": 0,
+              "default": 10
+            },
+            {
+              "name": "maxCommentsPerPost",
+              "type": "number",
+              "required": false,
+              "integer": true,
+              "min": 0,
+              "default": 10
+            },
+            {
+              "name": "maxCommunitiesCount",
+              "type": "number",
+              "required": false,
+              "integer": true,
+              "min": 0,
+              "default": 2
             }
           ]
         }

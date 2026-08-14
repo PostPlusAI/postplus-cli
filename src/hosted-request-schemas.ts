@@ -245,7 +245,7 @@ function buildResearchSchemaReport(
     sourceKeys,
     notes: [
       'collect / scrape input is an opaque provider-shaped JSON object the agent authors; the collection/source key stays on the CLI flag, not inside the file.',
-      'Use --run-handle with research collect for polling instead of a new launch.',
+      'Use --resume-from <result.json> with research collect or scrape instead of launching a pending run again.',
       'Use research scrape <source-key> with a JSON array of records for public-content sources.',
       'The CLI derives operationId before sending requests to PostPlus Cloud.',
     ],
@@ -401,7 +401,6 @@ function requireMediaBinding(endpointKey: string): MediaGenerationBinding {
   }
   return binding;
 }
-
 
 function buildPublishSchemaReport(): HostedRequestSchemaReport {
   const operations = manifestTargetKeys('publish', 'social-publishing');

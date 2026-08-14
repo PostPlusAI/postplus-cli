@@ -167,8 +167,8 @@ export async function runHostedDomainCommand(
 
   // Poll a pending async media-generation run by handle. This is a hand-coded
   // branch (not a manifest verb) because a status poll has no endpointKey/field
-  // contract to project — exactly like the `research collect --run-handle`
-  // polling branch. It must be checked before the manifest verb dispatch.
+  // contract to project — exactly like the hand-coded research resume branch.
+  // It must be checked before the manifest verb dispatch.
   if (domain === 'media' && subcommand === 'poll') {
     return runMediaPoll(rest, context);
   }
@@ -1166,7 +1166,7 @@ function submitMediaGenerationRequest(params: {
 // reuses the submit's operationId, so polling never re-reserves or re-charges.
 // The body carries only the status quadruple; submit-only fields (input,
 // requestDimensions, quoteConfirmationToken) are never sent. Mirrors the
-// `research collect --run-handle` polling branch.
+// internal handle-based half of the research resume branch.
 //
 // Bounded wait: video/audio renders take minutes, and an agent caller has no
 // sleep primitive of its own — a single-shot poll forced it to hammer this verb
@@ -1251,14 +1251,154 @@ async function pollHostedRunUntilSettled(input: {
   }
 }
 
-// Read the top-level `status` a research collect/scrape resume payload carries
-// (the same field extractResearchResume keys terminality on).
-function readResearchRunStatus(payload: unknown): string | null {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return null;
+type ResearchVerb = 'collect' | 'scrape';
+
+type ResearchRunProjection = {
+  runHandle: string | null;
+  status: string | null;
+};
+
+function readResearchRunRecord(value: unknown): ResearchRunProjection {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { runHandle: null, status: null };
   }
-  const status = (payload as Record<string, unknown>).status;
-  return typeof status === 'string' && status.trim() ? status : null;
+  const record = value as Record<string, unknown>;
+  return {
+    // Validate non-blank but return the original bytes. A signed opaque handle
+    // must never be normalized, trimmed, or reconstructed by this boundary.
+    runHandle:
+      typeof record.runHandle === 'string' && record.runHandle.trim()
+        ? record.runHandle
+        : null,
+    status:
+      typeof record.status === 'string' && record.status.trim()
+        ? record.status
+        : null,
+  };
+}
+
+// The hosted-collection route projects runHandle/status at the top level,
+// while the generic hosted-capability route projects public-content collection
+// state under `output`. Research owns that transport difference here so every
+// resume caller consumes one stable projection.
+function readResearchRun(payload: unknown): ResearchRunProjection {
+  const topLevel = readResearchRunRecord(payload);
+  if (topLevel.runHandle || topLevel.status) {
+    return topLevel;
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return topLevel;
+  }
+  return readResearchRunRecord((payload as Record<string, unknown>).output);
+}
+
+function readResearchRunStatus(payload: unknown): string | null {
+  return readResearchRun(payload).status;
+}
+
+function assertResearchResumePayload(
+  payload: unknown,
+  verb: ResearchVerb,
+): void {
+  const { runHandle, status } = readResearchRun(payload);
+  if (status) {
+    if (!isTerminalRunStatus(status) && !runHandle) {
+      throw new Error(
+        `Research ${verb} returned non-terminal status without a resumable run handle.`,
+      );
+    }
+    return;
+  }
+
+  // Public-content scrape completion is the delivered record array. Pending
+  // responses are objects with output.runHandle/output.status and were handled
+  // above. No other shape is accepted as an implicit terminal result.
+  if (
+    verb === 'scrape' &&
+    payload &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    Array.isArray((payload as Record<string, unknown>).output)
+  ) {
+    return;
+  }
+
+  throw new Error(
+    `Research ${verb} returned an unrecognized resume response without status.`,
+  );
+}
+
+async function resolveResearchResumeInput(input: {
+  context: HostedRequestContext | undefined;
+  flags: ParsedFlags;
+  verb: ResearchVerb;
+}): Promise<{
+  outputPath: string | null;
+  preserveCheckpointOnError: boolean;
+  runHandle: string;
+}> {
+  const allowedKeys = new Set([
+    'json',
+    'output',
+    'poll-interval-seconds',
+    'resume-from',
+    'run-handle',
+    'wait-seconds',
+  ]);
+  for (const key of [...input.flags.values.keys(), ...input.flags.booleans]) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(
+        `Unknown option for research ${input.verb} resume: --${key}.`,
+      );
+    }
+  }
+
+  const directRunHandle = input.flags.values.get('run-handle') ?? null;
+  const resumeFrom = input.flags.values.get('resume-from') ?? null;
+
+  if (input.context) {
+    if (resumeFrom) {
+      throw new Error(
+        `research ${input.verb} --resume-from is only available in the local CLI; the hosted runtime must pass its structured run handle.`,
+      );
+    }
+    return {
+      outputPath: input.flags.values.get('output') ?? null,
+      preserveCheckpointOnError: false,
+      runHandle: requireFlag(input.flags, 'run-handle'),
+    };
+  }
+
+  if (directRunHandle) {
+    throw new Error(
+      `Direct --run-handle is not accepted by the local CLI. Use research ${input.verb} --resume-from <result.json>.`,
+    );
+  }
+  if (input.flags.values.has('output')) {
+    throw new Error(
+      `research ${input.verb} --resume-from updates its checkpoint file directly; do not also pass --output.`,
+    );
+  }
+
+  const checkpointPath = path.resolve(requireFlag(input.flags, 'resume-from'));
+  const checkpoint = await readJsonFile(checkpointPath);
+  const { runHandle, status } = readResearchRun(checkpoint);
+  if (status && isTerminalRunStatus(status)) {
+    throw new Error(
+      `Research ${input.verb} checkpoint is already terminal (${status}).`,
+    );
+  }
+  if (!runHandle) {
+    throw new Error(
+      `Research ${input.verb} checkpoint contains no resumable run handle: ${checkpointPath}`,
+    );
+  }
+
+  return {
+    outputPath: checkpointPath,
+    preserveCheckpointOnError: true,
+    runHandle,
+  };
 }
 
 // Parse the shared `--wait-seconds` / `--poll-interval-seconds` pair used by
@@ -1596,14 +1736,15 @@ async function runResearchCollect(
 ): Promise<number | unknown> {
   const [first, ...rest] = args;
 
-  // Polling path: `research collect --run-handle <h>`. No positional collectionKey.
+  // Resume path: local CLI reads --resume-from; hosted-lib receives the
+  // structured handle directly. Neither form has a positional collectionKey.
   // Same bounded in-command wait as `media poll` (see pollHostedRunUntilSettled):
   // apify collections run 15s-2min, and an agent caller with no sleep primitive
   // would otherwise hammer this verb in a tight model loop.
   if (!first || first.startsWith('--')) {
     const flags = parseFlags(args, new Set(['json']));
-    const runHandle = requireFlag(flags, 'run-handle');
-    const outputPath = flags.values.get('output') ?? null;
+    const { outputPath, preserveCheckpointOnError, runHandle } =
+      await resolveResearchResumeInput({ context, flags, verb: 'collect' });
     const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
 
     return dispatchHostedCommand(
@@ -1611,19 +1752,23 @@ async function runResearchCollect(
         request: () =>
           pollHostedRunUntilSettled({
             pollIntervalMs,
-            pollOnce: () =>
-              postHostedJson({
+            pollOnce: async () => {
+              const payload = await postHostedJson({
                 body: { runHandle, runHandleType: 'hosted-collection' },
                 pathName: '/api/postplus-cli/hosted/collection',
                 skillName: null,
                 context,
-              }),
+              });
+              assertResearchResumePayload(payload, 'collect');
+              return payload;
+            },
             readStatus: readResearchRunStatus,
             waitBudgetMs,
           }),
         errorInputLabel: 'research-collect-run-handle',
         json: flags.booleans.has('json'),
         outputPath,
+        preserveOutputOnProductError: preserveCheckpointOnError,
       },
       context,
     );
@@ -1663,6 +1808,11 @@ async function runResearchCollect(
   }
 
   const outputPath = flags.values.get('output') ?? null;
+  if (!context && !outputPath) {
+    throw new Error(
+      'Local research collect requires --output <result.json> so an asynchronous run has a durable checkpoint.',
+    );
+  }
   const { body: raw, errorInputLabel } = await resolveRequestBody(
     context,
     flags,
@@ -1710,7 +1860,8 @@ async function runResearchCollect(
       errorInputLabel,
       json: flags.booleans.has('json'),
       outputPath,
-      asyncResume: (payload) => extractResearchResume(payload, 'collect'),
+      asyncResume: (payload) =>
+        extractResearchResume(payload, 'collect', outputPath),
     },
     context,
   );
@@ -1734,8 +1885,8 @@ async function runResearchScrape(
 
   if (!first || first.startsWith('--')) {
     const flags = parseFlags(args, new Set(['json']));
-    const runHandle = requireFlag(flags, 'run-handle');
-    const outputPath = flags.values.get('output') ?? null;
+    const { outputPath, preserveCheckpointOnError, runHandle } =
+      await resolveResearchResumeInput({ context, flags, verb: 'scrape' });
     const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
 
     return dispatchHostedCommand(
@@ -1743,19 +1894,23 @@ async function runResearchScrape(
         request: () =>
           pollHostedRunUntilSettled({
             pollIntervalMs,
-            pollOnce: () =>
-              postHostedJson({
+            pollOnce: async () => {
+              const payload = await postHostedJson({
                 body: { runHandle, runHandleType: 'public-content-collection' },
                 pathName: '/api/postplus-cli/hosted/collection',
                 skillName: null,
                 context,
-              }),
+              });
+              assertResearchResumePayload(payload, 'scrape');
+              return payload;
+            },
             readStatus: readResearchRunStatus,
             waitBudgetMs,
           }),
         errorInputLabel: 'research-scrape-run-handle',
         json: flags.booleans.has('json'),
         outputPath,
+        preserveOutputOnProductError: preserveCheckpointOnError,
       },
       context,
     );
@@ -1793,6 +1948,11 @@ async function runResearchScrape(
   }
 
   const outputPath = flags.values.get('output') ?? null;
+  if (!context && !outputPath) {
+    throw new Error(
+      'Local research scrape requires --output <result.json> so an asynchronous run has a durable checkpoint.',
+    );
+  }
   const { body: raw, errorInputLabel } = await resolveRequestBody(
     context,
     flags,
@@ -1843,7 +2003,8 @@ async function runResearchScrape(
       errorInputLabel,
       json: flags.booleans.has('json'),
       outputPath,
-      asyncResume: (payload) => extractResearchResume(payload, 'scrape'),
+      asyncResume: (payload) =>
+        extractResearchResume(payload, 'scrape', outputPath),
     },
     context,
   );
@@ -2403,12 +2564,15 @@ async function runHostedCommand(input: {
   errorInputLabel: string;
   json: boolean;
   outputPath: string | null;
-  // Fail-soft-to-resumable (plan E): when an async submit returns a still-pending
-  // run, the call site provides a closure that maps the payload to the LITERAL
-  // resume command (`postplus media poll --handle <id>` / `research <verb>
-  // --run-handle <h>`). We emit it to stderr — in BOTH human and --json modes, so
-  // the run id (already in the stdout payload) is never lost — without touching
-  // the server payload on stdout. Returns null for a terminal/non-async payload.
+  // A resume checkpoint is durable input, not an error sink. If a status read
+  // fails, keep the last valid handle on disk so the caller can retry after the
+  // underlying problem is fixed. --json still receives the structured error on
+  // stdout; human mode keeps the existing actionable stderr message.
+  preserveOutputOnProductError?: boolean;
+  // When an async submit remains pending, render its next safe action. Media
+  // keeps its short literal id; research emits only --resume-from <checkpoint>
+  // so an agent never rewrites a signed opaque handle. stderr is used in both
+  // human and --json modes without changing the server payload on stdout.
   asyncResume?: (payload: unknown) => string | null;
 }): Promise<number> {
   let payload: unknown;
@@ -2437,11 +2601,17 @@ async function runHostedCommand(input: {
     }
 
     if (error instanceof HostedProductRequestError) {
-      await writeResult(
-        { error: error.productError },
-        input.outputPath,
-        input.json,
-      );
+      if (input.preserveOutputOnProductError) {
+        if (input.json) {
+          await writeResult({ error: error.productError }, null, true);
+        }
+      } else {
+        await writeResult(
+          { error: error.productError },
+          input.outputPath,
+          input.json,
+        );
+      }
       process.stderr.write(`${error.message}\n`);
       return 1;
     }
@@ -2473,6 +2643,7 @@ async function dispatchHostedCommand(
     errorInputLabel: string;
     json: boolean;
     outputPath: string | null;
+    preserveOutputOnProductError?: boolean;
     asyncResume?: (payload: unknown) => string | null;
   },
   context: HostedRequestContext | undefined,
@@ -2557,24 +2728,19 @@ function extractMediaPollResume(
 
 function extractResearchResume(
   payload: unknown,
-  verb: 'collect' | 'scrape',
+  verb: ResearchVerb,
+  outputPath: string | null,
 ): string | null {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+  const { runHandle, status } = readResearchRun(payload);
+  if (!runHandle || !outputPath) {
     return null;
   }
-  const record = payload as Record<string, unknown>;
-  const runHandle =
-    typeof record.runHandle === 'string' && record.runHandle.trim()
-      ? record.runHandle
-      : null;
-  if (!runHandle) {
-    return null;
-  }
-  const status = typeof record.status === 'string' ? record.status : null;
   if (status && isTerminalRunStatus(status)) {
     return null;
   }
-  return `postplus research ${verb} --run-handle ${shellQuoteArg(runHandle)}`;
+  return `postplus research ${verb} --resume-from ${shellQuoteArg(
+    path.resolve(outputPath),
+  )}`;
 }
 
 async function writeQuoteConfirmationChallenge(
@@ -2758,10 +2924,10 @@ function printResearchHelp(): void {
 
 Usage:
   postplus research schema [--collection-key <key>] [--json]
-  postplus research collect <collection-key> --request <input.json> [--skill <skill-id>] [--max-charge-usd <usd>] [--output <result.json>]
-  postplus research collect --run-handle <runHandle> [--output <result.json>]
-  postplus research scrape <source-key> --request <input-array.json> [--skill <skill-id>] [--max-charge-usd <usd>] [--output <result.json>]
-  postplus research scrape --run-handle <runHandle> [--output <result.json>]
+  postplus research collect <collection-key> --request <input.json> --output <result.json> [--skill <skill-id>] [--max-charge-usd <usd>]
+  postplus research collect --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
+  postplus research scrape <source-key> --request <input-array.json> --output <result.json> [--skill <skill-id>] [--max-charge-usd <usd>]
+  postplus research scrape --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
 `);
 }
 
