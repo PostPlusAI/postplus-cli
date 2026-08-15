@@ -2820,6 +2820,36 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       ]
     }
   ],
+  "x-research": [
+    {
+      "skill": "x-research",
+      "mode": "cli-runner",
+      "surface": "request-json",
+      "verb": "collect",
+      "domain": "research",
+      "capability": "hosted-collection",
+      "collectionKeys": [
+        "x-posts",
+        "x-profiles",
+        "x-user-search"
+      ],
+      "effect": "spend",
+      "collections": [
+        {
+          "collectionKey": "x-posts",
+          "actorId": "apidojo/twitter-scraper-lite"
+        },
+        {
+          "collectionKey": "x-profiles",
+          "actorId": "apidojo/twitter-user-scraper"
+        },
+        {
+          "collectionKey": "x-user-search",
+          "actorId": "apidojo/twitter-user-scraper"
+        }
+      ]
+    }
+  ],
   "youtube-research": [
     {
       "skill": "youtube-research",
