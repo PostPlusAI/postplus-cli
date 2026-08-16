@@ -1401,7 +1401,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "domain": "research",
       "capability": "hosted-collection",
       "collectionKeys": [
-        "reddit-search"
+        "reddit-search",
+        "reddit-post-comments",
+        "reddit-subreddit-posts",
+        "reddit-user-activity"
       ],
       "effect": "spend",
       "collections": [
@@ -1419,28 +1422,66 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "default": 10
             },
             {
-              "name": "maxCommentsCount",
-              "type": "number",
-              "required": false,
-              "integer": true,
-              "min": 0,
-              "default": 10
-            },
-            {
-              "name": "maxCommentsPerPost",
-              "type": "number",
-              "required": false,
-              "integer": true,
-              "min": 0,
-              "default": 10
-            },
-            {
               "name": "maxCommunitiesCount",
               "type": "number",
               "required": false,
               "integer": true,
               "min": 0,
               "default": 2
+            }
+          ]
+        },
+        {
+          "collectionKey": "reddit-post-comments",
+          "actorId": "harshmaur/reddit-comments-scraper",
+          "inputFields": [
+            {
+              "name": "maxCommentsPerPost",
+              "type": "number",
+              "required": false,
+              "integer": true,
+              "min": 1,
+              "max": 10000,
+              "default": 100
+            }
+          ]
+        },
+        {
+          "collectionKey": "reddit-subreddit-posts",
+          "actorId": "harshmaur/reddit-subreddit-scraper",
+          "inputFields": [
+            {
+              "name": "maxPostsCount",
+              "type": "number",
+              "required": false,
+              "integer": true,
+              "min": 1,
+              "max": 50000,
+              "default": 1000
+            }
+          ]
+        },
+        {
+          "collectionKey": "reddit-user-activity",
+          "actorId": "harshmaur/reddit-user-scraper",
+          "inputFields": [
+            {
+              "name": "maxPostsCount",
+              "type": "number",
+              "required": false,
+              "integer": true,
+              "min": 0,
+              "max": 50000,
+              "default": 25
+            },
+            {
+              "name": "maxCommentsCount",
+              "type": "number",
+              "required": false,
+              "integer": true,
+              "min": 0,
+              "max": 50000,
+              "default": 25
             }
           ]
         }
