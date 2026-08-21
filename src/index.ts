@@ -23,6 +23,7 @@ import {
   runBalanceCommand,
   runRunsCommand,
 } from './hosted-account-commands.js';
+import { runHostedAdsCommand } from './hosted-ads-commands.js';
 import {
   runHostedDomainCommand,
   runMediaFileCommand,
@@ -89,6 +90,7 @@ Usage:
   postplus balance [--json]
   postplus runs list [--status <status>] [--since <iso>] [--limit <n>] [--json]
   postplus runs show <run-id> [--json]
+  postplus ads manifest|connections|accounts|bindings|readiness|query ... --provider google --json
   postplus research schema [--collection-key <key>] [--json]
   postplus research collect <collection-key> --request <input.json> --output <result.json> [--skill <skill-id>]
   postplus research collect --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
@@ -557,6 +559,8 @@ async function main(): Promise<void> {
         await runStudioCommand(['help']);
       } else if (helpTopic === 'workflow') {
         await runWorkflowCommand(['help']);
+      } else if (helpTopic === 'ads') {
+        await runHostedAdsCommand(['help']);
       } else {
         printHelp();
       }
@@ -571,6 +575,9 @@ async function main(): Promise<void> {
       return;
     case 'runs':
       process.exitCode = await runRunsCommand(rest);
+      return;
+    case 'ads':
+      process.exitCode = await runHostedAdsCommand(rest);
       return;
     // The bin path never passes the in-process context, so these always resolve
     // to the numeric exit code (the `unknown` return is the hosted-lib path only).

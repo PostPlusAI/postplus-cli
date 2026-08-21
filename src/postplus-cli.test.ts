@@ -46,6 +46,11 @@ import {
   runRunsCommand,
 } from './hosted-account-commands.js';
 import {
+  HOSTED_ADS_QUERY_TIMEOUT_MS,
+  type HostedAdsCommandDependencies,
+  runHostedAdsCommand,
+} from './hosted-ads-commands.js';
+import {
   runHostedDomainCommand,
   runMediaFileCommand,
   runWorkflowCommand,
@@ -4194,6 +4199,532 @@ describe('skill management commands', () => {
 
     assert.match(versionStdout.trim(), /^\d+\.\d+\.\d+$/);
     assert.equal(flagStdout, versionStdout);
+  });
+});
+
+describe('hosted Ads read commands', () => {
+  const bindingId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const auth = {
+    apiBaseUrl: 'https://postplus.test',
+    cliSessionToken: 'private-cli-session-token',
+  };
+
+  function createCommandHarness(input?: {
+    payload?: unknown;
+    readJson?: unknown;
+    status?: number;
+  }) {
+    const requests: Parameters<
+      HostedAdsCommandDependencies['sendRequest']
+    >[0][] = [];
+    const outputs: unknown[] = [];
+    const authOptions: ({ forceRefresh?: boolean } | undefined)[] = [];
+    const dependencies: HostedAdsCommandDependencies = {
+      async readJsonFile() {
+        return input && Object.hasOwn(input, 'readJson')
+          ? input.readJson
+          : {
+              bindingId,
+              parameters: {},
+              queryId: 'campaign.structure',
+            };
+      },
+      async resolveAuth(options) {
+        authOptions.push(options);
+        return auth;
+      },
+      async sendRequest(request) {
+        requests.push(request);
+        return new Response(
+          JSON.stringify(
+            input?.payload ?? {
+              data: {},
+              kind: 'manifest',
+              namespace: 'ads',
+              ok: true,
+              requestId: 'request-1',
+              schemaVersion: 1,
+            },
+          ),
+          {
+            status: input?.status ?? 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      },
+      writeJson(value) {
+        outputs.push(value);
+      },
+    };
+    return { authOptions, dependencies, outputs, requests };
+  }
+
+  it('maps every exact read grammar to one fixed hosted URL, method, body, and timeout', async () => {
+    const cases: {
+      args: string[];
+      body?: unknown;
+      method: 'GET' | 'POST';
+      pathName: string;
+      timeoutMs: number;
+    }[] = [
+      {
+        args: ['manifest', '--provider', 'google', '--json'],
+        method: 'GET',
+        pathName: '/api/postplus-cli/hosted/ads/google/manifest',
+        timeoutMs: 30_000,
+      },
+      {
+        args: ['connections', '--provider', 'google', '--json'],
+        method: 'GET',
+        pathName: '/api/postplus-cli/hosted/ads/google/connections',
+        timeoutMs: 30_000,
+      },
+      {
+        args: ['accounts', '--provider', 'google', '--json'],
+        method: 'GET',
+        pathName: '/api/postplus-cli/hosted/ads/google/accounts',
+        timeoutMs: 30_000,
+      },
+      {
+        args: [
+          'bindings',
+          '--provider',
+          'google',
+          '--cursor',
+          'cursor_1',
+          '--limit',
+          '100',
+          '--json',
+        ],
+        method: 'GET',
+        pathName:
+          '/api/postplus-cli/hosted/ads/google/bindings?limit=100&cursor=cursor_1',
+        timeoutMs: 30_000,
+      },
+      {
+        args: [
+          'readiness',
+          '--provider',
+          'google',
+          '--binding-id',
+          bindingId,
+          '--json',
+        ],
+        method: 'GET',
+        pathName: `/api/postplus-cli/hosted/ads/google/bindings/${bindingId}/readiness`,
+        timeoutMs: 30_000,
+      },
+      {
+        args: [
+          'query',
+          '--provider',
+          'google',
+          '--request',
+          'query.json',
+          '--json',
+        ],
+        body: {
+          bindingId,
+          parameters: {},
+          queryId: 'campaign.structure',
+        },
+        method: 'POST',
+        pathName: '/api/postplus-cli/hosted/ads/google/query',
+        timeoutMs: HOSTED_ADS_QUERY_TIMEOUT_MS,
+      },
+    ];
+
+    assert.ok(HOSTED_ADS_QUERY_TIMEOUT_MS > 30_000);
+    for (const testCase of cases) {
+      const harness = createCommandHarness();
+      assert.equal(
+        await runHostedAdsCommand(testCase.args, harness.dependencies),
+        0,
+      );
+      assert.equal(harness.requests.length, 1);
+      assert.equal(harness.requests[0]?.method, testCase.method);
+      assert.equal(harness.requests[0]?.pathName, testCase.pathName);
+      assert.equal(harness.requests[0]?.timeoutMs, testCase.timeoutMs);
+      assert.deepEqual(harness.requests[0]?.body, testCase.body);
+      assert.deepEqual(harness.authOptions, [undefined]);
+      assert.equal(harness.outputs.length, 1);
+    }
+  });
+
+  it('requires exact google, JSON output, and command-owned flags before auth', async () => {
+    const invalidArgs = [
+      ['manifest', '--json'],
+      ['manifest', '--provider', 'meta', '--json'],
+      ['manifest', '--provider', 'Google', '--json'],
+      ['manifest', '--provider', 'google'],
+      ['manifest', '--provider', 'google', '--accountId', 'x', '--json'],
+      ['manifest', '--provider', 'google', '--provider', 'google', '--json'],
+      ['manifest', '--provider', 'google', '--json', '--json'],
+      ['unknown', '--provider', 'google', '--json'],
+    ];
+
+    for (const args of invalidArgs) {
+      const harness = createCommandHarness();
+      await assert.rejects(() =>
+        runHostedAdsCommand(args, harness.dependencies),
+      );
+      assert.equal(harness.authOptions.length, 0);
+      assert.equal(harness.requests.length, 0);
+      assert.equal(harness.outputs.length, 0);
+    }
+  });
+
+  it('validates binding pagination and canonical UUIDs before auth', async () => {
+    const invalidArgs = [
+      ['bindings', '--provider', 'google', '--limit', '0', '--json'],
+      ['bindings', '--provider', 'google', '--limit', '101', '--json'],
+      ['bindings', '--provider', 'google', '--limit', '1.5', '--json'],
+      ['bindings', '--provider', 'google', '--limit', '01', '--json'],
+      [
+        'bindings',
+        '--provider',
+        'google',
+        '--cursor',
+        'not+base64url',
+        '--json',
+      ],
+      [
+        'readiness',
+        '--provider',
+        'google',
+        '--binding-id',
+        bindingId.toUpperCase(),
+        '--json',
+      ],
+    ];
+
+    for (const args of invalidArgs) {
+      const harness = createCommandHarness();
+      await assert.rejects(() =>
+        runHostedAdsCommand(args, harness.dependencies),
+      );
+      assert.equal(harness.authOptions.length, 0);
+      assert.equal(harness.requests.length, 0);
+    }
+  });
+
+  it('rejects malformed or authority-bearing query files before auth', async () => {
+    const prohibitedKeys = [
+      'accountId',
+      'actorUserId',
+      'connectionId',
+      'customerId',
+      'loginCustomerId',
+      'gaql',
+      'action',
+      'url',
+      'token',
+      'retry',
+      'unknown',
+    ];
+
+    for (const key of prohibitedKeys) {
+      const harness = createCommandHarness({
+        readJson: {
+          bindingId,
+          parameters: {},
+          queryId: 'campaign.structure',
+          [key]: 'caller-owned',
+        },
+      });
+      await assert.rejects(() =>
+        runHostedAdsCommand(
+          [
+            'query',
+            '--provider',
+            'google',
+            '--request',
+            'query.json',
+            '--json',
+          ],
+          harness.dependencies,
+        ),
+      );
+      assert.equal(harness.authOptions.length, 0);
+      assert.equal(harness.requests.length, 0);
+    }
+
+    for (const invalidRequest of [
+      null,
+      [],
+      { bindingId, parameters: [], queryId: 'campaign.structure' },
+      { bindingId, parameters: {}, queryId: 'Campaign Structure' },
+      {
+        bindingId: bindingId.toUpperCase(),
+        parameters: {},
+        queryId: 'campaign.structure',
+      },
+    ]) {
+      const harness = createCommandHarness({ readJson: invalidRequest });
+      await assert.rejects(() =>
+        runHostedAdsCommand(
+          [
+            'query',
+            '--provider',
+            'google',
+            '--request',
+            'query.json',
+            '--json',
+          ],
+          harness.dependencies,
+        ),
+      );
+      assert.equal(harness.requests.length, 0);
+    }
+  });
+
+  it('rejects malformed request-file JSON before auth', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-ads-query-'));
+    tempDirs.push(requestDir);
+    const requestPath = resolve(requestDir, 'malformed.json');
+    await writeFile(requestPath, '{not-json');
+    const harness = createCommandHarness();
+    const { readJsonFile: _readJsonFile, ...overrides } = harness.dependencies;
+
+    await assert.rejects(
+      () =>
+        runHostedAdsCommand(
+          ['query', '--provider', 'google', '--request', requestPath, '--json'],
+          overrides,
+        ),
+      /Could not read valid JSON/u,
+    );
+    assert.equal(harness.authOptions.length, 0);
+    assert.equal(harness.requests.length, 0);
+  });
+
+  it('wires one forced 401 refresh without exposing either session token', async () => {
+    const outputs: unknown[] = [];
+    const authOptions: ({ forceRefresh?: boolean } | undefined)[] = [];
+    const tokens = ['old-session-token', 'fresh-session-token'];
+    let requestInput:
+      | Parameters<HostedAdsCommandDependencies['sendRequest']>[0]
+      | undefined;
+
+    const exitCode = await runHostedAdsCommand(
+      ['connections', '--provider', 'google', '--json'],
+      {
+        async resolveAuth(options) {
+          authOptions.push(options);
+          return {
+            apiBaseUrl: 'https://postplus.test',
+            cliSessionToken:
+              options?.forceRefresh === true ? tokens[1]! : tokens[0]!,
+          };
+        },
+        async sendRequest(input) {
+          requestInput = input;
+          assert.ok(input.retryOn401);
+          const refreshed = await input.retryOn401();
+          assert.equal(refreshed.cliSessionToken, tokens[1]);
+          return new Response(
+            JSON.stringify({
+              data: { connections: [] },
+              kind: 'connection_list',
+              namespace: 'ads',
+              ok: true,
+              requestId: 'request-401',
+              schemaVersion: 1,
+            }),
+            { status: 200 },
+          );
+        },
+        writeJson(value) {
+          outputs.push(value);
+        },
+      },
+    );
+
+    assert.equal(exitCode, 0);
+    assert.equal(requestInput?.auth.cliSessionToken, tokens[0]);
+    assert.deepEqual(authOptions, [undefined, { forceRefresh: true }]);
+    const output = JSON.stringify(outputs);
+    assert.equal(output.includes(tokens[0]!), false);
+    assert.equal(output.includes(tokens[1]!), false);
+  });
+
+  it('preserves the stable hosted non-2xx error fields and redacts extra payload', async () => {
+    const harness = createCommandHarness({
+      payload: {
+        error: {
+          code: 'postplus_cli_hosted_ads_action_unavailable',
+          message: 'The hosted Ads read action is unavailable.',
+          retryable: false,
+          status: 409,
+        },
+        namespace: 'ads',
+        ok: false,
+        rawProviderPayload: 'must-not-escape',
+        requestId: 'request-error-1',
+        schemaVersion: 1,
+      },
+      status: 409,
+    });
+
+    assert.equal(
+      await runHostedAdsCommand(
+        ['manifest', '--provider', 'google', '--json'],
+        harness.dependencies,
+      ),
+      1,
+    );
+    assert.deepEqual(harness.outputs, [
+      {
+        error: {
+          code: 'postplus_cli_hosted_ads_action_unavailable',
+          message: 'The hosted Ads read action is unavailable.',
+          retryable: false,
+          status: 409,
+        },
+        namespace: 'ads',
+        ok: false,
+        requestId: 'request-error-1',
+        schemaVersion: 1,
+      },
+    ]);
+    assert.equal(
+      JSON.stringify(harness.outputs).includes('must-not-escape'),
+      false,
+    );
+  });
+
+  it('fails redacted if a server payload echoes the current session token', async () => {
+    const harness = createCommandHarness({
+      payload: {
+        data: { leaked: auth.cliSessionToken },
+        kind: 'manifest',
+        namespace: 'ads',
+        ok: true,
+        requestId: 'request-unsafe',
+        schemaVersion: 1,
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        runHostedAdsCommand(
+          ['manifest', '--provider', 'google', '--json'],
+          harness.dependencies,
+        ),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.message.includes(auth.cliSessionToken), false);
+        assert.match(error.message, /unsafe Ads response/u);
+        return true;
+      },
+    );
+    assert.equal(harness.outputs.length, 0);
+  });
+
+  it('uses the existing production compatibility headers and performs a real once-only 401 refresh', async () => {
+    await writeLocalConfig({
+      accountId: 'account-1',
+      accountName: 'Team Workspace',
+      accountSlug: 'team-workspace',
+      accountType: 'team',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'old-production-token',
+      managedSkills: { releaseId: 'skills-release-1', skillNames: [] },
+      sessionExpiresAt: 1_900_000_000,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    const originalFetch = globalThis.fetch;
+    const adsAuthorization: string[] = [];
+    let refreshCalls = 0;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      const headers = init?.headers as Record<string, string>;
+      if (url.endsWith('/api/postplus-cli/auth/refresh')) {
+        refreshCalls += 1;
+        return new Response(
+          JSON.stringify({
+            accountId: 'account-1',
+            accountName: 'Team Workspace',
+            accountSlug: 'team-workspace',
+            accountType: 'team',
+            cliSessionToken: 'fresh-production-token',
+            sessionExpiresAt: 1_900_000_100,
+            subscriptionStatus: 'active',
+            userEmail: 'user@example.com',
+            userId: 'user-1',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      assert.equal(
+        url,
+        'https://postplus.test/api/postplus-cli/hosted/ads/google/manifest',
+      );
+      adsAuthorization.push(headers.authorization!);
+      assert.equal(
+        headers[POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.contractVersion],
+        '2',
+      );
+      assert.equal(
+        headers[POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.runtime],
+        'postplus-cli',
+      );
+      assert.equal(
+        headers[POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.skillsReleaseId],
+        'skills-release-1',
+      );
+      return adsAuthorization.length === 1
+        ? new Response('{}', { status: 401 })
+        : new Response(
+            JSON.stringify({
+              data: { actions: [] },
+              kind: 'manifest',
+              namespace: 'ads',
+              ok: true,
+              requestId: 'request-production',
+              schemaVersion: 1,
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+    };
+    const outputs: unknown[] = [];
+    try {
+      assert.equal(
+        await runHostedAdsCommand(
+          ['manifest', '--provider', 'google', '--json'],
+          { writeJson: (value) => outputs.push(value) },
+        ),
+        0,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assert.equal(refreshCalls, 1);
+    assert.deepEqual(adsAuthorization, [
+      'Bearer old-production-token',
+      'Bearer fresh-production-token',
+    ]);
+    const output = JSON.stringify(outputs);
+    assert.equal(output.includes('old-production-token'), false);
+    assert.equal(output.includes('fresh-production-token'), false);
+    assert.equal(
+      adsAuthorization.some((value) => /googleapis|google\.com/u.test(value)),
+      false,
+    );
+  });
+
+  it('documents and dispatches the thin Ads grammar without authentication for help', async () => {
+    const { stdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'ads',
+      'help',
+    ]);
+    assert.match(stdout, /postplus ads manifest --provider google --json/u);
+    assert.match(stdout, /postplus ads query --provider google --request/u);
+    assert.match(stdout, /read-only/u);
   });
 });
 
