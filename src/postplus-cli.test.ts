@@ -4351,10 +4351,100 @@ describe('hosted Ads read commands', () => {
     }
   });
 
-  it('requires exact google, JSON output, and command-owned flags before auth', async () => {
+  it('maps every exact Meta Ads grammar to its fixed hosted URL without adding provider authority', async () => {
+    const metaQuery = {
+      bindingId,
+      parameters: {},
+      queryId: 'meta_ads.insights.account_daily.v1',
+    };
+    const cases: {
+      args: string[];
+      body?: unknown;
+      method: 'GET' | 'POST';
+      pathName: string;
+      timeoutMs: number;
+    }[] = [
+      {
+        args: ['manifest', '--provider', 'meta_ads', '--json'],
+        method: 'GET',
+        pathName: '/api/postplus-cli/hosted/ads/meta_ads/manifest',
+        timeoutMs: 30_000,
+      },
+      {
+        args: ['connections', '--provider', 'meta_ads', '--json'],
+        method: 'GET',
+        pathName: '/api/postplus-cli/hosted/ads/meta_ads/connections',
+        timeoutMs: 30_000,
+      },
+      {
+        args: ['accounts', '--provider', 'meta_ads', '--json'],
+        method: 'GET',
+        pathName: '/api/postplus-cli/hosted/ads/meta_ads/accounts',
+        timeoutMs: 30_000,
+      },
+      {
+        args: ['bindings', '--provider', 'meta_ads', '--json'],
+        method: 'GET',
+        pathName: '/api/postplus-cli/hosted/ads/meta_ads/bindings',
+        timeoutMs: 30_000,
+      },
+      {
+        args: [
+          'readiness',
+          '--provider',
+          'meta_ads',
+          '--binding-id',
+          bindingId,
+          '--json',
+        ],
+        method: 'GET',
+        pathName: `/api/postplus-cli/hosted/ads/meta_ads/bindings/${bindingId}/readiness`,
+        timeoutMs: 30_000,
+      },
+      {
+        args: [
+          'query',
+          '--provider',
+          'meta_ads',
+          '--request',
+          'query.json',
+          '--json',
+        ],
+        body: metaQuery,
+        method: 'POST',
+        pathName: '/api/postplus-cli/hosted/ads/meta_ads/query',
+        timeoutMs: HOSTED_ADS_QUERY_TIMEOUT_MS,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const harness = createCommandHarness({ readJson: metaQuery });
+      assert.equal(
+        await runHostedAdsCommand(testCase.args, harness.dependencies),
+        0,
+      );
+      assert.equal(harness.requests.length, 1);
+      assert.equal(harness.requests[0]?.method, testCase.method);
+      assert.equal(harness.requests[0]?.pathName, testCase.pathName);
+      assert.equal(harness.requests[0]?.timeoutMs, testCase.timeoutMs);
+      assert.deepEqual(harness.requests[0]?.body, testCase.body);
+      assert.deepEqual(harness.authOptions, [undefined]);
+      assert.equal(harness.outputs.length, 1);
+      assert.equal(
+        /graph\.facebook|googleapis|oauth|access_token/iu.test(
+          JSON.stringify(harness.requests[0]),
+        ),
+        false,
+      );
+    }
+  });
+
+  it('requires exact google|meta_ads, JSON output, and command-owned flags before auth', async () => {
     const invalidArgs = [
       ['manifest', '--json'],
       ['manifest', '--provider', 'meta', '--json'],
+      ['manifest', '--provider', 'Meta_Ads', '--json'],
+      ['manifest', '--provider', 'meta-ads', '--json'],
       ['manifest', '--provider', 'Google', '--json'],
       ['manifest', '--provider', 'google'],
       ['manifest', '--provider', 'google', '--accountId', 'x', '--json'],
@@ -4405,6 +4495,22 @@ describe('hosted Ads read commands', () => {
       );
       assert.equal(harness.authOptions.length, 0);
       assert.equal(harness.requests.length, 0);
+    }
+  });
+
+  it('rejects pagination for Meta bindings before auth', async () => {
+    for (const args of [
+      ['bindings', '--provider', 'meta_ads', '--limit', '1', '--json'],
+      ['bindings', '--provider', 'meta_ads', '--cursor', 'cursor_1', '--json'],
+    ]) {
+      const harness = createCommandHarness();
+      await assert.rejects(
+        () => runHostedAdsCommand(args, harness.dependencies),
+        /Meta Ads bindings do not accept --limit or --cursor/u,
+      );
+      assert.equal(harness.authOptions.length, 0);
+      assert.equal(harness.requests.length, 0);
+      assert.equal(harness.outputs.length, 0);
     }
   });
 
@@ -4478,6 +4584,35 @@ describe('hosted Ads read commands', () => {
     }
   });
 
+  it('accepts only the fixed Meta account-daily query with empty parameters', async () => {
+    for (const invalidRequest of [
+      { bindingId, parameters: {}, queryId: 'campaign.structure' },
+      {
+        bindingId,
+        parameters: { datePreset: 'yesterday' },
+        queryId: 'meta_ads.insights.account_daily.v1',
+      },
+    ]) {
+      const harness = createCommandHarness({ readJson: invalidRequest });
+      await assert.rejects(() =>
+        runHostedAdsCommand(
+          [
+            'query',
+            '--provider',
+            'meta_ads',
+            '--request',
+            'query.json',
+            '--json',
+          ],
+          harness.dependencies,
+        ),
+      );
+      assert.equal(harness.authOptions.length, 0);
+      assert.equal(harness.requests.length, 0);
+      assert.equal(harness.outputs.length, 0);
+    }
+  });
+
   it('rejects malformed request-file JSON before auth', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-ads-query-'));
     tempDirs.push(requestDir);
@@ -4548,6 +4683,64 @@ describe('hosted Ads read commands', () => {
     assert.equal(output.includes(tokens[1]!), false);
   });
 
+  it('shares bearer-only, once-refresh transport with Meta Ads', async () => {
+    const authOptions: ({ forceRefresh?: boolean } | undefined)[] = [];
+    const outputs: unknown[] = [];
+    const tokens = ['old-meta-session-token', 'fresh-meta-session-token'];
+    let requestInput:
+      | Parameters<HostedAdsCommandDependencies['sendRequest']>[0]
+      | undefined;
+
+    assert.equal(
+      await runHostedAdsCommand(
+        ['connections', '--provider', 'meta_ads', '--json'],
+        {
+          async resolveAuth(options) {
+            authOptions.push(options);
+            return {
+              apiBaseUrl: 'https://postplus.test',
+              cliSessionToken:
+                options?.forceRefresh === true ? tokens[1]! : tokens[0]!,
+            };
+          },
+          async sendRequest(input) {
+            requestInput = input;
+            const refreshed = await input.retryOn401?.();
+            assert.equal(refreshed?.cliSessionToken, tokens[1]);
+            return new Response(
+              JSON.stringify({
+                data: { connections: [] },
+                kind: 'connection_list',
+                namespace: 'ads',
+                ok: true,
+                requestId: 'request-meta-401',
+                schemaVersion: 1,
+              }),
+              { status: 200 },
+            );
+          },
+          writeJson(value) {
+            outputs.push(value);
+          },
+        },
+      ),
+      0,
+    );
+
+    assert.equal(
+      requestInput?.pathName,
+      '/api/postplus-cli/hosted/ads/meta_ads/connections',
+    );
+    assert.deepEqual(authOptions, [undefined, { forceRefresh: true }]);
+    assert.deepEqual(Object.keys(requestInput?.auth ?? {}).sort(), [
+      'apiBaseUrl',
+      'cliSessionToken',
+    ]);
+    const output = JSON.stringify(outputs);
+    assert.equal(output.includes(tokens[0]!), false);
+    assert.equal(output.includes(tokens[1]!), false);
+  });
+
   it('preserves the stable hosted non-2xx error fields and redacts extra payload', async () => {
     const harness = createCommandHarness({
       payload: {
@@ -4589,6 +4782,54 @@ describe('hosted Ads read commands', () => {
     ]);
     assert.equal(
       JSON.stringify(harness.outputs).includes('must-not-escape'),
+      false,
+    );
+  });
+
+  it('prints the server-owned Meta Web recovery without leaking raw diagnostic fields', async () => {
+    const harness = createCommandHarness({
+      payload: {
+        error: {
+          code: 'postplus_cli_hosted_ads_connection_required',
+          message: 'Connect this Ads provider in PostPlus Workspace settings.',
+          retryable: false,
+          status: 409,
+        },
+        namespace: 'ads',
+        ok: false,
+        providerAccessToken: 'must-not-escape',
+        rawProviderPayload: 'must-not-escape',
+        requestId: 'request-meta-recovery',
+        schemaVersion: 1,
+      },
+      status: 409,
+    });
+
+    assert.equal(
+      await runHostedAdsCommand(
+        ['accounts', '--provider', 'meta_ads', '--json'],
+        harness.dependencies,
+      ),
+      1,
+    );
+    assert.deepEqual(harness.outputs, [
+      {
+        error: {
+          code: 'postplus_cli_hosted_ads_connection_required',
+          message: 'Connect this Ads provider in PostPlus Workspace settings.',
+          retryable: false,
+          status: 409,
+        },
+        namespace: 'ads',
+        ok: false,
+        requestId: 'request-meta-recovery',
+        schemaVersion: 1,
+      },
+    ]);
+    assert.equal(
+      /must-not-escape|providerAccessToken|rawProviderPayload/u.test(
+        JSON.stringify(harness.outputs),
+      ),
       false,
     );
   });
@@ -4715,6 +4956,12 @@ describe('hosted Ads read commands', () => {
   });
 
   it('documents and dispatches the thin Ads grammar without authentication for help', async () => {
+    const { stdout: topLevelStdout } = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      'src/index.ts',
+      'help',
+    ]);
     const { stdout } = await execFileAsync(process.execPath, [
       '--import',
       'tsx',
@@ -4722,9 +4969,16 @@ describe('hosted Ads read commands', () => {
       'ads',
       'help',
     ]);
+    assert.match(
+      topLevelStdout,
+      /postplus ads .* --provider google\|meta_ads --json/u,
+    );
     assert.match(stdout, /postplus ads manifest --provider google --json/u);
+    assert.match(stdout, /postplus ads manifest --provider meta_ads --json/u);
     assert.match(stdout, /postplus ads query --provider google --request/u);
+    assert.match(stdout, /postplus ads query --provider meta_ads --request/u);
     assert.match(stdout, /read-only/u);
+    assert.match(stdout, /PostPlus Workspace settings in the Web/u);
   });
 });
 

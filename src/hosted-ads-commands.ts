@@ -12,12 +12,13 @@ const HOSTED_ADS_DIAGNOSTIC_TIMEOUT_MS = 30_000;
 export const HOSTED_ADS_QUERY_TIMEOUT_MS = 45_000;
 const MAX_BINDING_LIST_LIMIT = 100;
 const MAX_CURSOR_LENGTH = 512;
+const META_ADS_ACCOUNT_DAILY_QUERY_ID = 'meta_ads.insights.account_daily.v1';
 const CANONICAL_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const QUERY_ID_PATTERN = /^[a-z][a-z0-9_.]{0,127}$/u;
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/u;
 
-type HostedAdsProvider = 'google';
+type HostedAdsProvider = 'google' | 'meta_ads';
 type HostedAdsSubcommand =
   | 'accounts'
   | 'bindings'
@@ -136,16 +137,18 @@ async function parseHostedAdsCommand(
   const flags = parseStrictFlags(args, allowedValueFlags);
   const provider = flags.values.get('provider');
   if (provider === undefined) {
-    throw new Error(`ads ${rawSubcommand} requires --provider google.`);
+    throw new Error(
+      `ads ${rawSubcommand} requires --provider google|meta_ads.`,
+    );
   }
-  if (provider !== 'google') {
-    throw new Error('Ads provider must be exact lowercase google.');
+  if (provider !== 'google' && provider !== 'meta_ads') {
+    throw new Error('Ads provider must be exact lowercase google or meta_ads.');
   }
   if (!flags.json) {
     throw new Error(`ads ${rawSubcommand} requires --json.`);
   }
 
-  const pathPrefix = '/api/postplus-cli/hosted/ads/google';
+  const pathPrefix = `/api/postplus-cli/hosted/ads/${provider}`;
   if (
     rawSubcommand === 'manifest' ||
     rawSubcommand === 'connections' ||
@@ -161,6 +164,12 @@ async function parseHostedAdsCommand(
   }
 
   if (rawSubcommand === 'bindings') {
+    if (
+      provider === 'meta_ads' &&
+      (flags.values.has('limit') || flags.values.has('cursor'))
+    ) {
+      throw new Error('Meta Ads bindings do not accept --limit or --cursor.');
+    }
     const query = new URLSearchParams();
     const rawLimit = flags.values.get('limit');
     if (rawLimit !== undefined) {
@@ -216,6 +225,7 @@ async function parseHostedAdsCommand(
   }
   const body = normalizeQueryRequest(
     await dependencies.readJsonFile(requestPath),
+    provider,
   );
   return {
     body,
@@ -262,7 +272,10 @@ function parseStrictFlags(
   return { json, values };
 }
 
-function normalizeQueryRequest(value: unknown): {
+function normalizeQueryRequest(
+  value: unknown,
+  provider: HostedAdsProvider,
+): {
   bindingId: string;
   parameters: Record<string, unknown>;
   queryId: string;
@@ -290,6 +303,17 @@ function normalizeQueryRequest(value: unknown): {
   }
   if (!isPlainObject(value.parameters)) {
     throw new Error('parameters must be a JSON object.');
+  }
+  if (
+    provider === 'meta_ads' &&
+    value.queryId !== META_ADS_ACCOUNT_DAILY_QUERY_ID
+  ) {
+    throw new Error(
+      `Meta Ads queryId must be ${META_ADS_ACCOUNT_DAILY_QUERY_ID}.`,
+    );
+  }
+  if (provider === 'meta_ads' && Object.keys(value.parameters).length !== 0) {
+    throw new Error('Meta Ads account-daily parameters must be empty.');
   }
   return Object.freeze({
     bindingId,
@@ -387,13 +411,21 @@ function printHostedAdsHelp(): void {
 
 Usage:
   postplus ads manifest --provider google --json
+  postplus ads manifest --provider meta_ads --json
   postplus ads connections --provider google --json
+  postplus ads connections --provider meta_ads --json
   postplus ads accounts --provider google --json
+  postplus ads accounts --provider meta_ads --json
   postplus ads bindings --provider google [--limit N] [--cursor X] --json
+  postplus ads bindings --provider meta_ads --json
   postplus ads readiness --provider google --binding-id UUID --json
+  postplus ads readiness --provider meta_ads --binding-id UUID --json
   postplus ads query --provider google --request <file> --json
+  postplus ads query --provider meta_ads --request <file> --json
 
 These commands are read-only. Account connection, discovery, candidate selection,
 and advertiser binding remain browser-owner workflows.
+Open PostPlus Workspace settings in the Web for OAuth, discovery, explicit
+advertiser selection, and binding.
 `);
 }
