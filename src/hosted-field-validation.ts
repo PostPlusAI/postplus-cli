@@ -7,7 +7,6 @@
 // use. The Web boundary stays the AUTHORITATIVE gate; this is pre-submit feedback so the
 // agent gets an immediate field-level error (e.g. seedance resolution "999p") instead of
 // waiting for the round-trip.
-
 import {
   HOSTED_MEDIA_REFERENCE_URI_PREFIX,
   assertModelledFieldValuesInRange as assertModelledFieldValuesInRangeCore,
@@ -25,6 +24,20 @@ export function assertModelledFieldValuesInRange(
     input,
     (message) => new Error(message),
   );
+}
+
+export function assertNoUnknownModelledFields(
+  endpointKey: string,
+  fields: readonly ManifestField[],
+  input: Record<string, unknown>,
+): void {
+  const modelled = new Set(fields.map((field) => field.name));
+  const unknown = Object.keys(input).filter((key) => !modelled.has(key));
+  if (unknown.length > 0) {
+    throw new Error(
+      `${endpointKey} input carries field(s) outside the manifest contract: ${unknown.join(', ')}.`,
+    );
+  }
 }
 
 // The only reference forms the hosted media boundary can actually use: a

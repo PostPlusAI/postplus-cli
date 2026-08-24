@@ -1499,6 +1499,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "endpointKeys": [
         "video-seedance-2-fast-image",
         "video-seedance-2-fast-text",
+        "video-seedance-2-5-first-frame",
+        "video-seedance-2-5-first-last-frame",
+        "video-seedance-2-5-reference",
+        "video-seedance-2-5-text",
         "video-seedance-2-image",
         "video-seedance-2-mini-image",
         "video-seedance-2-mini-text",
@@ -1687,6 +1691,464 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             "referenceVideoCount",
             "referenceVideoMode"
           ]
+        },
+        {
+          "endpointKey": "video-seedance-2-5-first-frame",
+          "provider": "moyu-enterprise",
+          "providerModelPath": "doubao-seedance-2.5",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "first_frame",
+              "class": "intent",
+              "flag": "--first-frame",
+              "type": "media-url",
+              "required": true
+            },
+            {
+              "name": "resolution",
+              "class": "default",
+              "flag": "--resolution",
+              "type": "string",
+              "enumValues": [
+                "480p",
+                "720p"
+              ],
+              "canonicalize": "lowercase",
+              "default": "720p",
+              "required": false
+            },
+            {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "adaptive",
+                "21:9",
+                "16:9",
+                "4:3",
+                "1:1",
+                "3:4",
+                "9:16"
+              ],
+              "default": "adaptive",
+              "required": false
+            },
+            {
+              "name": "duration",
+              "class": "default",
+              "flag": "--duration",
+              "type": "number",
+              "default": 5,
+              "required": false,
+              "min": 4,
+              "max": 30,
+              "specialValues": [
+                -1
+              ]
+            },
+            {
+              "name": "generate_audio",
+              "class": "default",
+              "flag": "--generate-audio",
+              "type": "boolean",
+              "default": true,
+              "required": false
+            },
+            {
+              "name": "output_format",
+              "class": "default",
+              "flag": "--output-format",
+              "type": "string",
+              "enumValues": [
+                "mp4",
+                "mov"
+              ],
+              "canonicalize": "lowercase",
+              "default": "mp4",
+              "required": false
+            },
+            {
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "requestDimensions",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ],
+          "billingDimensions": []
+        },
+        {
+          "endpointKey": "video-seedance-2-5-first-last-frame",
+          "provider": "moyu-enterprise",
+          "providerModelPath": "doubao-seedance-2.5",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "first_frame",
+              "class": "intent",
+              "flag": "--first-frame",
+              "type": "media-url",
+              "required": true
+            },
+            {
+              "name": "last_frame",
+              "class": "intent",
+              "flag": "--last-frame",
+              "type": "media-url",
+              "required": true
+            },
+            {
+              "name": "resolution",
+              "class": "default",
+              "flag": "--resolution",
+              "type": "string",
+              "enumValues": [
+                "480p",
+                "720p"
+              ],
+              "canonicalize": "lowercase",
+              "default": "720p",
+              "required": false
+            },
+            {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "adaptive"
+              ],
+              "default": "adaptive",
+              "required": false
+            },
+            {
+              "name": "duration",
+              "class": "default",
+              "flag": "--duration",
+              "type": "number",
+              "default": -1,
+              "required": false,
+              "enumValues": [
+                "-1"
+              ]
+            },
+            {
+              "name": "generate_audio",
+              "class": "default",
+              "flag": "--generate-audio",
+              "type": "boolean",
+              "default": true,
+              "required": false
+            },
+            {
+              "name": "output_format",
+              "class": "default",
+              "flag": "--output-format",
+              "type": "string",
+              "enumValues": [
+                "mp4",
+                "mov"
+              ],
+              "canonicalize": "lowercase",
+              "default": "mp4",
+              "required": false
+            },
+            {
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "requestDimensions",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ],
+          "billingDimensions": []
+        },
+        {
+          "endpointKey": "video-seedance-2-5-reference",
+          "provider": "moyu-enterprise",
+          "providerModelPath": "doubao-seedance-2.5",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "resolution",
+              "class": "default",
+              "flag": "--resolution",
+              "type": "string",
+              "enumValues": [
+                "480p",
+                "720p"
+              ],
+              "canonicalize": "lowercase",
+              "default": "720p",
+              "required": false
+            },
+            {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "adaptive",
+                "21:9",
+                "16:9",
+                "4:3",
+                "1:1",
+                "3:4",
+                "9:16"
+              ],
+              "default": "adaptive",
+              "required": false
+            },
+            {
+              "name": "duration",
+              "class": "default",
+              "flag": "--duration",
+              "type": "number",
+              "default": 5,
+              "required": false,
+              "min": 4,
+              "max": 30,
+              "specialValues": [
+                -1
+              ]
+            },
+            {
+              "name": "reference_images",
+              "class": "intent",
+              "flag": "--reference-image",
+              "type": "media-url",
+              "repeatable": true,
+              "minItems": 1,
+              "maxItems": 30,
+              "required": false
+            },
+            {
+              "name": "reference_videos",
+              "class": "intent",
+              "flag": "--reference-video",
+              "type": "media-url",
+              "repeatable": true,
+              "minItems": 1,
+              "maxItems": 10,
+              "required": false
+            },
+            {
+              "name": "reference_audios",
+              "class": "intent",
+              "flag": "--reference-audio",
+              "type": "media-url",
+              "repeatable": true,
+              "minItems": 1,
+              "maxItems": 10,
+              "required": false
+            },
+            {
+              "name": "generate_audio",
+              "class": "default",
+              "flag": "--generate-audio",
+              "type": "boolean",
+              "default": true,
+              "required": false
+            },
+            {
+              "name": "output_format",
+              "class": "default",
+              "flag": "--output-format",
+              "type": "string",
+              "enumValues": [
+                "mp4",
+                "mov"
+              ],
+              "canonicalize": "lowercase",
+              "default": "mp4",
+              "required": false
+            },
+            {
+              "name": "omni_reference_task_type",
+              "class": "default",
+              "flag": "--omni-reference-task-type",
+              "type": "string",
+              "enumValues": [
+                "auto",
+                "reference",
+                "edit",
+                "extend"
+              ],
+              "canonicalize": "lowercase",
+              "default": "auto",
+              "required": false
+            },
+            {
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "requestDimensions",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ],
+          "billingDimensions": []
+        },
+        {
+          "endpointKey": "video-seedance-2-5-text",
+          "provider": "moyu-enterprise",
+          "providerModelPath": "doubao-seedance-2.5",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "resolution",
+              "class": "default",
+              "flag": "--resolution",
+              "type": "string",
+              "enumValues": [
+                "480p",
+                "720p"
+              ],
+              "canonicalize": "lowercase",
+              "default": "720p",
+              "required": false
+            },
+            {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "adaptive",
+                "21:9",
+                "16:9",
+                "4:3",
+                "1:1",
+                "3:4",
+                "9:16"
+              ],
+              "default": "adaptive",
+              "required": false
+            },
+            {
+              "name": "duration",
+              "class": "default",
+              "flag": "--duration",
+              "type": "number",
+              "default": 5,
+              "required": false,
+              "min": 4,
+              "max": 30,
+              "specialValues": [
+                -1
+              ]
+            },
+            {
+              "name": "generate_audio",
+              "class": "default",
+              "flag": "--generate-audio",
+              "type": "boolean",
+              "default": true,
+              "required": false
+            },
+            {
+              "name": "output_format",
+              "class": "default",
+              "flag": "--output-format",
+              "type": "string",
+              "enumValues": [
+                "mp4",
+                "mov"
+              ],
+              "canonicalize": "lowercase",
+              "default": "mp4",
+              "required": false
+            },
+            {
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "requestDimensions",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ],
+          "billingDimensions": []
         },
         {
           "endpointKey": "video-seedance-2-image",

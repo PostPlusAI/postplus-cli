@@ -6171,6 +6171,214 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('discovers and projects four independent Seedance 2.5 scene contracts', () => {
+    const endpointKeys = [
+      'video-seedance-2-5-text',
+      'video-seedance-2-5-first-frame',
+      'video-seedance-2-5-first-last-frame',
+      'video-seedance-2-5-reference',
+    ];
+    const report = buildHostedRequestSchemaReport({ domain: 'media' });
+    for (const endpointKey of endpointKeys) {
+      assert.ok(report.endpointKeys?.includes(endpointKey));
+    }
+
+    const selected = buildHostedRequestSchemaReport({
+      domain: 'media',
+      endpointKey: 'video-seedance-2-5-reference',
+    });
+    const endpoint = selected.endpoints?.[0];
+    assert.equal(endpoint?.endpointKey, 'video-seedance-2-5-reference');
+    const byName = new Map(
+      endpoint?.fields.map((field) => [field.name, field]) ?? [],
+    );
+    assert.deepEqual(byName.get('resolution')?.enumValues, ['480p', '720p']);
+    assert.deepEqual(byName.get('duration')?.specialValues, [-1]);
+    assert.equal(byName.get('reference_images')?.maxItems, 30);
+    assert.equal(byName.get('reference_videos')?.maxItems, 10);
+    assert.equal(byName.get('reference_audios')?.maxItems, 10);
+    assert.deepEqual(byName.get('omni_reference_task_type')?.enumValues, [
+      'auto',
+      'reference',
+      'edit',
+      'extend',
+    ]);
+  });
+
+  it('maps each Seedance 2.5 scene flags to its exact, non-overlapping Web input', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const posted: Array<Record<string, unknown>> = [];
+    globalThis.fetch = async (_input, init) => {
+      posted.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const cases: Array<{
+        args: string[];
+        expected: Record<string, unknown>;
+      }> = [
+        {
+          args: ['video-seedance-2-5-text', '--prompt', 'text scene'],
+          expected: {
+            prompt: 'text scene',
+            resolution: '720p',
+            aspect_ratio: 'adaptive',
+            duration: 5,
+            generate_audio: true,
+            output_format: 'mp4',
+          },
+        },
+        {
+          args: [
+            'video-seedance-2-5-first-frame',
+            '--prompt',
+            'opening scene',
+            '--first-frame',
+            'https://example.com/open.png',
+          ],
+          expected: {
+            prompt: 'opening scene',
+            first_frame: 'https://example.com/open.png',
+            resolution: '720p',
+            aspect_ratio: 'adaptive',
+            duration: 5,
+            generate_audio: true,
+            output_format: 'mp4',
+          },
+        },
+        {
+          args: [
+            'video-seedance-2-5-first-last-frame',
+            '--prompt',
+            'bridge two frames',
+            '--first-frame',
+            'https://example.com/open.png',
+            '--last-frame',
+            'https://example.com/close.png',
+            '--duration',
+            '-1',
+          ],
+          expected: {
+            prompt: 'bridge two frames',
+            first_frame: 'https://example.com/open.png',
+            last_frame: 'https://example.com/close.png',
+            resolution: '720p',
+            aspect_ratio: 'adaptive',
+            duration: -1,
+            generate_audio: true,
+            output_format: 'mp4',
+          },
+        },
+        {
+          args: [
+            'video-seedance-2-5-reference',
+            '--prompt',
+            'use multimodal references',
+            '--reference-image',
+            'https://example.com/person.png',
+            '--reference-video',
+            'https://example.com/motion.mp4',
+            '--reference-audio',
+            'https://example.com/voice.wav',
+          ],
+          expected: {
+            prompt: 'use multimodal references',
+            resolution: '720p',
+            aspect_ratio: 'adaptive',
+            duration: 5,
+            reference_images: ['https://example.com/person.png'],
+            reference_videos: ['https://example.com/motion.mp4'],
+            reference_audios: ['https://example.com/voice.wav'],
+            generate_audio: true,
+            output_format: 'mp4',
+            omni_reference_task_type: 'auto',
+          },
+        },
+      ];
+
+      for (const testCase of cases) {
+        assert.equal(
+          await runHostedDomainCommand('media', ['create', ...testCase.args]),
+          0,
+        );
+      }
+      assert.deepEqual(
+        posted.map((body) => body.input),
+        cases.map((testCase) => testCase.expected),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fast-fails invalid Seedance 2.5 duration, resolution, and reference cardinality before a hosted call', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', { status: 200 });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'video-seedance-2-5-text',
+            '--prompt',
+            'clip',
+            '--duration',
+            '31',
+          ]),
+        /duration must be an integer from 4 to 30 or one of -1/u,
+      );
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'video-seedance-2-5-text',
+            '--prompt',
+            'clip',
+            '--resolution',
+            '1080p',
+          ]),
+        /resolution must be one of 480p, 720p/u,
+      );
+      const references = Array.from({ length: 31 }, (_, index) => [
+        '--reference-image',
+        `https://example.com/reference-${index}.png`,
+      ]).flat();
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'video-seedance-2-5-reference',
+            '--prompt',
+            'clip',
+            ...references,
+          ]),
+        /reference_images must contain at most 30 item/u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('derives seedance billing defaults from the manifest when the agent omits them', async () => {
     await setLocalSession({
       accountId: 'account_1',

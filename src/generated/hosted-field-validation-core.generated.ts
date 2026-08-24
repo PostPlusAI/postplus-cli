@@ -27,9 +27,13 @@ export type CanonicalizableField = {
   name: string;
   class: 'intent' | 'default' | 'runner-managed';
   type: 'string' | 'number' | 'boolean' | 'media-url';
+  repeatable?: boolean;
+  minItems?: number;
+  maxItems?: number;
   enumValues?: readonly string[];
   min?: number;
   max?: number;
+  specialValues?: readonly number[];
   canonicalize?: 'lowercase' | 'image-resolution-tier';
 };
 
@@ -83,7 +87,11 @@ function assertModelledNumberFieldValue(
     field.enumValues && field.enumValues.length > 0 ? field.enumValues : null;
   const constraint = enumValues
     ? `must be one of ${enumValues.join(', ')}`
-    : `must be an integer from ${field.min} to ${field.max}`;
+    : `must be an integer from ${field.min} to ${field.max}${
+        field.specialValues?.length
+          ? ` or one of ${field.specialValues.join(', ')}`
+          : ''
+      }`;
 
   if (typeof raw !== 'number' || !Number.isFinite(raw)) {
     throw createError(
@@ -101,7 +109,10 @@ function assertModelledNumberFieldValue(
   if (field.min === undefined || field.max === undefined) {
     return;
   }
-  if (!(Number.isInteger(raw) && raw >= field.min && raw <= field.max)) {
+  if (
+    !field.specialValues?.includes(raw) &&
+    !(Number.isInteger(raw) && raw >= field.min && raw <= field.max)
+  ) {
     throw createError(
       `${endpointKey} ${field.name} ${constraint}; received ${raw}.`,
     );
@@ -124,6 +135,24 @@ export function assertModelledFieldValuesInRange(
   for (const field of fields) {
     if (field.class === 'runner-managed') {
       continue;
+    }
+    if (Object.hasOwn(input, field.name) && field.repeatable) {
+      const raw = input[field.name];
+      if (!Array.isArray(raw)) {
+        throw createError(
+          `${endpointKey} ${field.name} must be an array; received ${formatReceivedValue(raw)}.`,
+        );
+      }
+      if (field.minItems !== undefined && raw.length < field.minItems) {
+        throw createError(
+          `${endpointKey} ${field.name} must contain at least ${field.minItems} item(s); received ${raw.length}.`,
+        );
+      }
+      if (field.maxItems !== undefined && raw.length > field.maxItems) {
+        throw createError(
+          `${endpointKey} ${field.name} must contain at most ${field.maxItems} item(s); received ${raw.length}.`,
+        );
+      }
     }
     const enumValues =
       field.enumValues && field.enumValues.length > 0 ? field.enumValues : null;

@@ -16,6 +16,7 @@ import { HOSTED_MEDIA_REFERENCE_URI_PREFIX } from './generated/hosted-field-vali
 import {
   assertMediaUrlFieldSchemes,
   assertModelledFieldValuesInRange,
+  assertNoUnknownModelledFields,
 } from './hosted-field-validation.js';
 import {
   type HostedDomain,
@@ -402,6 +403,8 @@ async function runMediaVerbRequestJson(args: {
     );
   }
   const input = raw as Record<string, unknown>;
+
+  assertNoUnknownModelledFields(endpointKey, endpoint.fields, input);
 
   // Runner-managed fields are minted/derived by the CLI; reject them in the body so
   // the agent cannot smuggle in ids, tokens, or billing dimensions.
@@ -1711,7 +1714,10 @@ function buildMediaVerbInput(input: {
     // keeps a non-range number field (e.g. transcription duration_seconds) positive.
     if (field.type === 'number') {
       const parsed = Number(raw);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
+      const modelledNonPositive =
+        field.enumValues?.includes(String(parsed)) === true ||
+        field.specialValues?.includes(parsed) === true;
+      if (!Number.isFinite(parsed) || (parsed <= 0 && !modelledNonPositive)) {
         throw new Error(`--${key} must be a positive number.`);
       }
       record[field.name] = parsed;
@@ -3075,7 +3081,19 @@ function formatFieldDetail(field: ManifestField): string {
   if (field.enumValues && field.enumValues.length > 0) {
     detail.push(`one of {${field.enumValues.join(', ')}}`);
   } else if (field.min !== undefined || field.max !== undefined) {
-    detail.push(`range ${field.min ?? '-'}..${field.max ?? '-'}`);
+    detail.push(
+      `range ${field.min ?? '-'}..${field.max ?? '-'}${
+        field.specialValues?.length
+          ? ` or {${field.specialValues.join(', ')}}`
+          : ''
+      }`,
+    );
+  }
+  if (
+    field.repeatable &&
+    (field.minItems !== undefined || field.maxItems !== undefined)
+  ) {
+    detail.push(`items ${field.minItems ?? 0}..${field.maxItems ?? '∞'}`);
   }
   if (field.default !== undefined) {
     detail.push(`default ${String(field.default)}`);

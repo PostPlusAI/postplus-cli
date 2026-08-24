@@ -21,9 +21,12 @@ type FieldContract = {
   type: 'string' | 'number' | 'boolean' | 'media-url';
   required: boolean;
   repeatable?: boolean;
+  minItems?: number;
+  maxItems?: number;
   enumValues?: readonly string[];
   min?: number;
   max?: number;
+  specialValues?: readonly number[];
   // Casing-normalization hint for the enum check, projected from the manifest so the
   // discovery surface documents the accepted casing (e.g. resolution "720P" == "720p").
   canonicalize?: 'lowercase' | 'image-resolution-tier';
@@ -99,6 +102,12 @@ function toFieldContract(field: ManifestField): FieldContract {
   if (field.repeatable) {
     contract.repeatable = true;
   }
+  if (field.minItems !== undefined) {
+    contract.minItems = field.minItems;
+  }
+  if (field.maxItems !== undefined) {
+    contract.maxItems = field.maxItems;
+  }
   if (field.enumValues) {
     contract.enumValues = field.enumValues;
   }
@@ -107,6 +116,9 @@ function toFieldContract(field: ManifestField): FieldContract {
   }
   if (field.max !== undefined) {
     contract.max = field.max;
+  }
+  if (field.specialValues) {
+    contract.specialValues = field.specialValues;
   }
   if (field.canonicalize) {
     contract.canonicalize = field.canonicalize;

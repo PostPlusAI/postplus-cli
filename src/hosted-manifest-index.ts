@@ -3,7 +3,6 @@
 // the schema report, and the per-endpoint `--help` all index the manifest through
 // this module so the discovery surface never hand-maintains a mirror of enum sets,
 // defaults, or the intent/default/runner-managed field classification.
-
 import { HOSTED_EXECUTION_MANIFESTS } from './generated/hosted-execution-manifest.generated.js';
 
 export type HostedDomain = 'media' | 'publish' | 'research';
@@ -16,9 +15,12 @@ export type ManifestField = {
   flag: string | null;
   type: 'string' | 'number' | 'boolean' | 'media-url';
   repeatable?: boolean;
+  minItems?: number;
+  maxItems?: number;
   enumValues?: readonly string[];
   min?: number;
   max?: number;
+  specialValues?: readonly number[];
   // How a string value is normalized before the early enum check compares it against
   // enumValues (issue #475). Projected verbatim from the Web EnvelopeFieldSpec hint —
   // the single source both the Web validator and this CLI early validator read — so
@@ -236,7 +238,9 @@ export function capabilityEndpointsWithFlag(
 // Resolves the endpoint contract for a media-generation endpointKey, or null when
 // the key is not a modelled media-generation endpoint. Used by the schema report
 // and per-endpoint `--help` to read the field-level contract.
-export function findMediaEndpoint(endpointKey: string): ManifestEndpoint | null {
+export function findMediaEndpoint(
+  endpointKey: string,
+): ManifestEndpoint | null {
   return findMediaGenerationBinding(endpointKey)?.endpoint ?? null;
 }
 
