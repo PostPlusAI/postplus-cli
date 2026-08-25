@@ -8383,12 +8383,17 @@ describe('account read-only commands', () => {
               completionTokens: 90,
               promptTokens: 0,
               providerRawUsage: {
-                moyuTaskListUsage: {
-                  completion_tokens: 90,
-                  prompt_tokens: 0,
-                  task_id: 'task_9',
+                actualCostUsd: 0.00059,
+                moyuCostSource: 'provider_poll_total_cost',
+                moyuProviderCost: {
+                  currency: 'CNY',
+                  total_cost: '0.00413',
                 },
-                moyuUsageSource: 'task_list',
+                moyuProviderUsage: {
+                  completion_tokens: 90,
+                  total_tokens: 90,
+                },
+                moyuUsageSource: 'provider_poll',
               },
               totalTokens: 90,
             },
@@ -8420,12 +8425,17 @@ describe('account read-only commands', () => {
           completionTokens: 90,
           promptTokens: 0,
           providerRawUsage: {
-            moyuTaskListUsage: {
-              completion_tokens: 90,
-              prompt_tokens: 0,
-              task_id: 'task_9',
+            actualCostUsd: 0.00059,
+            moyuCostSource: 'provider_poll_total_cost',
+            moyuProviderCost: {
+              currency: 'CNY',
+              total_cost: '0.00413',
             },
-            moyuUsageSource: 'task_list',
+            moyuProviderUsage: {
+              completion_tokens: 90,
+              total_tokens: 90,
+            },
+            moyuUsageSource: 'provider_poll',
           },
           totalTokens: 90,
         },
