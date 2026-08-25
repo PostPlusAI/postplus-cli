@@ -8376,6 +8376,23 @@ describe('account read-only commands', () => {
           outputs: { data: { id: 'run_1' } },
           error: null,
           requestDimensions: { seconds: 5 },
+          settlementEvidence: {
+            estimatedExternalCostUsd: 0.00059,
+            estimatedOnly: false,
+            usage: {
+              completionTokens: 90,
+              promptTokens: 0,
+              providerRawUsage: {
+                moyuTaskListUsage: {
+                  completion_tokens: 90,
+                  prompt_tokens: 0,
+                  task_id: 'task_9',
+                },
+                moyuUsageSource: 'task_list',
+              },
+              totalTokens: 90,
+            },
+          },
           createdAt: '2026-07-02T10:00:00Z',
           updatedAt: '2026-07-02T10:05:00Z',
           completedAt: '2026-07-02T10:05:00Z',
@@ -8396,6 +8413,23 @@ describe('account read-only commands', () => {
         'https://postplus.test/api/postplus-cli/hosted/runs/run_1',
       );
       assert.equal(report.finalizedMillicredits, 3200);
+      assert.deepEqual(report.settlementEvidence, {
+        estimatedExternalCostUsd: 0.00059,
+        estimatedOnly: false,
+        usage: {
+          completionTokens: 90,
+          promptTokens: 0,
+          providerRawUsage: {
+            moyuTaskListUsage: {
+              completion_tokens: 90,
+              prompt_tokens: 0,
+              task_id: 'task_9',
+            },
+            moyuUsageSource: 'task_list',
+          },
+          totalTokens: 90,
+        },
+      });
       const human = formatHostedRunDetailReport(report);
       assert.match(human, /Settled cost: 3200 millicredits \(actual\)/u);
       assert.match(human, /This run is terminal\./u);

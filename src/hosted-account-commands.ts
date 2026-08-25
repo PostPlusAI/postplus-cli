@@ -174,6 +174,7 @@ export type HostedRunDetail = HostedRunSummary & {
   outputs: unknown;
   error: unknown;
   requestDimensions: unknown;
+  settlementEvidence: unknown;
   completedAt: string | null;
   failedAt: string | null;
   expiresAt: string | null;
@@ -291,6 +292,7 @@ export async function fetchHostedRunDetail(
     outputs: record.outputs ?? null,
     error: record.error ?? null,
     requestDimensions: record.requestDimensions ?? null,
+    settlementEvidence: record.settlementEvidence ?? null,
     completedAt: readString(record.completedAt),
     failedAt: readString(record.failedAt),
     expiresAt: readString(record.expiresAt),
