@@ -1512,7 +1512,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "endpoints": [
         {
           "endpointKey": "video-seedance-2-fast-image",
-          "provider": "moyu",
+          "provider": "moyu-enterprise",
           "providerModelPath": "doubao-seedance-2-0-fast-260128",
           "fields": [
             {
@@ -1583,7 +1583,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         },
         {
           "endpointKey": "video-seedance-2-fast-text",
-          "provider": "moyu",
+          "provider": "moyu-enterprise",
           "providerModelPath": "doubao-seedance-2-0-fast-260128",
           "fields": [
             {
@@ -2152,7 +2152,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         },
         {
           "endpointKey": "video-seedance-2-image",
-          "provider": "moyu",
+          "provider": "moyu-enterprise",
           "providerModelPath": "doubao-seedance-2-0-260128",
           "fields": [
             {
@@ -2224,7 +2224,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         },
         {
           "endpointKey": "video-seedance-2-mini-image",
-          "provider": "moyu",
+          "provider": "moyu-enterprise",
           "providerModelPath": "doubao-seedance-2-0-mini-260615",
           "fields": [
             {
@@ -2295,7 +2295,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         },
         {
           "endpointKey": "video-seedance-2-mini-text",
-          "provider": "moyu",
+          "provider": "moyu-enterprise",
           "providerModelPath": "doubao-seedance-2-0-mini-260615",
           "fields": [
             {
@@ -2390,7 +2390,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         },
         {
           "endpointKey": "video-seedance-2-text",
-          "provider": "moyu",
+          "provider": "moyu-enterprise",
           "providerModelPath": "doubao-seedance-2-0-260128",
           "fields": [
             {

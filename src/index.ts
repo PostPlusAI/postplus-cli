@@ -98,7 +98,7 @@ Usage:
   postplus media <verb> <endpoint-key> --request <input.json> | --<flags> [--output <result.json>]
   postplus media estimate <endpoint-key> --request <input.json> | --<flags> [--json]
   postplus media poll --handle <run-id> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--debug] [--json] [--output <result.json>]
-  postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
+  postplus media-file upload --input-file <path> [--mime <type>] [--storage-only] [--skill <skill-id>] [--json] [--output <result.json>]
   postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
   postplus publish schema [--json]
   postplus publish <operation> --request <input.json> [--output <result.json>]

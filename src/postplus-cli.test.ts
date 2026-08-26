@@ -7003,6 +7003,93 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('media-file --storage-only stops after PostPlus storage and returns the durable handoff', async () => {
+    const uploadDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-cli-storage-only-'),
+    );
+    tempDirs.push(uploadDir);
+    const imagePath = resolve(uploadDir, 'person.png');
+    const outputPath = resolve(uploadDir, 'result.json');
+    await writeFile(imagePath, Buffer.from('fake-png-bytes'));
+
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const storageReference = {
+      bucket: 'uploads',
+      mimeType: 'image/png',
+      name: 'person.png',
+      sizeBytes: 14,
+      storagePath: 'user_1/hosted-media/inputs/storage-only/person.png',
+    };
+    const mediaReference =
+      'postplus-media://uploads/user_1/hosted-media/inputs/storage-only/person.png';
+    const originalFetch = globalThis.fetch;
+    const hostedBodies: Array<Record<string, unknown>> = [];
+    let storagePutCount = 0;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url === 'https://postplus.test/api/postplus-cli/hosted/capability') {
+        hostedBodies.push(
+          JSON.parse(String(init?.body)) as Record<string, unknown>,
+        );
+        return new Response(
+          JSON.stringify({
+            output: {
+              mediaReference,
+              signedUpload: {
+                expiresInSeconds: 600,
+                method: 'PUT',
+                requiredHeaders: { 'content-type': 'image/png' },
+                token: 'signed-token',
+                url: 'https://upload.test/storage-only',
+              },
+              storageReference,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === 'https://upload.test/storage-only') {
+        storagePutCount += 1;
+        return new Response('{}', { status: 200 });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    };
+
+    try {
+      const result = await runMediaFileCommand([
+        'upload',
+        '--input-file',
+        imagePath,
+        '--storage-only',
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 0);
+      assert.equal(hostedBodies.length, 1);
+      assert.equal(hostedBodies[0]?.operation, 'create-upload-url');
+      assert.equal(storagePutCount, 1);
+
+      const output = JSON.parse(await readFile(outputPath, 'utf8'));
+      assert.deepEqual(output.output, {
+        mediaReference,
+        storageReference,
+      });
+      assert.equal(Object.hasOwn(output.output, 'signedUpload'), false);
+      assert.equal(Object.hasOwn(output.output, 'data'), false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('media-file download resolves a persistent reference and honors the last repeated boolean value', async () => {
     const downloadDir = await mkdtemp(
       resolve(tmpdir(), 'postplus-cli-download-'),
