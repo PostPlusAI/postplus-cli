@@ -1637,6 +1637,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--reference-image",
               "type": "media-url",
               "repeatable": true,
+              "minItems": 1,
+              "maxItems": 9,
               "required": false
             },
             {
@@ -1645,6 +1647,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--reference-video",
               "type": "media-url",
               "repeatable": true,
+              "minItems": 1,
+              "maxItems": 3,
               "required": false
             },
             {
@@ -1653,6 +1657,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--reference-audio",
               "type": "media-url",
               "repeatable": true,
+              "minItems": 1,
+              "maxItems": 3,
               "required": false
             },
             {
@@ -2349,6 +2355,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--reference-image",
               "type": "media-url",
               "repeatable": true,
+              "minItems": 1,
+              "maxItems": 9,
               "required": false
             },
             {
@@ -2445,6 +2453,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--reference-image",
               "type": "media-url",
               "repeatable": true,
+              "minItems": 1,
+              "maxItems": 9,
               "required": false
             },
             {
@@ -2453,6 +2463,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--reference-video",
               "type": "media-url",
               "repeatable": true,
+              "minItems": 1,
+              "maxItems": 3,
               "required": false
             },
             {
@@ -2461,6 +2473,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--reference-audio",
               "type": "media-url",
               "repeatable": true,
+              "minItems": 1,
+              "maxItems": 3,
               "required": false
             },
             {
