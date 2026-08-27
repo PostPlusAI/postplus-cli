@@ -19,6 +19,7 @@ type FieldContract = {
   kind: 'intent' | 'default' | 'runner-managed';
   flag: string | null;
   type: 'string' | 'number' | 'boolean' | 'media-url';
+  mediaKind?: 'image' | 'video' | 'audio';
   required: boolean;
   repeatable?: boolean;
   minItems?: number;
@@ -101,6 +102,9 @@ function toFieldContract(field: ManifestField): FieldContract {
   };
   if (field.repeatable) {
     contract.repeatable = true;
+  }
+  if (field.mediaKind) {
+    contract.mediaKind = field.mediaKind;
   }
   if (field.minItems !== undefined) {
     contract.minItems = field.minItems;
@@ -196,7 +200,7 @@ function exampleScalarForField(field: ManifestField): unknown {
     case 'boolean':
       return true;
     case 'media-url':
-      return 'https://example.com/input';
+      return `./input.${field.mediaKind === 'audio' ? 'mp3' : field.mediaKind === 'video' ? 'mp4' : 'png'}`;
     default:
       return `<${field.name}>`;
   }
@@ -306,15 +310,16 @@ function buildMediaSchemaReport(
     schemaVersion: 1,
     domain: 'media',
     command:
-      'postplus media <verb> <endpoint-key> --request <input.json> | --<flags> --output <result.json>',
-    description: 'Schemas for files passed to hosted media commands.',
+      'postplus media <verb> <endpoint-key> --<role/intent flags> [--wait] --output <result.json>',
+    description: 'Manifest-driven contracts for hosted media commands.',
     endpointKeys,
     modelKeys,
     selectedEndpointKey: endpointKey ?? undefined,
     notes: [
       'Each media-generation endpoint declares its fields as intent (you write it), default (manifest-defaulted; write only to deviate), or runner-managed (minted by the CLI; no flag, never in the body).',
       'Endpoint-specific input belongs under input; capability / endpointKey come from the verb + positional, not the body.',
-      'video-analysis analyze takes an opaque Gemini request object the agent authors verbatim under payload.',
+      'Media role flags accept a local file path directly; the CLI stages local bytes before the single hosted submit.',
+      'video-analysis analyze takes normalized --video and --prompt flags; provider payload construction stays server-side.',
       'The CLI derives operationId and billing dimensions before sending requests to PostPlus Cloud.',
       'Run `postplus media <verb> <endpoint-key> --help` for a single endpoint flag/enum/default breakdown.',
       'Each endpoint contract carries a copy-pasteable example (required fields ∪ prompt, enums at their first value) under example.command / example.request.',
@@ -347,8 +352,8 @@ function buildMediaSchemaReport(
       },
       {
         id: 'video-analysis.analyze',
-        description: 'Run hosted Gemini video analysis.',
-        required: ['capability', 'operation', 'modelKey', 'payload'],
+        description: 'Run hosted video analysis from normalized intent.',
+        required: ['capability', 'operation', 'modelKey', 'input'],
         jsonSchema: {
           additionalProperties: false,
           properties: {
@@ -359,43 +364,21 @@ function buildMediaSchemaReport(
             },
             operation: { const: 'analyze' },
             operationId: OPERATION_ID_SCHEMA,
-            payload: JSON_OBJECT_SCHEMA,
-            quoteConfirmationToken: {
-              minLength: 1,
-              type: 'string',
-            },
-          },
-          required: ['capability', 'operation', 'modelKey', 'payload'],
-          type: 'object',
-        },
-      },
-      {
-        id: 'media-file.create-upload-url',
-        description:
-          'Create a hosted media upload target via `postplus media-file upload`.',
-        required: ['capability', 'operation', 'file'],
-        jsonSchema: {
-          additionalProperties: false,
-          properties: {
-            capability: { const: 'media-file' },
-            file: {
+            input: {
               additionalProperties: false,
               properties: {
-                mimeType: { minLength: 1, type: 'string' },
-                name: { minLength: 1, type: 'string' },
-                sizeBytes: { minimum: 1, type: 'integer' },
+                prompt: { minLength: 1, type: 'string' },
+                video: { minLength: 1, type: 'string' },
               },
-              required: ['mimeType', 'name', 'sizeBytes'],
+              required: ['prompt', 'video'],
               type: 'object',
             },
-            operation: { const: 'create-upload-url' },
-            operationId: OPERATION_ID_SCHEMA,
             quoteConfirmationToken: {
               minLength: 1,
               type: 'string',
             },
           },
-          required: ['capability', 'operation', 'file'],
+          required: ['capability', 'operation', 'modelKey', 'input'],
           type: 'object',
         },
       },

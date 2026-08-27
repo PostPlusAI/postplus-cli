@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 
 import { readLocalConfig, updateLocalConfig } from './local-state.js';
 
-export const POSTPLUS_CLIENT_CONTRACT_VERSION = 2;
+export const POSTPLUS_CLIENT_CONTRACT_VERSION = 3;
 export const POSTPLUS_CLIENT_RUNTIME = 'postplus-cli';
 export const POSTPLUS_UPDATE_COMMAND = 'postplus update';
 // Single source for the low-level npm self-update command. It lives beside the

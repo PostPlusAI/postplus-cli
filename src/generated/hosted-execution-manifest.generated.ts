@@ -29,6 +29,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--audio",
               "type": "media-url",
+              "mediaKind": "audio",
               "required": true
             },
             {
@@ -334,6 +335,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -494,6 +496,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -785,6 +788,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -861,6 +865,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -937,6 +942,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -1126,6 +1132,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -1186,6 +1193,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -1605,7 +1613,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "video-analysis",
       "mode": "cli-runner",
-      "surface": "request-json",
+      "surface": "flags",
       "verb": "analyze",
       "domain": "media",
       "capability": "video-analysis",
@@ -1616,7 +1624,24 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "models": [
         {
           "modelKey": "video-analysis",
-          "providerModelPath": "gemini-3.5-flash"
+          "providerModelPath": "gemini-3.5-flash",
+          "fields": [
+            {
+              "name": "video",
+              "class": "intent",
+              "flag": "--video",
+              "type": "media-url",
+              "mediaKind": "video",
+              "required": true
+            },
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            }
+          ]
         }
       ]
     }
@@ -1735,6 +1760,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -1868,6 +1894,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -1925,6 +1952,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -1932,6 +1960,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--audio",
               "type": "media-url",
+              "mediaKind": "audio",
               "required": true
             },
             {
@@ -1961,6 +1990,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--mask-image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": false
             },
             {
@@ -1999,6 +2029,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -2006,6 +2037,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--video",
               "type": "media-url",
+              "mediaKind": "video",
               "required": true
             },
             {
@@ -2179,6 +2211,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--first-frame",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -2286,6 +2319,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--first-frame",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -2293,6 +2327,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--last-frame",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -2435,6 +2470,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 30,
@@ -2445,6 +2481,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-video",
               "type": "media-url",
+              "mediaKind": "video",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 10,
@@ -2455,6 +2492,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-audio",
               "type": "media-url",
+              "mediaKind": "audio",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 10,
@@ -2537,6 +2575,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -2648,6 +2687,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": false
             },
@@ -2656,6 +2696,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-video",
               "type": "media-url",
+              "mediaKind": "video",
               "repeatable": true,
               "required": false
             },
@@ -2664,6 +2705,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-audio",
               "type": "media-url",
+              "mediaKind": "audio",
               "repeatable": true,
               "required": false
             },
@@ -2721,6 +2763,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -2830,6 +2873,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": false
             },
@@ -2838,6 +2882,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-video",
               "type": "media-url",
+              "mediaKind": "video",
               "repeatable": true,
               "required": false
             },
@@ -2846,6 +2891,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-audio",
               "type": "media-url",
+              "mediaKind": "audio",
               "repeatable": true,
               "required": false
             },
@@ -2903,6 +2949,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -3012,6 +3059,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": false
             },
@@ -3078,6 +3126,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--video",
               "type": "media-url",
+              "mediaKind": "video",
               "required": true
             },
             {
@@ -3249,6 +3298,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--audio",
               "type": "media-url",
+              "mediaKind": "audio",
               "required": true
             },
             {

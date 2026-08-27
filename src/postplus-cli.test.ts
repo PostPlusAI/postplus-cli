@@ -29,6 +29,7 @@ import {
 import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import {
   POSTPLUS_CLIENT_COMPATIBILITY_HEADERS,
+  POSTPLUS_CLIENT_CONTRACT_VERSION,
   POSTPLUS_CLI_UPDATE_COMMAND,
   POSTPLUS_UPDATE_COMMAND,
   formatPostPlusClientUpgradeError,
@@ -295,21 +296,6 @@ function createMediaReadinessResponse(): Response {
           required: true,
         },
         {
-          checks: [
-            {
-              id: 'provider_configuration',
-              label: 'Provider configuration',
-              ok: false,
-              required: true,
-            },
-          ],
-          id: 'media-file:upload',
-          label: 'Media file: upload',
-          mediaFileOperation: 'upload',
-          ok: false,
-          required: true,
-        },
-        {
           id: 'video-analysis:video-analysis',
           label: 'Video analysis: video-analysis',
           modelKey: 'video-analysis',
@@ -565,6 +551,10 @@ beforeEach(async () => {
   tempDirs.push(configDir);
   tempDirs.push(stateDir);
   process.env.POSTPLUS_CONFIG_DIR = configDir;
+  // The test host declares proxy variables; production Node requires this at
+  // process start. Unit requests are mocked, and this keeps them aligned with
+  // the explicit transport preflight contract.
+  process.env.NODE_USE_ENV_PROXY = '1';
   process.env.XDG_STATE_HOME = stateDir;
 });
 
@@ -611,7 +601,7 @@ describe('doctor and status', () => {
           (init?.headers as Record<string, string>)[
             POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.contractVersion
           ],
-          '2',
+          String(POSTPLUS_CLIENT_CONTRACT_VERSION),
         );
         assert.equal(
           (init?.headers as Record<string, string>)[
@@ -2016,6 +2006,62 @@ process.exit(1);
     assert.match(formatted, /Account ID: user-1/);
     assert.doesNotMatch(formatted, /Workspace:/);
     assert.doesNotMatch(formatted, /Workspace slug:/);
+  });
+
+  it('keeps an environment API override process-local and binds the session to its origin', async () => {
+    await writeLocalConfig({ apiBaseUrl: 'https://postplus.example.com' });
+    process.env.POSTPLUS_API_BASE_URL = 'https://staging.postplus.example.com';
+    await setLocalSession({
+      accountId: 'account-staging',
+      accountName: 'Staging',
+      accountSlug: null,
+      accountType: 'team',
+      apiBaseUrl: 'https://staging.postplus.example.com',
+      cliSessionToken: 'staging-session',
+      sessionExpiresAt: null,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+      persistApiBaseUrl: false,
+    });
+    const stagedConfig = await readLocalConfig();
+    assert.equal(stagedConfig?.apiBaseUrl, 'https://postplus.example.com');
+    assert.equal(
+      stagedConfig?.sessionApiBaseUrl,
+      'https://staging.postplus.example.com',
+    );
+
+    delete process.env.POSTPLUS_API_BASE_URL;
+    await assert.rejects(
+      () => validateRemoteAuth(),
+      /session belongs to https:\/\/staging\.postplus\.example\.com, but this process targets https:\/\/postplus\.example\.com/u,
+    );
+  });
+
+  it('fails immediately when proxy variables exist but Node environment proxy support is disabled', async () => {
+    await setLocalSession({
+      accountId: 'account-1',
+      accountName: 'Account',
+      accountSlug: null,
+      accountType: 'personal',
+      apiBaseUrl: 'https://postplus.example.com',
+      cliSessionToken: 'session',
+      sessionExpiresAt: null,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    delete process.env.NODE_USE_ENV_PROXY;
+    let fetchCalls = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(null, { status: 200 });
+    };
+    try {
+      await assert.rejects(() => validateRemoteAuth(), /NODE_USE_ENV_PROXY=1/u);
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('refreshes a rejected CLI session before doctor checks remote auth', async () => {
@@ -4811,6 +4857,10 @@ describe('hosted domain commands', () => {
       topLevelHelp,
       /postplus media-file upload .* \[--json\] \[--output <result\.json>\]/u,
     );
+    assert.doesNotMatch(
+      topLevelHelp,
+      /storage-only|storageReference|WaveSpeed|asset:\/\//u,
+    );
 
     const { stdout: researchHelp } = await execFileAsync(process.execPath, [
       '--import',
@@ -5197,7 +5247,10 @@ describe('hosted domain commands', () => {
     assert.match(stdout, /media transcribe transcription/u);
     assert.match(stdout, /Surface: flags/u);
     assert.match(stdout, /Intent \(you must \/ may write\):/u);
-    assert.match(stdout, /--audio {2}\[media-url; required\]/u);
+    assert.match(
+      stdout,
+      /--audio {2}\[audio input: local path \| HTTPS \| PostPlus media reference \| data URI; required\]/u,
+    );
     assert.match(
       stdout,
       /--task {2}\[string; optional; one of \{transcribe, translate\}; default transcribe\]/u,
@@ -5245,7 +5298,7 @@ describe('hosted domain commands', () => {
     assert.match(stdout, /\n {4}requestDimensions\n/u);
   });
 
-  it('prints per-target --help for opaque research, video-analysis, and publish surfaces', async () => {
+  it('prints per-target help for opaque research/publish and normalized video analysis', async () => {
     const { stdout: collectHelp } = await execFileAsync(process.execPath, [
       '--import',
       'tsx',
@@ -5283,7 +5336,9 @@ describe('hosted domain commands', () => {
       'video-analysis',
       '--help',
     ]);
-    assert.match(analyzeHelp, /opaque Gemini request payload/u);
+    assert.match(analyzeHelp, /flags \(normalized media intent\)/u);
+    assert.match(analyzeHelp, /--video <video>.*--prompt <prompt>/u);
+    assert.doesNotMatch(analyzeHelp, /Gemini request payload|file_reference/u);
 
     const { stdout: publishHelp } = await execFileAsync(process.execPath, [
       '--import',
@@ -6081,6 +6136,88 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('stages a local role input for an exact estimate without a provider submit', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const inputDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-estimate-media-'),
+    );
+    tempDirs.push(inputDir);
+    const localImage = resolve(inputDir, 'person.png');
+    await writeFile(localImage, 'png-bytes');
+
+    const originalFetch = globalThis.fetch;
+    const hostedBodies: Record<string, unknown>[] = [];
+    let putCount = 0;
+    globalThis.fetch = async (input, init) => {
+      if (String(input) === 'https://storage.example.com/estimate-upload') {
+        putCount += 1;
+        return new Response(null, { status: 200 });
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      hostedBodies.push(body);
+      if (body.capability === 'media-file') {
+        return new Response(
+          JSON.stringify({
+            output: {
+              mediaReference:
+                'postplus-media://uploads/users/user_1/hosted-media/inputs/person.png',
+              signedUpload: {
+                method: 'PUT',
+                requiredHeaders: { 'content-type': 'image/png' },
+                url: 'https://storage.example.com/estimate-upload',
+              },
+              storageReference: {
+                bucket: 'uploads',
+                mimeType: 'image/png',
+                name: 'person.png',
+                storagePath: 'users/user_1/hosted-media/inputs/person.png',
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ estimateOnly: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          'estimate',
+          'image-gpt-image-2-edit',
+          '--prompt',
+          'change the jacket color',
+          '--reference-image',
+          localImage,
+        ]),
+        0,
+      );
+      assert.equal(putCount, 1);
+      assert.equal(hostedBodies.length, 2);
+      assert.equal(hostedBodies[0]!.operation, 'create-upload-url');
+      assert.deepEqual(
+        (hostedBodies[1]!.input as Record<string, unknown>).images,
+        [
+          'postplus-media://uploads/users/user_1/hosted-media/inputs/person.png',
+        ],
+      );
+      assert.equal(Object.hasOwn(hostedBodies[1]!, 'operationId'), false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('rejects spend-only flags and unknown endpoints on media estimate before any call', async () => {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
@@ -6198,6 +6335,54 @@ describe('hosted domain commands', () => {
       output: { data: { id: 'run_1', status: 'completed' } },
     });
     assert.doesNotMatch(terminalStderr, /resume/iu);
+  });
+
+  it('submits once and waits by polling only the returned run handle', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const bodies: Record<string, unknown>[] = [];
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      const payload =
+        body.operation === 'request'
+          ? { output: { data: { id: 'run_wait_1', status: 'processing' } } }
+          : { output: { data: { id: 'run_wait_1', status: 'completed' } } };
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'image-gpt-image-2-text',
+        '--prompt',
+        'a red umbrella',
+        '--wait',
+        '--wait-seconds',
+        '0',
+      ]);
+      assert.equal(result, 0);
+      assert.equal(bodies.length, 2);
+      assert.equal(bodies[0]?.operation, 'request');
+      assert.equal(bodies[1]?.operation, 'status');
+      assert.equal(bodies[1]?.handle, 'run_wait_1');
+      assert.equal('input' in bodies[1]!, false);
+      assert.equal('quoteConfirmationToken' in bodies[1]!, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('polls a pending media run by handle against /hosted/capability', async () => {
@@ -7304,21 +7489,7 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('submits a manifest-driven video-analysis request (request-json) posting the opaque Gemini payload verbatim', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    const payload = {
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: 'Analyze this video for hook, pacing, and CTA.' }],
-        },
-      ],
-      generationConfig: { temperature: 0.2 },
-    };
-    await writeFile(requestPath, JSON.stringify(payload));
-
+  it('submits normalized video-analysis intent without a provider payload', async () => {
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -7347,24 +7518,30 @@ describe('hosted domain commands', () => {
       const result = await runHostedDomainCommand('media', [
         'analyze',
         'video-analysis',
-        '--request',
-        requestPath,
+        '--video',
+        'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
+        '--prompt',
+        'Analyze this video for hook, pacing, and CTA.',
       ]);
       assert.equal(result, 0);
       const body = postedBody as Record<string, unknown>;
       assert.equal(body.capability, 'video-analysis');
       assert.equal(body.operation, 'analyze');
       assert.equal(body.modelKey, 'video-analysis');
-      assert.deepEqual(body.payload, payload);
+      assert.deepEqual(body.input, {
+        prompt: 'Analyze this video for hook, pacing, and CTA.',
+        video:
+          'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
+      });
       assert.match(
         String(body.operationId),
         /^postplus-cli:media:video-analysis:analyze:/u,
       );
-      // The locked Web contract is strict — the body carries no media-generation
-      // envelope keys (no requestDimensions, endpointKey, input, estimatedUsage).
+      // The locked Web contract is strict — no provider request JSON or
+      // media-generation billing dimensions can be authored by the agent.
       assert.equal(Object.hasOwn(body, 'requestDimensions'), false);
       assert.equal(Object.hasOwn(body, 'endpointKey'), false);
-      assert.equal(Object.hasOwn(body, 'input'), false);
+      assert.equal(Object.hasOwn(body, 'payload'), false);
       assert.equal(Object.hasOwn(body, 'estimatedUsage'), false);
     } finally {
       globalThis.fetch = originalFetch;
@@ -7372,16 +7549,6 @@ describe('hosted domain commands', () => {
   });
 
   it('media analyze forwards --video-seconds as estimatedUsage.videoSeconds', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    const payload = {
-      contents: [
-        { role: 'user', parts: [{ text: 'Analyze this short clip.' }] },
-      ],
-    };
-    await writeFile(requestPath, JSON.stringify(payload));
-
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -7406,8 +7573,10 @@ describe('hosted domain commands', () => {
       const result = await runHostedDomainCommand('media', [
         'analyze',
         'video-analysis',
-        '--request',
-        requestPath,
+        '--video',
+        'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
+        '--prompt',
+        'Analyze this short clip.',
         '--video-seconds',
         '30',
       ]);
@@ -7422,11 +7591,6 @@ describe('hosted domain commands', () => {
   });
 
   it('media analyze fast-fails on a non-positive --video-seconds before any hosted call', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(requestPath, JSON.stringify({ contents: [] }));
-
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -7453,8 +7617,10 @@ describe('hosted domain commands', () => {
           runHostedDomainCommand('media', [
             'analyze',
             'video-analysis',
-            '--request',
-            requestPath,
+            '--video',
+            'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
+            '--prompt',
+            'Analyze this short clip.',
             '--video-seconds',
             '0',
           ]),
@@ -7466,7 +7632,7 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('media-file upload returns a hosted media URL after create-upload-url, PUT, and upload', async () => {
+  it('media-file upload pre-stages once and returns only durable PostPlus identities', async () => {
     const uploadDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-upload-'));
     tempDirs.push(uploadDir);
     const videoPath = resolve(uploadDir, 'clip.mp4');
@@ -7502,21 +7668,6 @@ describe('hosted domain commands', () => {
       if (url === 'https://postplus.test/api/postplus-cli/hosted/capability') {
         const requestBody = JSON.parse(String(init?.body));
         hostedBodies.push(requestBody);
-        if (requestBody.operation === 'upload') {
-          // Faithful to production: the provider upload response nests the fetch
-          // URL under `data` and does NOT carry storageReference. The CLI itself
-          // composes storageReference back in at output.storageReference.
-          return new Response(
-            JSON.stringify({
-              output: {
-                data: {
-                  download_url: 'https://uploads.example.com/clip.mp4',
-                },
-              },
-            }),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          );
-        }
         return new Response(
           JSON.stringify({
             output: {
@@ -7564,7 +7715,7 @@ describe('hosted domain commands', () => {
       ]);
       assert.equal(result, 0);
 
-      assert.equal(hostedBodies.length, 2);
+      assert.equal(hostedBodies.length, 1);
       const body = hostedBodies[0] as Record<string, unknown>;
       assert.equal(body.capability, 'media-file');
       assert.equal(body.operation, 'create-upload-url');
@@ -7574,40 +7725,24 @@ describe('hosted domain commands', () => {
         sizeBytes: fileBytes.length,
       });
       assert.equal(body.operationId, 'upload-test-op');
-      const uploadBody = hostedBodies[1] as Record<string, unknown>;
-      assert.equal(uploadBody.capability, 'media-file');
-      assert.equal(uploadBody.operation, 'upload');
-      assert.equal(uploadBody.operationId, 'upload-test-op:upload');
-      assert.deepEqual(uploadBody.file, {
-        mimeType: 'video/mp4',
-        name: 'clip.mp4',
-        storageReference,
-      });
       // The bytes were streamed to the signed target, not embedded in the JSON body.
       assert.equal(putContentType, 'video/mp4');
       assert.deepEqual(putBytes, fileBytes);
 
       const output = JSON.parse(await readFile(outputPath, 'utf8'));
-      assert.equal(
-        output.output.data.download_url,
-        'https://uploads.example.com/clip.mp4',
-      );
-      assert.deepEqual(output.output.storageReference, storageReference);
-      // The persistent postplus-media:// reference minted by create-upload-url is
-      // composed into the final result beside storageReference/download_url.
       assert.equal(output.output.mediaReference, mediaReference);
+      assert.equal(Object.hasOwn(output.output, 'storageReference'), false);
+      assert.equal(Object.hasOwn(output.output, 'signedUpload'), false);
+      assert.equal(Object.hasOwn(output.output, 'data'), false);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it('media-file --storage-only stops after PostPlus storage and returns the durable handoff', async () => {
-    const uploadDir = await mkdtemp(
-      resolve(tmpdir(), 'postplus-cli-storage-only-'),
-    );
+  it('media-file upload rejects the retired --storage-only switch before network access', async () => {
+    const uploadDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-upload-'));
     tempDirs.push(uploadDir);
     const imagePath = resolve(uploadDir, 'person.png');
-    const outputPath = resolve(uploadDir, 'result.json');
     await writeFile(imagePath, Buffer.from('fake-png-bytes'));
 
     await setLocalSession({
@@ -7620,69 +7755,25 @@ describe('hosted domain commands', () => {
       userId: 'user_1',
     });
 
-    const storageReference = {
-      bucket: 'uploads',
-      mimeType: 'image/png',
-      name: 'person.png',
-      sizeBytes: 14,
-      storagePath: 'user_1/hosted-media/inputs/storage-only/person.png',
-    };
-    const mediaReference =
-      'postplus-media://uploads/user_1/hosted-media/inputs/storage-only/person.png';
     const originalFetch = globalThis.fetch;
-    const hostedBodies: Array<Record<string, unknown>> = [];
-    let storagePutCount = 0;
-    globalThis.fetch = async (input, init) => {
-      const url = String(input);
-      if (url === 'https://postplus.test/api/postplus-cli/hosted/capability') {
-        hostedBodies.push(
-          JSON.parse(String(init?.body)) as Record<string, unknown>,
-        );
-        return new Response(
-          JSON.stringify({
-            output: {
-              mediaReference,
-              signedUpload: {
-                expiresInSeconds: 600,
-                method: 'PUT',
-                requiredHeaders: { 'content-type': 'image/png' },
-                token: 'signed-token',
-                url: 'https://upload.test/storage-only',
-              },
-              storageReference,
-            },
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        );
-      }
-      if (url === 'https://upload.test/storage-only') {
-        storagePutCount += 1;
-        return new Response('{}', { status: 200 });
-      }
-      throw new Error(`unexpected fetch ${url}`);
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      throw new Error('fetch should not be called');
     };
 
     try {
-      const result = await runMediaFileCommand([
-        'upload',
-        '--input-file',
-        imagePath,
-        '--storage-only',
-        '--output',
-        outputPath,
-      ]);
-      assert.equal(result, 0);
-      assert.equal(hostedBodies.length, 1);
-      assert.equal(hostedBodies[0]?.operation, 'create-upload-url');
-      assert.equal(storagePutCount, 1);
-
-      const output = JSON.parse(await readFile(outputPath, 'utf8'));
-      assert.deepEqual(output.output, {
-        mediaReference,
-        storageReference,
-      });
-      assert.equal(Object.hasOwn(output.output, 'signedUpload'), false);
-      assert.equal(Object.hasOwn(output.output, 'data'), false);
+      await assert.rejects(
+        () =>
+          runMediaFileCommand([
+            'upload',
+            '--input-file',
+            imagePath,
+            '--storage-only',
+          ]),
+        /storage-only/u,
+      );
+      assert.equal(fetchCalls, 0);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -8380,7 +8471,320 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('rejects a local file path in a media-url field locally with the upload remedy', async () => {
+  it('stages a local media field durably before the single generation submit', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const inputDir = await mkdtemp(resolve(tmpdir(), 'postplus-local-media-'));
+    tempDirs.push(inputDir);
+    const localImage = resolve(inputDir, 'reference image.png');
+    await writeFile(localImage, 'png-bytes');
+
+    const originalFetch = globalThis.fetch;
+    const hostedBodies: Record<string, unknown>[] = [];
+    let signedPutCount = 0;
+    globalThis.fetch = async (input, init) => {
+      if (String(input) === 'https://storage.example.com/signed-upload') {
+        signedPutCount += 1;
+        assert.equal(init?.method, 'PUT');
+        return new Response(null, { status: 200 });
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      hostedBodies.push(body);
+      if (body.capability === 'media-file') {
+        assert.equal(body.operation, 'create-upload-url');
+        return new Response(
+          JSON.stringify({
+            output: {
+              mediaReference:
+                'postplus-media://uploads/users/user_1/hosted-media/inputs/ref.png',
+              signedUpload: {
+                method: 'PUT',
+                requiredHeaders: { 'content-type': 'image/png' },
+                url: 'https://storage.example.com/signed-upload',
+              },
+              storageReference: {
+                bucket: 'postplus-media',
+                mimeType: 'image/png',
+                name: 'reference image.png',
+                storagePath: 'uploads/user_1/ref.png',
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'image-gpt-image-2-edit',
+        '--prompt',
+        'recolor the jacket to navy',
+        '--reference-image',
+        localImage,
+      ]);
+      assert.equal(result, 0);
+      assert.equal(signedPutCount, 1);
+      assert.equal(hostedBodies.length, 2);
+      const submit = hostedBodies[1]!;
+      assert.equal(submit.capability, 'media-generation');
+      assert.deepEqual((submit.input as Record<string, unknown>).images, [
+        'postplus-media://uploads/users/user_1/hosted-media/inputs/ref.png',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('deduplicates repeated local media by content and reuses the scoped cache', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const inputDir = await mkdtemp(resolve(tmpdir(), 'postplus-local-media-'));
+    tempDirs.push(inputDir);
+    const localImage = resolve(inputDir, '同一张图片.png');
+    await writeFile(localImage, 'same-png-bytes');
+
+    const originalFetch = globalThis.fetch;
+    let createUploadCount = 0;
+    let putCount = 0;
+    let submitCount = 0;
+    globalThis.fetch = async (input, init) => {
+      if (String(input) === 'https://storage.example.com/cache-upload') {
+        putCount += 1;
+        return new Response(null, { status: 200 });
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (body.capability === 'media-file') {
+        createUploadCount += 1;
+        return new Response(
+          JSON.stringify({
+            output: {
+              mediaReference:
+                'postplus-media://uploads/users/user_1/hosted-media/inputs/cached.png',
+              signedUpload: {
+                method: 'PUT',
+                requiredHeaders: {},
+                url: 'https://storage.example.com/cache-upload',
+              },
+              storageReference: {
+                bucket: 'postplus-media',
+                mimeType: 'image/png',
+                name: 'cached.png',
+                storagePath: 'uploads/user_1/cached.png',
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      submitCount += 1;
+      assert.deepEqual((body.input as Record<string, unknown>).images, [
+        'postplus-media://uploads/users/user_1/hosted-media/inputs/cached.png',
+        'postplus-media://uploads/users/user_1/hosted-media/inputs/cached.png',
+      ]);
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    const command = [
+      'create',
+      'image-gpt-image-2-edit',
+      '--prompt',
+      'keep both references',
+      '--reference-image',
+      localImage,
+      '--reference-image',
+      `@${localImage}`,
+    ];
+    try {
+      assert.equal(await runHostedDomainCommand('media', command), 0);
+      assert.equal(await runHostedDomainCommand('media', command), 0);
+      assert.equal(createUploadCount, 1);
+      assert.equal(putCount, 1);
+      assert.equal(submitCount, 2);
+      const cache = JSON.parse(
+        await readFile(
+          resolve(process.env.POSTPLUS_CONFIG_DIR!, 'media-staging-cache.json'),
+          'utf8',
+        ),
+      ) as { entries: Record<string, unknown> };
+      assert.equal(Object.keys(cache.entries).length, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('persists partial staging progress and resumes at the first failed media item', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const inputDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-partial-media-'),
+    );
+    tempDirs.push(inputDir);
+    const firstImage = resolve(inputDir, 'first.png');
+    const secondImage = resolve(inputDir, 'second.png');
+    await writeFile(firstImage, 'first-png-bytes');
+    await writeFile(secondImage, 'second-png-bytes');
+
+    const originalFetch = globalThis.fetch;
+    const stageCounts = new Map<string, number>();
+    let submitCount = 0;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.startsWith('https://storage.example.com/partial-')) {
+        return new Response(null, { status: 200 });
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (body.capability === 'media-file') {
+        const file = body.file as { name: string };
+        const attempt = (stageCounts.get(file.name) ?? 0) + 1;
+        stageCounts.set(file.name, attempt);
+        if (file.name === 'second.png' && attempt === 1) {
+          return new Response(
+            JSON.stringify({
+              code: 'postplus_cli_hosted_media_storage_unavailable',
+              layer: 'hosted-capability',
+              message: 'Mock second input staging failed.',
+              operationId: body.operationId,
+              userMessageRule: 'retry_later',
+            }),
+            { status: 503, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            output: {
+              mediaReference: `postplus-media://uploads/users/user_1/hosted-media/inputs/${file.name}`,
+              signedUpload: {
+                method: 'PUT',
+                requiredHeaders: { 'content-type': 'image/png' },
+                url: `https://storage.example.com/partial-${file.name}`,
+              },
+              storageReference: {
+                bucket: 'uploads',
+                mimeType: 'image/png',
+                name: file.name,
+                storagePath: `users/user_1/hosted-media/inputs/${file.name}`,
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      submitCount += 1;
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    const command = [
+      'create',
+      'image-gpt-image-2-edit',
+      '--prompt',
+      'combine the references',
+      '--reference-image',
+      firstImage,
+      '--reference-image',
+      secondImage,
+    ];
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('media', command),
+        /postplus_cli_hosted_media_storage_unavailable/u,
+      );
+      assert.equal(submitCount, 0);
+
+      assert.equal(await runHostedDomainCommand('media', command), 0);
+      assert.equal(stageCounts.get('first.png'), 1);
+      assert.equal(stageCounts.get('second.png'), 2);
+      assert.equal(submitCount, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects missing explicit paths and wrong media kinds before the network', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const inputDir = await mkdtemp(resolve(tmpdir(), 'postplus-local-media-'));
+    tempDirs.push(inputDir);
+    const imagePath = resolve(inputDir, 'not-audio.png');
+    await writeFile(imagePath, 'png-bytes');
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(null, { status: 500 });
+    };
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'image-gpt-image-2-edit',
+            '--prompt',
+            'test',
+            '--reference-image',
+            '@missing-image.png',
+          ]),
+        /Local media file is not readable/u,
+      );
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'voice-clone',
+            '--text',
+            'hello',
+            '--audio',
+            imagePath,
+          ]),
+        /--audio expects audio.*image\/png/u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects non-file bare and insecure media values before any hosted call', async () => {
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -8395,16 +8799,11 @@ describe('hosted domain commands', () => {
     let fetchCalls = 0;
     globalThis.fetch = async () => {
       fetchCalls += 1;
-      return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
+      return new Response(null, { status: 500 });
     };
-
     try {
       for (const badReference of [
-        '/Users/agent/product-shots/ref-a.png',
-        'ref-a.png',
+        'definitely-not-a-local-file.png',
         'http://example.com/ref-a.png',
       ]) {
         await assert.rejects(
@@ -8417,10 +8816,9 @@ describe('hosted domain commands', () => {
               '--reference-image',
               badReference,
             ]),
-          /image-gpt-image-2-edit images must be an https:\/\/ URL, a postplus-media:\/\/ reference, or a data: URI; received ".*"\. A local file must be uploaded first: `postplus media-file upload --input-file <file>`/u,
+          /must be an https:\/\/ URL, a postplus-media:\/\/ reference, or a data: URI/u,
         );
       }
-      // Fast-failed at flag parse: no hosted call was ever made.
       assert.equal(fetchCalls, 0);
     } finally {
       globalThis.fetch = originalFetch;
@@ -8779,6 +9177,50 @@ describe('hosted domain commands', () => {
         message: 'Media generation timed out while calling the provider.',
         operationId: 'op-from-web-123',
         userMessageRule: 'retry_later',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('invalidates the update cache immediately on a hosted 426 response', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const cachePath = resolve(
+      process.env.POSTPLUS_CONFIG_DIR!,
+      'update-check.json',
+    );
+    await writeFile(cachePath, '{"checkedAt":"2099-01-01T00:00:00.000Z"}\n');
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          code: 'postplus_client_upgrade_required',
+          error: 'Update required.',
+          compatibility: { upgrade: { command: 'postplus update' } },
+        }),
+        { status: 426, headers: { 'content-type': 'application/json' } },
+      );
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'image-gpt-image-2-text',
+            '--prompt',
+            'test',
+          ]),
+        /Run: postplus update/u,
+      );
+      await assert.rejects(() => readFile(cachePath, 'utf8'), {
+        code: 'ENOENT',
       });
     } finally {
       globalThis.fetch = originalFetch;

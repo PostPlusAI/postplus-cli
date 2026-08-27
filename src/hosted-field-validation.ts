@@ -41,13 +41,9 @@ export function assertNoUnknownModelledFields(
 }
 
 // The only reference forms the hosted media boundary can actually use: a
-// provider-fetchable HTTPS URL, the persistent hosted-media reference minted by
-// `postplus media-file upload`, or inline data-URI bytes. Everything else —
-// above all a local filesystem path — cannot be downloaded by the PostPlus
-// server, so it must fast-fail here at flag parse instead of surfacing later as
-// an async provider_network_failed terminal state (2026-07 incident: 30 edit
-// submits all failed in the background poll because a local path sailed
-// through).
+// provider-fetchable HTTPS URL, a persistent hosted-media reference, or inline
+// data-URI bytes. Manifest-declared local paths have already been validated and
+// staged by `resolveManifestMediaInputs` before this final transport gate.
 const MEDIA_URL_SCHEME_PREFIXES = [
   'https://',
   HOSTED_MEDIA_REFERENCE_URI_PREFIX,
@@ -62,11 +58,9 @@ function formatRejectedMediaUrlValue(value: string): string {
   return value.length > 120 ? `${value.slice(0, 120)}…` : value;
 }
 
-// Client-side gate for `media-url` typed fields, run on the built input at the
-// same call sites as assertModelledFieldValuesInRange. The Web boundary stays
-// authoritative (it enforces the same scheme set at submit time, before any
-// reserve); this is pre-submit feedback so a local file path is rejected with
-// the upload remedy instead of a hosted round-trip.
+// Client-side gate for `media-url` typed fields, run on the prepared input at
+// the same call sites as assertModelledFieldValuesInRange. The Web boundary
+// stays authoritative; this is pre-submit feedback for an unsupported value.
 export function assertMediaUrlFieldSchemes(
   endpointKey: string,
   fields: readonly ManifestField[],
@@ -89,8 +83,7 @@ export function assertMediaUrlFieldSchemes(
       if (!hasAllowedMediaUrlScheme(value)) {
         throw new Error(
           `${endpointKey} ${field.name} must be an https:// URL, a ${HOSTED_MEDIA_REFERENCE_URI_PREFIX} reference, or a data: URI; received "${formatRejectedMediaUrlValue(value)}". ` +
-            'A local file must be uploaded first: `postplus media-file upload --input-file <file>` returns a ' +
-            `persistent ${HOSTED_MEDIA_REFERENCE_URI_PREFIX} reference to use here.`,
+            `Pass an existing local file through ${field.flag ?? `the ${field.name} field`}, or use a supported remote media value.`,
         );
       }
     }

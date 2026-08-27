@@ -629,20 +629,11 @@ function capabilityMatchesRequirements(
   const requirementKeys = collectHostedRequirementKeys(requirements);
 
   return identifiers.some((identifier) => {
-    if (
-      identifier === 'media-file:upload' &&
-      hostedCapabilities.has('media-file') &&
-      !requiresHostedMediaFileUpload(requirements)
-    ) {
-      return false;
-    }
-
     const [prefix, suffix] = splitCapabilityIdentifier(identifier);
 
     if (
       prefix === 'media-file' &&
       suffix &&
-      suffix !== 'upload' &&
       hostedCapabilities.has('media-file')
     ) {
       return true;
@@ -663,15 +654,6 @@ function capabilityMatchesRequirements(
 
     return requirementKeys.has(identifier) || requirementKeys.has(suffix);
   });
-}
-
-function requiresHostedMediaFileUpload(
-  requirements: PublicSkillRequirements,
-): boolean {
-  return (
-    requirements.hostedCapabilities.includes('media-generation') ||
-    requirements.endpointKeys.length > 0
-  );
 }
 
 function collectCapabilityIdentifiers(
@@ -733,7 +715,9 @@ function collectHostedRequirementKeys(
 // `public-content-discovery:web-search` readiness is filtered out for skills that
 // require `public-content-discovery`, producing a false "readiness check missing".
 function isWholeFamilyHostedCapability(prefix: string): boolean {
-  return prefix === 'public-content-discovery' || prefix === 'social-publishing';
+  return (
+    prefix === 'public-content-discovery' || prefix === 'social-publishing'
+  );
 }
 
 function requiresSocialPublishingPlan(

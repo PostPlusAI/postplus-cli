@@ -14,6 +14,7 @@ export type ManifestField = {
   class: ManifestFieldClass;
   flag: string | null;
   type: 'string' | 'number' | 'boolean' | 'media-url';
+  mediaKind?: 'image' | 'video' | 'audio';
   repeatable?: boolean;
   minItems?: number;
   maxItems?: number;
@@ -42,6 +43,7 @@ export type ManifestEndpoint = {
 export type ManifestModel = {
   modelKey: string;
   providerModelPath: string;
+  fields: readonly ManifestField[];
 };
 
 export type ManifestCollection = {

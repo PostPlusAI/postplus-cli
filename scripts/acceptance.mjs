@@ -1,7 +1,14 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -142,6 +149,87 @@ try {
   await mkdir(path.join(tempRoot, 'home'), { recursive: true });
   await mkdir(path.join(tempRoot, 'npm-cache'), { recursive: true });
   await mkdir(path.join(tempRoot, 'npm-prefix', 'lib'), { recursive: true });
+
+  // Existing-user environment journey: a staging override is process-local,
+  // the persisted production target stays untouched, and a staging-bound
+  // session cannot later be sent to production after the override is removed.
+  const configDir = path.join(tempRoot, 'postplus-config');
+  const configPath = path.join(configDir, 'config.json');
+  await mkdir(configDir, { recursive: true });
+  await writeFile(
+    configPath,
+    `${JSON.stringify(
+      {
+        accountId: 'account-staging',
+        accountName: 'Staging account',
+        accountType: 'team',
+        apiBaseUrl: 'https://postplus.example.com',
+        cliSessionToken: 'staging-session-token',
+        sessionApiBaseUrl: 'https://staging.postplus.example.com',
+        userEmail: 'acceptance@example.com',
+        userId: 'user-acceptance',
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
+  const configEnv = {
+    ...process.env,
+    POSTPLUS_CONFIG_DIR: configDir,
+  };
+  const stagingStatus = JSON.parse(
+    await runCapture(
+      process.execPath,
+      [path.resolve(repoRoot, 'build', 'index.js'), 'auth', 'status', '--json'],
+      {
+        env: {
+          ...configEnv,
+          POSTPLUS_API_BASE_URL: 'https://staging.postplus.example.com',
+        },
+      },
+    ),
+  );
+  if (
+    stagingStatus.apiBaseUrl?.source !== 'env' ||
+    stagingStatus.apiBaseUrl?.value !== 'https://staging.postplus.example.com'
+  ) {
+    throw new Error('Staging API override was not resolved process-locally.');
+  }
+  const persistedConfig = JSON.parse(await readFile(configPath, 'utf8'));
+  if (persistedConfig.apiBaseUrl !== 'https://postplus.example.com') {
+    throw new Error(
+      'Staging API override polluted the persisted production target.',
+    );
+  }
+  let mismatchFailure = '';
+  try {
+    await runCapture(
+      process.execPath,
+      [
+        path.resolve(repoRoot, 'build', 'index.js'),
+        'auth',
+        'validate',
+        '--json',
+      ],
+      { env: configEnv },
+    );
+  } catch (error) {
+    mismatchFailure = error instanceof Error ? error.message : String(error);
+  }
+  if (
+    !mismatchFailure.includes(
+      'session belongs to https://staging.postplus.example.com',
+    ) ||
+    !mismatchFailure.includes(
+      'this process targets https://postplus.example.com',
+    )
+  ) {
+    throw new Error(
+      'A staging-bound session was not rejected before production validation.',
+    );
+  }
+
   await run(
     'npx',
     ['-y', 'skills', 'add', skillsRepoRoot, '--list', '--full-depth'],

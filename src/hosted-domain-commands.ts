@@ -26,6 +26,11 @@ import {
   buildVerbTargetIndex,
   capabilityEndpointsWithFlag,
 } from './hosted-manifest-index.js';
+import {
+  type LocalMediaFile,
+  inferMediaMimeType,
+  resolveManifestMediaInputs,
+} from './hosted-media-input.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import {
@@ -38,6 +43,7 @@ import {
   type LargeCreditQuoteConfirmationChallenge,
   readLargeCreditQuoteConfirmationChallenge,
 } from './quote-confirmation.js';
+import { clearUpdateCheckCache } from './update-check.js';
 
 // Manifest-driven verb grammar indexes (SSOT projected from apps/web +
 // public-skill-metadata via the generated manifest). The verb/flag grammar,
@@ -282,7 +288,7 @@ async function runMediaVerbFlags(args: {
   const endpoint = requireResolvedEndpoint(resolved, verb, endpointKey);
   const fields = endpoint.fields;
   const flagToField = new Map<string, ManifestField>();
-  const booleanKeys = new Set<string>(['json']);
+  const booleanKeys = new Set<string>(['json', 'wait']);
   const arrayKeys = new Set<string>();
 
   for (const field of fields) {
@@ -307,6 +313,9 @@ async function runMediaVerbFlags(args: {
     'output',
     'quote-confirmation-token',
     'skill',
+    'wait',
+    'wait-seconds',
+    'poll-interval-seconds',
   ]);
 
   // Reject unknown flags. This is how runner-managed fields (no flag) and typos
@@ -332,7 +341,7 @@ async function runMediaVerbFlags(args: {
     }
   }
 
-  const input = buildMediaVerbInput({
+  let input = buildMediaVerbInput({
     endpointKey,
     fields,
     flags,
@@ -344,6 +353,19 @@ async function runMediaVerbFlags(args: {
   // stays authoritative). It runs on the built input so a mixed-case "4K"/"High"
   // passes while an out-of-enum value fast-fails locally before the hosted call.
   assertModelledFieldValuesInRange(endpointKey, fields, input);
+  input = await resolveManifestMediaInputs({
+    endpointKey,
+    fields,
+    request: input,
+    stage: context
+      ? null
+      : ({ file, operationId }) =>
+          stageHostedMediaFile({
+            file,
+            operationId,
+            skillName: flags.values.get('skill') ?? resolved.skill,
+          }),
+  });
   // media-url fields fast-fail here on a local path / bare string; the Web
   // boundary enforces the same scheme set at submit time.
   assertMediaUrlFieldSchemes(endpointKey, fields, input);
@@ -361,6 +383,7 @@ async function runMediaVerbFlags(args: {
     quoteConfirmationToken: flags.values.get('quote-confirmation-token'),
     skillName: flags.values.get('skill') ?? resolved.skill,
     context,
+    wait: resolveHostedSubmitWaitOption(flags),
   });
 }
 
@@ -377,7 +400,7 @@ async function runMediaVerbRequestJson(args: {
 }): Promise<number | unknown> {
   const { endpointKey, resolved, verb, context } = args;
   const endpoint = requireResolvedEndpoint(resolved, verb, endpointKey);
-  const flags = parseFlags(args.args, new Set(['json']));
+  const flags = parseFlags(args.args, new Set(['json', 'wait']));
   const allowedKeys = new Set([
     'hosted-operation-id',
     'json',
@@ -385,6 +408,9 @@ async function runMediaVerbRequestJson(args: {
     'quote-confirmation-token',
     'request',
     'skill',
+    'wait',
+    'wait-seconds',
+    'poll-interval-seconds',
   ]);
   for (const key of [...flags.values.keys(), ...flags.booleans]) {
     if (!allowedKeys.has(key)) {
@@ -402,7 +428,7 @@ async function runMediaVerbRequestJson(args: {
       `media ${verb} ${endpointKey} --request must be a JSON object of media-generation input.`,
     );
   }
-  const input = raw as Record<string, unknown>;
+  let input = raw as Record<string, unknown>;
 
   assertNoUnknownModelledFields(endpointKey, endpoint.fields, input);
 
@@ -422,6 +448,19 @@ async function runMediaVerbRequestJson(args: {
   // resolution ("999p") fast-fails locally before the hosted call while a mixed-case
   // "720P" passes.
   assertModelledFieldValuesInRange(endpointKey, endpoint.fields, input);
+  input = await resolveManifestMediaInputs({
+    endpointKey,
+    fields: endpoint.fields,
+    request: input,
+    stage: context
+      ? null
+      : ({ file, operationId }) =>
+          stageHostedMediaFile({
+            file,
+            operationId,
+            skillName: flags.values.get('skill') ?? resolved.skill,
+          }),
+  });
   // media-url fields fast-fail here on a local path / bare string; the Web
   // boundary enforces the same scheme set at submit time.
   assertMediaUrlFieldSchemes(endpointKey, endpoint.fields, input);
@@ -439,6 +478,7 @@ async function runMediaVerbRequestJson(args: {
     quoteConfirmationToken: flags.values.get('quote-confirmation-token'),
     skillName: flags.values.get('skill') ?? resolved.skill,
     context,
+    wait: resolveHostedSubmitWaitOption(flags),
   });
 }
 
@@ -455,14 +495,10 @@ function requireResolvedEndpoint(
   return resolved.endpoint;
 }
 
-// video-analysis verb (request-json surface). The agent authors an opaque Gemini
-// request object (contents + generationConfig) in `--request <file>`; capability,
-// operation, and modelKey come from the verb + positional, so the body posts
-// EXACTLY the locked Web contract. There is no field classification; the payload
-// is forwarded verbatim as the Gemini request. The optional `--video-seconds`
-// flag is the one runner-supplied hint: when provided it is sent as
-// `estimatedUsage.videoSeconds` so the Web boundary can route eligible short
-// videos through its preflight/routing path (omit it to use the default route).
+// video-analysis verb (normalized flags surface). The agent supplies only the
+// video role and analysis prompt; local media is durably staged by the same
+// Manifest-driven transport as generation. Provider payload construction is a
+// Web concern and never appears in CLI or Skill input.
 async function runVideoAnalysisVerb(args: {
   args: string[];
   modelKey: string;
@@ -471,15 +507,22 @@ async function runVideoAnalysisVerb(args: {
   context: HostedRequestContext | undefined;
 }): Promise<number | unknown> {
   const { modelKey, resolved, verb, context } = args;
+  const model = resolved.model;
+  if (!model) {
+    throw new Error(
+      `media ${verb} ${modelKey} resolved without a model contract.`,
+    );
+  }
   const flags = parseFlags(args.args, new Set(['json']));
   const allowedKeys = new Set([
     'hosted-operation-id',
     'json',
     'output',
     'quote-confirmation-token',
-    'request',
+    'prompt',
     'skill',
     'video-seconds',
+    'video',
   ]);
   for (const key of [...flags.values.keys(), ...flags.booleans]) {
     if (!allowedKeys.has(key)) {
@@ -488,16 +531,25 @@ async function runVideoAnalysisVerb(args: {
   }
 
   const outputPath = flags.values.get('output') ?? null;
-  const { body: raw, errorInputLabel } = await resolveRequestBody(
-    context,
-    flags,
-  );
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(
-      `media ${verb} ${modelKey} --request must be a JSON object of Gemini request payload.`,
-    );
-  }
-  const payload = raw as Record<string, unknown>;
+  const prompt = requireFlag(flags, 'prompt');
+  let normalizedInput: Record<string, unknown> = {
+    prompt,
+    video: requireFlag(flags, 'video'),
+  };
+  normalizedInput = await resolveManifestMediaInputs({
+    endpointKey: modelKey,
+    fields: model.fields,
+    request: normalizedInput,
+    stage: context
+      ? null
+      : ({ file, operationId }) =>
+          stageHostedMediaFile({
+            file,
+            operationId,
+            skillName: flags.values.get('skill') ?? resolved.skill,
+          }),
+  });
+  assertMediaUrlFieldSchemes(modelKey, model.fields, normalizedInput);
 
   // Optional runner-supplied hint: the source video duration. When provided it is
   // forwarded as estimatedUsage.videoSeconds so the Web boundary's video-analysis
@@ -520,7 +572,7 @@ async function runVideoAnalysisVerb(args: {
     capability: 'video-analysis',
     operation: 'analyze',
     modelKey,
-    payload,
+    input: normalizedInput,
     ...(estimatedUsage ? { estimatedUsage } : {}),
     operationId:
       flags.values.get('hosted-operation-id') ??
@@ -538,7 +590,7 @@ async function runVideoAnalysisVerb(args: {
           skillName: flags.values.get('skill') ?? resolved.skill,
           context,
         }),
-      errorInputLabel,
+      errorInputLabel: `media-${verb}-${modelKey}`,
       json: flags.booleans.has('json'),
       outputPath,
     },
@@ -546,32 +598,12 @@ async function runVideoAnalysisVerb(args: {
   );
 }
 
-// `media-file upload`: the generic local-file -> hosted media verb. Released
-// skills ship no scripts, so a skill that must place a local file behind hosted
-// media first drives it through this verb. It is capability-generic: it knows no
-// skill request payload. The runner asks the Web boundary for a signed upload
-// target, PUTs bytes outside the JSON envelope, then asks the hosted provider
-// upload operation for the reusable provider-facing result.
-const MEDIA_FILE_MIME_BY_EXTENSION: Record<string, string> = {
-  '.gif': 'image/gif',
-  '.jpeg': 'image/jpeg',
-  '.jpg': 'image/jpeg',
-  '.m4a': 'audio/mp4',
-  '.m4v': 'video/mp4',
-  '.mov': 'video/quicktime',
-  '.mp3': 'audio/mpeg',
-  '.mp4': 'video/mp4',
-  '.png': 'image/png',
-  '.wav': 'audio/wav',
-  '.webm': 'video/webm',
-  '.webp': 'image/webp',
-};
-
+// `media-file upload`: an advanced durable pre-staging verb. Normal media
+// commands accept local paths directly; this command exists only when a caller
+// intentionally wants a reusable PostPlus media identity. It never chooses or
+// calls a provider transport.
 function inferUploadMimeType(filePath: string): string {
-  return (
-    MEDIA_FILE_MIME_BY_EXTENSION[path.extname(filePath).toLowerCase()] ??
-    'application/octet-stream'
-  );
+  return inferMediaMimeType(filePath) ?? 'application/octet-stream';
 }
 
 export async function runMediaFileCommand(
@@ -631,7 +663,7 @@ async function runMediaFileUpload(
   args: string[],
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
-  const flags = parseFlags(args, new Set(['json', 'storage-only']));
+  const flags = parseFlags(args, new Set(['json']));
   const allowedKeys = new Set([
     'hosted-operation-id',
     'input-file',
@@ -640,7 +672,6 @@ async function runMediaFileUpload(
     'output',
     'quote-confirmation-token',
     'skill',
-    'storage-only',
   ]);
   for (const key of [...flags.values.keys(), ...flags.booleans]) {
     if (!allowedKeys.has(key)) {
@@ -685,57 +716,10 @@ async function runMediaFileUpload(
         });
         const output = readHostedUploadOutput(payload);
         const signedUpload = readSignedUpload(output);
-        const storageReference = readStorageReferenceValue(output);
         const mediaReference = readMediaReferenceValue(output);
         await putHostedMediaBytes(signedUpload, absolutePath);
 
-        // `--storage-only` has no provider semantics: it stops after minting the
-        // durable PostPlus identity. A later capability request chooses its own
-        // provider transport (for example, the Moyu Seedance adapter registers
-        // referenced media in Moyu's token-scoped asset library). Avoid sending
-        // these bytes through the generic WaveSpeed upload hop here.
-        if (flags.booleans.has('storage-only')) {
-          return buildStorageOnlyUploadResult(payload, {
-            mediaReference,
-            storageReference,
-          });
-        }
-
-        const uploadResult = await postHostedJson({
-          body: {
-            capability: 'media-file',
-            operation: 'upload',
-            file: {
-              mimeType,
-              name: path.basename(absolutePath),
-              storageReference,
-            },
-            operationId: hostedOperationId
-              ? `${hostedOperationId}:upload`
-              : `postplus-cli:media-file:upload:${randomUUID()}`,
-            quoteConfirmationToken:
-              flags.values.get('quote-confirmation-token') ?? undefined,
-          },
-          pathName: '/api/postplus-cli/hosted/capability',
-          skillName: flags.values.get('skill') ?? null,
-          context,
-        });
-
-        // Surface the storage handoff this two-step upload already minted.
-        // The provider upload response only carries the provider fetch URL
-        // (output.data.download_url, a signed URL that EXPIRES); the
-        // create-upload-url response also minted (a) the Supabase
-        // storageReference — the only shape hosted verbs re-materializing bytes
-        // from storage accept (`media analyze` file_reference) — and (b) the
-        // persistent `postplus-media://` mediaReference, which never expires and
-        // is accepted by media-generation media fields and `media-file download
-        // --reference`. Compose both back in as siblings of
-        // output.data.download_url so the upload has durable handoffs instead of
-        // a dead end once the signed URL lapses.
-        return attachStorageHandoffToUploadResult(uploadResult, {
-          mediaReference,
-          storageReference,
-        });
+        return buildDurableUploadResult(payload, mediaReference);
       },
       errorInputLabel: inputFile,
       json: flags.booleans.has('json'),
@@ -1032,20 +1016,6 @@ function readSignedUpload(output: Record<string, unknown>): SignedUpload {
   return { method: record.method, requiredHeaders, url: record.url.trim() };
 }
 
-function readStorageReferenceValue(output: Record<string, unknown>): unknown {
-  const storageReference = output.storageReference;
-  if (
-    !storageReference ||
-    typeof storageReference !== 'object' ||
-    Array.isArray(storageReference)
-  ) {
-    throw new Error(
-      'Hosted media upload response is missing storageReference.',
-    );
-  }
-  return storageReference;
-}
-
 function readMediaReferenceValue(output: Record<string, unknown>): string {
   const mediaReference = output.mediaReference;
   if (
@@ -1059,46 +1029,37 @@ function readMediaReferenceValue(output: Record<string, unknown>): string {
   return mediaReference;
 }
 
-// Compose the create-upload-url storage handoff (storageReference +
-// mediaReference) into the final `media-file upload` result. The provider
-// upload response only exposes the provider fetch URL (output.data.download_url);
-// both durable identities minted at create-upload-url are otherwise lost after
-// the two-step flow. Fail loud if the envelope shape is unexpected rather than
-// silently dropping the handoff.
-function attachStorageHandoffToUploadResult(
-  payload: unknown,
-  handoff: { mediaReference: string; storageReference: unknown },
-): unknown {
-  if (
-    !payload ||
-    typeof payload !== 'object' ||
-    Array.isArray(payload) ||
-    !('output' in payload)
-  ) {
-    throw new Error(
-      'Hosted media upload response is missing output; cannot attach the storage handoff.',
-    );
-  }
-  const record = payload as Record<string, unknown>;
-  const output = record.output;
-  if (!output || typeof output !== 'object' || Array.isArray(output)) {
-    throw new Error(
-      'Hosted media upload output is not an object; cannot attach the storage handoff.',
-    );
-  }
-  return {
-    ...record,
-    output: {
-      ...(output as Record<string, unknown>),
-      mediaReference: handoff.mediaReference,
-      storageReference: handoff.storageReference,
+// Internal transport for a Manifest-declared local media input. It intentionally
+// stops at the durable PostPlus reference: endpoint-owned provider
+// materialization happens later at the Web boundary, after every local file has
+// staged successfully and before the single provider submit.
+async function stageHostedMediaFile(input: {
+  file: LocalMediaFile;
+  operationId: string;
+  skillName: string;
+}): Promise<string> {
+  const payload = await postHostedJson({
+    body: {
+      capability: 'media-file',
+      operation: 'create-upload-url',
+      file: {
+        mimeType: input.file.mimeType,
+        name: input.file.name,
+        sizeBytes: input.file.sizeBytes,
+      },
+      operationId: input.operationId,
     },
-  };
+    pathName: '/api/postplus-cli/hosted/capability',
+    skillName: input.skillName,
+  });
+  const output = readHostedUploadOutput(payload);
+  await putHostedMediaBytes(readSignedUpload(output), input.file.absolutePath);
+  return readMediaReferenceValue(output);
 }
 
-function buildStorageOnlyUploadResult(
+function buildDurableUploadResult(
   payload: unknown,
-  handoff: { mediaReference: string; storageReference: unknown },
+  mediaReference: string,
 ): unknown {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error(
@@ -1108,8 +1069,7 @@ function buildStorageOnlyUploadResult(
   return {
     ...(payload as Record<string, unknown>),
     output: {
-      mediaReference: handoff.mediaReference,
-      storageReference: handoff.storageReference,
+      mediaReference,
     },
   };
 }
@@ -1135,20 +1095,17 @@ async function putHostedMediaBytes(
 function printMediaFileHelp(): void {
   process.stdout.write(`PostPlus CLI - media-file commands
 
+Most media commands accept local paths directly through role flags such as
+--reference-image, --reference-video, --audio, or --video. Use media-file only
+when you intentionally want to pre-stage one file for reuse or download a
+completed artifact.
+
 Usage:
-  postplus media-file upload --input-file <path> [--mime <type>] [--storage-only] [--skill <skill-id>] [--json] [--output <result.json>]
+  postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
   postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
 
-The upload result carries output.mediaReference (persistent postplus-media://
-reference, never expires): reuse it in media-generation media fields and in
-media-file download --reference. output.data.download_url is a signed URL that
-expires.
-
-Use --storage-only to stop after PostPlus Storage and return only the durable
-PostPlus handoff. This flag does not select or contact a provider. If the returned
-reference is later used in a Moyu Seedance video request, the Web Moyu adapter
-registers that request's media in Moyu's asset library. Other capabilities (for
-example Video Analysis) keep their own provider-specific upload and execution flow.
+Upload returns a reusable PostPlus media reference. Provider-specific media
+preparation remains internal to the selected endpoint.
 `);
 }
 
@@ -1171,6 +1128,7 @@ function submitMediaGenerationRequest(params: {
   quoteConfirmationToken: string | undefined;
   skillName: string;
   context: HostedRequestContext | undefined;
+  wait: { pollIntervalMs: number; waitBudgetMs: number } | null;
 }): Promise<number | unknown> {
   // Billing dimensions are derived solely at the Web boundary from
   // (endpointKey, input); the CLI sends only the payload. The Web request schema
@@ -1186,14 +1144,44 @@ function submitMediaGenerationRequest(params: {
 
   return dispatchHostedCommand(
     {
-      request: () =>
-        postHostedJson({
+      request: async () => {
+        const submitted = await postHostedJson({
           body,
           pathName: '/api/postplus-cli/hosted/capability',
           skillName: params.skillName,
           context: params.context,
           timeoutMs: HOSTED_MEDIA_CREATE_REQUEST_TIMEOUT_MS,
-        }),
+        });
+        if (!params.wait) {
+          return submitted;
+        }
+        const run = readMediaPollRun(submitted);
+        if (!run.status || isTerminalRunStatus(run.status)) {
+          return submitted;
+        }
+        if (!run.id) {
+          throw new Error(
+            `Media submit returned non-terminal status ${run.status} without a resumable run handle.`,
+          );
+        }
+        return pollHostedRunUntilSettled({
+          pollIntervalMs: params.wait.pollIntervalMs,
+          pollOnce: () =>
+            postHostedJson({
+              body: {
+                capability: 'media-generation',
+                handle: run.id,
+                operation: 'status',
+                operationId: `postplus-cli:media:media-generation:status:${randomUUID()}`,
+              },
+              pathName: '/api/postplus-cli/hosted/capability',
+              skillName: null,
+              context: params.context,
+            }),
+          readStatus: (payload) => readMediaPollRun(payload).status,
+          waitBudgetMs: params.wait.waitBudgetMs,
+        });
+      },
       errorInputLabel: params.errorInputLabel,
       json: params.json,
       outputPath: params.outputPath,
@@ -1227,6 +1215,7 @@ function submitMediaGenerationRequest(params: {
 // readable run status returns immediately rather than looping blind.
 // `--wait-seconds 0` restores the legacy single status check.
 const HOSTED_RUN_DEFAULT_WAIT_SECONDS = 45;
+const HOSTED_SUBMIT_DEFAULT_WAIT_SECONDS = 600;
 const HOSTED_RUN_MAX_WAIT_SECONDS = 600;
 const HOSTED_RUN_DEFAULT_INTERVAL_SECONDS = 8;
 const HOSTED_RUN_MAX_INTERVAL_SECONDS = 60;
@@ -1468,6 +1457,40 @@ function resolveHostedRunWaitFlags(flags: ParsedFlags): {
   };
 }
 
+function resolveHostedSubmitWaitFlags(flags: ParsedFlags): {
+  pollIntervalMs: number;
+  waitBudgetMs: number;
+} {
+  return {
+    pollIntervalMs: resolvePositiveSecondsFlag(flags, 'poll-interval-seconds', {
+      allowZero: false,
+      defaultSeconds: HOSTED_RUN_DEFAULT_INTERVAL_SECONDS,
+      maxSeconds: HOSTED_RUN_MAX_INTERVAL_SECONDS,
+    }),
+    waitBudgetMs: resolvePositiveSecondsFlag(flags, 'wait-seconds', {
+      allowZero: true,
+      defaultSeconds: HOSTED_SUBMIT_DEFAULT_WAIT_SECONDS,
+      maxSeconds: HOSTED_RUN_MAX_WAIT_SECONDS,
+    }),
+  };
+}
+
+function resolveHostedSubmitWaitOption(
+  flags: ParsedFlags,
+): { pollIntervalMs: number; waitBudgetMs: number } | null {
+  const wait = flags.booleans.has('wait');
+  if (
+    !wait &&
+    (flags.values.has('wait-seconds') ||
+      flags.values.has('poll-interval-seconds'))
+  ) {
+    throw new Error(
+      '--wait-seconds and --poll-interval-seconds require --wait on a media submit.',
+    );
+  }
+  return wait ? resolveHostedSubmitWaitFlags(flags) : null;
+}
+
 // Parse a `--<key> <seconds>` duration flag (decimals allowed) into
 // milliseconds, fail-fast on anything outside its domain.
 function resolvePositiveSecondsFlag(
@@ -1548,7 +1571,7 @@ async function runMediaEstimate(
 
   const endpoint = requireResolvedEndpoint(resolved, 'estimate', endpointKey);
 
-  const { input, json, outputPath, errorInputLabel, skillName } =
+  const built =
     resolved.surface === 'flags'
       ? buildEstimateFlagsInput(endpoint, endpointKey, rest)
       : await buildEstimateRequestJsonInput(
@@ -1557,13 +1580,28 @@ async function runMediaEstimate(
           rest,
           context,
         );
+  let input = built.input;
 
   // Same schema-driven early validation the submit path runs, so an out-of-enum
   // value fast-fails locally before the estimate call — and the estimate prices
   // exactly the request a subsequent submit would send.
   assertModelledFieldValuesInRange(endpointKey, endpoint.fields, input);
-  // media-url fields fast-fail here on a local path / bare string; the Web
-  // boundary enforces the same scheme set at submit time.
+  // An exact quote uses the same canonical media request as submit. Local files
+  // are durably staged here (uncharged and cacheable), so the later approved
+  // submit reuses the same reference instead of introducing a second input path.
+  input = await resolveManifestMediaInputs({
+    endpointKey,
+    fields: endpoint.fields,
+    request: input,
+    stage: context
+      ? null
+      : ({ file, operationId }) =>
+          stageHostedMediaFile({
+            file,
+            operationId,
+            skillName: built.skillName ?? resolved.skill,
+          }),
+  });
   assertMediaUrlFieldSchemes(endpointKey, endpoint.fields, input);
 
   return dispatchHostedCommand(
@@ -1576,12 +1614,12 @@ async function runMediaEstimate(
             input,
           },
           pathName: '/api/postplus-cli/hosted/estimate',
-          skillName: skillName ?? resolved.skill,
+          skillName: built.skillName ?? resolved.skill,
           context,
         }),
-      errorInputLabel,
-      json,
-      outputPath,
+      errorInputLabel: built.errorInputLabel,
+      json: built.json,
+      outputPath: built.outputPath,
     },
     context,
   );
@@ -2598,6 +2636,7 @@ async function postHostedJson(input: {
 
     const compatibilityError = formatPostPlusCompatibilityError(payload);
     if (compatibilityError) {
+      await clearUpdateCheckCache();
       throw new Error(compatibilityError);
     }
     throw new HostedProductRequestError(productError);
@@ -2988,7 +3027,7 @@ function printDomainVerbHelp(domain: Exclude<HostedDomain, 'research'>): void {
       ? [...MEDIA_VERB_ENDPOINTS.keys()]
           .map(
             (verb) =>
-              `  postplus media ${verb} <endpoint-key> --<intent/default flags> [--json] [--output <result.json>]\n`,
+              `  postplus media ${verb} <endpoint-key> --<intent/default flags> [--wait] [--json] [--output <result.json>]\n`,
           )
           .join('') +
         '  postplus media estimate <endpoint-key> --<same flags/--request as matching submit verb> [--json]\n' +
@@ -3014,16 +3053,18 @@ function printMediaEndpointHelp(
   targetKey: string,
   resolved: ResolvedVerbTarget,
 ): void {
-  // video-analysis: opaque Gemini payload, no field classification to render.
+  // video-analysis: normalized role flags; provider payload stays server-side.
   if (resolved.capability === 'video-analysis') {
+    const fields = resolved.model?.fields ?? [];
     process.stdout.write(`PostPlus CLI - ${domain} ${verb} ${targetKey}
 
-  Surface: request-json (opaque Gemini request payload)
+  Surface: flags (normalized media intent)
   Usage:
-    postplus ${domain} ${verb} ${targetKey} --request <input.json> [--video-seconds <n>] [--json] [--output <result.json>]
+    postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} [--video-seconds <n>] [--json] [--output <result.json>]
 
-  --request <file>  A JSON object authored verbatim as the Gemini request
-                    (contents + optional generationConfig) under "payload".
+  --video <video>    Local path, PostPlus media reference, or video data URI.
+                    The CLI stages local bytes before the analysis submit.
+  --prompt <text>    The analysis question or requested evidence structure.
   --video-seconds <n>  Optional source video duration in seconds. Supplying it
                     lets the hosted boundary route eligible short videos through
                     its preflight path; omit it to use the default route.
@@ -3050,8 +3091,8 @@ function printMediaEndpointHelp(
     `  Surface: ${resolved.surface}`,
     '  Usage:',
     isFlagsSurface
-      ? `    postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} [--json] [--output <result.json>]`
-      : `    postplus ${domain} ${verb} ${targetKey} --request <input.json> [--json] [--output <result.json>]`,
+      ? `    postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} [--wait] [--json] [--output <result.json>]`
+      : `    postplus ${domain} ${verb} ${targetKey} --request <input.json> [--wait] [--json] [--output <result.json>]`,
     '',
   ];
 
@@ -3120,7 +3161,11 @@ function appendFieldGroup(
 // repeatable arity — all read from the manifest contract.
 function formatFieldDetail(field: ManifestField): string {
   const detail: string[] = [
-    field.repeatable ? `${field.type}[]` : field.type,
+    field.type === 'media-url'
+      ? `${field.mediaKind ?? 'media'} input${field.repeatable ? '[]' : ''}: local path | HTTPS | PostPlus media reference | data URI`
+      : field.repeatable
+        ? `${field.type}[]`
+        : field.type,
     field.required ? 'required' : 'optional',
   ];
   if (field.enumValues && field.enumValues.length > 0) {
