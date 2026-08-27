@@ -98,7 +98,7 @@ async function runCapture(command, args, options = {}) {
 
     child.stdout.on('data', (chunk) => stdout.push(Buffer.from(chunk)));
     child.stderr.on('data', (chunk) => stderr.push(Buffer.from(chunk)));
-    child.on('exit', (code) => {
+    child.on('close', (code) => {
       if (code === 0) {
         resolve(Buffer.concat(stdout).toString('utf8'));
         return;

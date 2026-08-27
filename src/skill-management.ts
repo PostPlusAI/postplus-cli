@@ -1116,10 +1116,13 @@ async function listInstalledSkillsForMutationScope(
   dependencies: SkillManagementDependencies,
   scope: PostPlusSkillsInstallScope,
 ): Promise<InstalledSkillEntry[]> {
-  return await listInstalledSkillsForScope(
+  const installed = await listInstalledSkillsForScope(
     dependencies,
     buildSkillScopeArgs(scope),
   );
+
+  const installerScope = scope === 'global' ? 'global' : 'project';
+  return installed.filter((skill) => skill.scope === installerScope);
 }
 
 async function listInstalledSkillsForScope(

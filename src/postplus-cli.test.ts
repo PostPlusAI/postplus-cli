@@ -3821,6 +3821,94 @@ describe('skill management commands', () => {
     }
   });
 
+  it('protects and verifies global skills using only global installer entries', async () => {
+    const originalFetch = globalThis.fetch;
+    const officialContent = 'official skill\n';
+    const globalSkillDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-global-skill-'),
+    );
+    const projectSkillDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-project-skill-'),
+    );
+    tempDirs.push(globalSkillDir, projectSkillDir);
+    await writeFile(
+      resolve(globalSkillDir, 'SKILL.md'),
+      officialContent,
+      'utf8',
+    );
+    await writeFile(
+      resolve(projectSkillDir, 'SKILL.md'),
+      'project customization\n',
+      'utf8',
+    );
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    let promptCount = 0;
+
+    try {
+      await writeGlobalSkillsInstallerLock({
+        'demo-skill': {
+          source: 'PostPlusAI/postplus-skills',
+          sourceType: 'github',
+          sourceUrl: 'https://github.com/PostPlusAI/postplus-skills.git',
+          skillFolderHash: computeSingleFileGitTreeHash(
+            'SKILL.md',
+            officialContent,
+          ),
+          skillPath: 'skills/demo-skill/SKILL.md',
+        },
+      });
+
+      const exitCode = await runPostPlusSkillUpdate({
+        confirmModifiedSkillBackup: async () => {
+          promptCount += 1;
+          return true;
+        },
+        isInteractive: () => true,
+        runCommand: async () => ({
+          stderr: '',
+          stdout: JSON.stringify([
+            {
+              agents: ['Codex'],
+              name: 'demo-skill',
+              path: globalSkillDir,
+              scope: 'global',
+            },
+            {
+              agents: ['Codex'],
+              name: 'demo-skill',
+              path: projectSkillDir,
+              scope: 'project',
+            },
+          ]),
+        }),
+        runInteractiveCommand: async () => 0,
+      });
+
+      assert.equal(exitCode, 0);
+      assert.equal(promptCount, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('fails before mutation when a locally modified managed skill is found outside an interactive terminal', async () => {
     const originalFetch = globalThis.fetch;
     const installedSkillDir = await mkdtemp(
@@ -4102,6 +4190,54 @@ describe('skill management commands', () => {
           'current-directory',
           'claude-code',
         ),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not treat a global skill as a current-directory installation', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await assert.rejects(
+        runPostPlusSkillUpdate(
+          {
+            runCommand: async () => ({
+              stderr: '',
+              stdout: JSON.stringify([
+                {
+                  agents: ['Codex'],
+                  name: 'demo-skill',
+                  path: '/tmp/global-demo-skill',
+                  scope: 'global',
+                },
+              ]),
+            }),
+            runInteractiveCommand: async () => 0,
+          },
+          { scope: 'current-directory' },
+        ),
+        /did not converge.*missing: demo-skill.*baseline was not changed/i,
       );
     } finally {
       globalThis.fetch = originalFetch;
