@@ -631,7 +631,7 @@ async function runMediaFileUpload(
   args: string[],
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
-  const flags = parseFlags(args, new Set(['json']));
+  const flags = parseFlags(args, new Set(['json', 'storage-only']));
   const allowedKeys = new Set([
     'hosted-operation-id',
     'input-file',
@@ -640,6 +640,7 @@ async function runMediaFileUpload(
     'output',
     'quote-confirmation-token',
     'skill',
+    'storage-only',
   ]);
   for (const key of [...flags.values.keys(), ...flags.booleans]) {
     if (!allowedKeys.has(key)) {
@@ -687,6 +688,18 @@ async function runMediaFileUpload(
         const storageReference = readStorageReferenceValue(output);
         const mediaReference = readMediaReferenceValue(output);
         await putHostedMediaBytes(signedUpload, absolutePath);
+
+        // `--storage-only` has no provider semantics: it stops after minting the
+        // durable PostPlus identity. A later capability request chooses its own
+        // provider transport (for example, the Moyu Seedance adapter registers
+        // referenced media in Moyu's token-scoped asset library). Avoid sending
+        // these bytes through the generic WaveSpeed upload hop here.
+        if (flags.booleans.has('storage-only')) {
+          return buildStorageOnlyUploadResult(payload, {
+            mediaReference,
+            storageReference,
+          });
+        }
 
         const uploadResult = await postHostedJson({
           body: {
@@ -1083,6 +1096,24 @@ function attachStorageHandoffToUploadResult(
   };
 }
 
+function buildStorageOnlyUploadResult(
+  payload: unknown,
+  handoff: { mediaReference: string; storageReference: unknown },
+): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error(
+      'Hosted media create-upload-url response is invalid; cannot return the storage handoff.',
+    );
+  }
+  return {
+    ...(payload as Record<string, unknown>),
+    output: {
+      mediaReference: handoff.mediaReference,
+      storageReference: handoff.storageReference,
+    },
+  };
+}
+
 async function putHostedMediaBytes(
   signedUpload: SignedUpload,
   absolutePath: string,
@@ -1105,18 +1136,30 @@ function printMediaFileHelp(): void {
   process.stdout.write(`PostPlus CLI - media-file commands
 
 Usage:
-  postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
+  postplus media-file upload --input-file <path> [--mime <type>] [--storage-only] [--skill <skill-id>] [--json] [--output <result.json>]
   postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
 
 The upload result carries output.mediaReference (persistent postplus-media://
 reference, never expires): reuse it in media-generation media fields and in
 media-file download --reference. output.data.download_url is a signed URL that
 expires.
+
+Use --storage-only to stop after PostPlus Storage and return only the durable
+PostPlus handoff. This flag does not select or contact a provider. If the returned
+reference is later used in a Moyu Seedance video request, the Web Moyu adapter
+registers that request's media in Moyu's asset library. Other capabilities (for
+example Video Analysis) keep their own provider-specific upload and execution flow.
 `);
 }
 
 // Shared submit path for both surfaces: wrap the media input, derive billing
 // dimensions from endpointKey + input, and POST to the Web boundary.
+// A legal high-cardinality request may spend up to the Web route's 800s ceiling
+// registering media, waiting for Active, and accepting the one generation submit.
+// Keep the client slightly wider so it never abandons a request the server can still
+// submit and bill.
+const HOSTED_MEDIA_CREATE_REQUEST_TIMEOUT_MS = 14 * 60_000;
+
 function submitMediaGenerationRequest(params: {
   capability: string;
   endpointKey: string;
@@ -1149,6 +1192,7 @@ function submitMediaGenerationRequest(params: {
           pathName: '/api/postplus-cli/hosted/capability',
           skillName: params.skillName,
           context: params.context,
+          timeoutMs: HOSTED_MEDIA_CREATE_REQUEST_TIMEOUT_MS,
         }),
       errorInputLabel: params.errorInputLabel,
       json: params.json,
@@ -2511,6 +2555,7 @@ async function postHostedJson(input: {
   debug?: boolean;
   pathName: string;
   skillName: string | null;
+  timeoutMs?: number;
   // When present (the hosted-lib path) the POST uses the injected auth +
   // skillsReleaseId with NO disk read and NO 401-refresh-retry (the eve runtime
   // supplies fresh session auth each turn). When absent (the bin path) the auth
@@ -2527,7 +2572,7 @@ async function postHostedJson(input: {
         pathName: input.pathName,
         skillName: input.skillName,
         skillsReleaseId: input.context.skillsReleaseId ?? null,
-        timeoutMs: 120000,
+        timeoutMs: input.timeoutMs ?? 120000,
       })
     : await sendAuthedCloudRequest({
         auth: await resolveFreshRemoteAuth(),
@@ -2537,7 +2582,7 @@ async function postHostedJson(input: {
         pathName: input.pathName,
         retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
         skillName: input.skillName,
-        timeoutMs: 120000,
+        timeoutMs: input.timeoutMs ?? 120000,
       });
 
   const payload = await readJsonResponse(response);
