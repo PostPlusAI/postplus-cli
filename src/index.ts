@@ -269,6 +269,10 @@ Install scope:
   postplus update --current-directory   Update PostPlus skills in the current directory
   postplus uninstall                    Remove global PostPlus skills
   postplus uninstall --current-directory  Remove PostPlus skills from the current directory
+
+Local changes:
+  Interactive updates ask to back up locally modified managed skills before replacing them.
+  Non-interactive updates stop before mutation and require an interactive confirmation.
 `);
       return 0;
     default:
