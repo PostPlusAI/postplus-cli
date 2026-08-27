@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -86,6 +86,34 @@ async function run(command, args, options = {}) {
   });
 }
 
+async function runCapture(command, args, options = {}) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      env: options.env ?? process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const stdout = [];
+    const stderr = [];
+
+    child.stdout.on('data', (chunk) => stdout.push(Buffer.from(chunk)));
+    child.stderr.on('data', (chunk) => stderr.push(Buffer.from(chunk)));
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdout).toString('utf8'));
+        return;
+      }
+
+      reject(
+        new Error(
+          `Command failed (${code ?? 'unknown'}): ${command} ${args.join(' ')}\n${Buffer.concat(stderr).toString('utf8')}`,
+        ),
+      );
+    });
+    child.on('error', reject);
+  });
+}
+
 await assertPathExists(
   path.resolve(skillsRepoRoot, 'skills', 'catalog.json'),
   `PostPlus skills checkout is missing skills/catalog.json: ${skillsRepoRoot}`,
@@ -120,6 +148,98 @@ try {
     {
       env: createIsolatedNpxEnv(tempRoot),
     },
+  );
+
+  const catalog = JSON.parse(
+    await readFile(
+      path.resolve(skillsRepoRoot, 'skills', 'catalog.json'),
+      'utf8',
+    ),
+  );
+  const fixtureSkill = catalog.skills.find(
+    (skill) =>
+      skill &&
+      typeof skill.name === 'string' &&
+      (skill.status === 'released' || skill.status?.startsWith('released/')),
+  )?.name;
+
+  if (!fixtureSkill) {
+    throw new Error(
+      'PostPlus skills catalog has no released acceptance fixture.',
+    );
+  }
+
+  const isolatedEnv = createIsolatedNpxEnv(tempRoot);
+  await run(
+    'npx',
+    [
+      '-y',
+      'skills',
+      'add',
+      skillsRepoRoot,
+      '--global',
+      '--full-depth',
+      '--skill',
+      fixtureSkill,
+      '--agent',
+      'codex',
+      'gemini-cli',
+      '--yes',
+    ],
+    { env: isolatedEnv },
+  );
+
+  const installedBefore = JSON.parse(
+    await runCapture('npx', ['-y', 'skills', 'list', '--json', '--global'], {
+      env: isolatedEnv,
+    }),
+  );
+  const installedFixture = installedBefore.find(
+    (skill) => skill.name === fixtureSkill,
+  );
+
+  if (!installedFixture) {
+    throw new Error('Real installer did not expose the acceptance skill.');
+  }
+
+  await run(
+    'npx',
+    ['-y', 'skills', 'remove', fixtureSkill, '--global', '--yes'],
+    { env: isolatedEnv },
+  );
+
+  const installedAfter = JSON.parse(
+    await runCapture('npx', ['-y', 'skills', 'list', '--json', '--global'], {
+      env: isolatedEnv,
+    }),
+  );
+  if (installedAfter.some((skill) => skill.name === fixtureSkill)) {
+    throw new Error(
+      'Agent-agnostic remove left the acceptance skill discoverable.',
+    );
+  }
+
+  try {
+    const installerLock = JSON.parse(
+      await readFile(
+        path.join(tempRoot, 'home', '.agents', '.skill-lock.json'),
+        'utf8',
+      ),
+    );
+    if (fixtureSkill in (installerLock.skills ?? {})) {
+      throw new Error(
+        'Agent-agnostic remove left the acceptance skill locked.',
+      );
+    }
+  } catch (error) {
+    if (!(error && typeof error === 'object' && error.code === 'ENOENT')) {
+      throw error;
+    }
+  }
+
+  await assertPathMissing(
+    path.join(tempRoot, 'home', '.agents', 'skills', fixtureSkill),
+    'Agent-agnostic remove left the shared skill directory behind.',
   );
 } finally {
   await rm(tempRoot, { recursive: true, force: true });

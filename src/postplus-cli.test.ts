@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { type ReadStream, readFileSync } from 'node:fs';
 import {
   mkdir,
@@ -116,6 +117,26 @@ function createEmptySkillRequirements(): PublicSkillRequirements {
     modelKeys: [],
     sourceKeys: [],
   };
+}
+
+function computeSingleFileGitTreeHash(
+  fileName: string,
+  content: string,
+): string {
+  const fileContent = Buffer.from(content);
+  const blobHash = createHash('sha1')
+    .update(`blob ${fileContent.length}\0`)
+    .update(fileContent)
+    .digest();
+  const treeContent = Buffer.concat([
+    Buffer.from(`100644 ${fileName}\0`),
+    blobHash,
+  ]);
+
+  return createHash('sha1')
+    .update(`tree ${treeContent.length}\0`)
+    .update(treeContent)
+    .digest('hex');
 }
 
 function isPublicCatalogUrl(url: string): boolean {
@@ -3277,8 +3298,6 @@ describe('skill management commands', () => {
       'a',
       'b',
       '--global',
-      '--agent',
-      ...POSTPLUS_SKILLS_AGENT_TARGETS,
       '--yes',
     ]);
   });
@@ -3305,16 +3324,7 @@ describe('skill management commands', () => {
     );
     assert.deepEqual(
       buildPostPlusSkillUninstallArgs(['a', 'b'], 'current-directory'),
-      [
-        '-y',
-        'skills',
-        'remove',
-        'a',
-        'b',
-        '--agent',
-        ...POSTPLUS_SKILLS_AGENT_TARGETS,
-        '--yes',
-      ],
+      ['-y', 'skills', 'remove', 'a', 'b', '--yes'],
     );
   });
 
@@ -3536,6 +3546,7 @@ describe('skill management commands', () => {
         },
       );
     const calls: string[][] = [];
+    const successMessages: string[] = [];
 
     try {
       await writeManagedSkillBaseline({
@@ -3543,6 +3554,24 @@ describe('skill management commands', () => {
         skillNames: ['demo-skill', 'retired-skill'],
       });
       const exitCode = await runPostPlusSkillUpdate({
+        reportSuccess: (message) => successMessages.push(message),
+        runCommand: async () => ({
+          stderr: '',
+          stdout: JSON.stringify([
+            {
+              agents: ['Codex'],
+              name: 'demo-skill',
+              path: '/tmp/demo-skill',
+              scope: 'global',
+            },
+            {
+              agents: ['Codex'],
+              name: 'new-skill',
+              path: '/tmp/new-skill',
+              scope: 'global',
+            },
+          ]),
+        }),
         runInteractiveCommand: async (_command, args) => {
           calls.push(args);
           return 0;
@@ -3551,7 +3580,7 @@ describe('skill management commands', () => {
       const config = await readLocalConfig();
 
       assert.equal(exitCode, 0);
-      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length * 2);
+      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length + 1);
       assert.deepEqual(
         calls[0],
         buildPostPlusSkillUpdateArgs(
@@ -3562,11 +3591,7 @@ describe('skill management commands', () => {
       );
       assert.deepEqual(
         calls[POSTPLUS_SKILLS_AGENT_TARGETS.length],
-        buildPostPlusSkillUninstallArgs(
-          ['retired-skill'],
-          'global',
-          'claude-code',
-        ),
+        buildPostPlusSkillUninstallArgs(['retired-skill'], 'global'),
       );
       assert.deepEqual(config?.managedSkills?.skillNames, [
         'demo-skill',
@@ -3574,6 +3599,453 @@ describe('skill management commands', () => {
       ]);
       assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
       assert.equal(config?.cliVersion, CURRENT_CLI_VERSION);
+      assert.deepEqual(successMessages, [
+        'PostPlus skills synchronized: 2 current, 1 retired removed (global). Restart active agent sessions to refresh skill discovery.',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not advance the baseline when the installer reports success but a retired skill remains', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await writeManagedSkillBaseline({
+        releaseId: 'catalog-1',
+        skillNames: ['demo-skill', 'retired-skill'],
+      });
+
+      await assert.rejects(
+        runPostPlusSkillUpdate({
+          runCommand: async () => ({
+            stderr: '',
+            stdout: JSON.stringify([
+              {
+                agents: ['Codex', 'Gemini CLI'],
+                name: 'demo-skill',
+                path: '/tmp/demo-skill',
+                scope: 'global',
+              },
+              {
+                agents: ['Gemini CLI'],
+                name: 'retired-skill',
+                path: '/tmp/retired-skill',
+                scope: 'global',
+              },
+            ]),
+          }),
+          runInteractiveCommand: async () => 0,
+        }),
+        /did not converge.*still present: retired-skill.*baseline was not changed/i,
+      );
+
+      const config = await readLocalConfig();
+      assert.equal(config?.managedSkills?.releaseId, 'catalog-1');
+      assert.deepEqual(config?.managedSkills?.skillNames, [
+        'demo-skill',
+        'retired-skill',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('backs up a locally modified managed skill before installing the official release', async () => {
+    const originalFetch = globalThis.fetch;
+    const officialContent = 'official skill\n';
+    const localContent = 'locally customized skill\n';
+    const installedSkillDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-modified-skill-'),
+    );
+    tempDirs.push(installedSkillDir);
+    await writeFile(
+      resolve(installedSkillDir, 'SKILL.md'),
+      localContent,
+      'utf8',
+    );
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    const prompts: Array<{
+      action: string;
+      scope: string;
+      skillNames: string[];
+    }> = [];
+    const messages: string[] = [];
+    let installCalls = 0;
+
+    try {
+      await writeManagedSkillBaseline({
+        releaseId: 'catalog-1',
+        skillNames: ['demo-skill'],
+      });
+      await writeGlobalSkillsInstallerLock({
+        'demo-skill': {
+          source: 'PostPlusAI/postplus-skills',
+          sourceType: 'github',
+          sourceUrl: 'https://github.com/PostPlusAI/postplus-skills.git',
+          skillFolderHash: computeSingleFileGitTreeHash(
+            'SKILL.md',
+            officialContent,
+          ),
+          skillPath: 'skills/demo-skill/SKILL.md',
+        },
+      });
+
+      const exitCode = await runPostPlusSkillUpdate({
+        confirmModifiedSkillBackup: async (prompt) => {
+          prompts.push(prompt);
+          return true;
+        },
+        isInteractive: () => true,
+        reportSuccess: (message) => messages.push(message),
+        runCommand: async () => ({
+          stderr: '',
+          stdout: JSON.stringify([
+            {
+              agents: ['Codex'],
+              name: 'demo-skill',
+              path: installedSkillDir,
+              scope: 'global',
+            },
+          ]),
+        }),
+        runInteractiveCommand: async () => {
+          installCalls += 1;
+          await writeFile(
+            resolve(installedSkillDir, 'SKILL.md'),
+            officialContent,
+            'utf8',
+          );
+          return 0;
+        },
+      });
+
+      assert.equal(exitCode, 0);
+      assert.equal(installCalls, POSTPLUS_SKILLS_AGENT_TARGETS.length);
+      assert.deepEqual(prompts, [
+        {
+          action: 'update',
+          scope: 'global',
+          skillNames: ['demo-skill'],
+        },
+      ]);
+      assert.match(messages[0] ?? '', /Backed up 1 locally modified/);
+      const backupRoot = resolve(
+        process.env.POSTPLUS_CONFIG_DIR ?? '',
+        'skill-backups',
+      );
+      const [backupDirectory] = await readdir(backupRoot);
+      assert.ok(backupDirectory);
+      const manifest = JSON.parse(
+        await readFile(
+          resolve(backupRoot, backupDirectory, 'manifest.json'),
+          'utf8',
+        ),
+      ) as {
+        skills: Array<{ backupPath: string; name: string }>;
+      };
+      assert.equal(manifest.skills[0]?.name, 'demo-skill');
+      assert.equal(
+        await readFile(
+          resolve(manifest.skills[0]?.backupPath ?? '', 'SKILL.md'),
+          'utf8',
+        ),
+        localContent,
+      );
+      assert.equal(
+        await readFile(resolve(installedSkillDir, 'SKILL.md'), 'utf8'),
+        officialContent,
+      );
+
+      let repeatedPromptCount = 0;
+      const repeatedExitCode = await runPostPlusSkillUpdate({
+        confirmModifiedSkillBackup: async () => {
+          repeatedPromptCount += 1;
+          return true;
+        },
+        isInteractive: () => true,
+        runCommand: async () => ({
+          stderr: '',
+          stdout: JSON.stringify([
+            {
+              agents: ['Codex'],
+              name: 'demo-skill',
+              path: installedSkillDir,
+              scope: 'global',
+            },
+          ]),
+        }),
+        runInteractiveCommand: async () => 0,
+      });
+      assert.equal(repeatedExitCode, 0);
+      assert.equal(repeatedPromptCount, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('protects and verifies global skills using only global installer entries', async () => {
+    const originalFetch = globalThis.fetch;
+    const officialContent = 'official skill\n';
+    const globalSkillDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-global-skill-'),
+    );
+    const projectSkillDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-project-skill-'),
+    );
+    tempDirs.push(globalSkillDir, projectSkillDir);
+    await writeFile(
+      resolve(globalSkillDir, 'SKILL.md'),
+      officialContent,
+      'utf8',
+    );
+    await writeFile(
+      resolve(projectSkillDir, 'SKILL.md'),
+      'project customization\n',
+      'utf8',
+    );
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    let promptCount = 0;
+
+    try {
+      await writeGlobalSkillsInstallerLock({
+        'demo-skill': {
+          source: 'PostPlusAI/postplus-skills',
+          sourceType: 'github',
+          sourceUrl: 'https://github.com/PostPlusAI/postplus-skills.git',
+          skillFolderHash: computeSingleFileGitTreeHash(
+            'SKILL.md',
+            officialContent,
+          ),
+          skillPath: 'skills/demo-skill/SKILL.md',
+        },
+      });
+
+      const exitCode = await runPostPlusSkillUpdate({
+        confirmModifiedSkillBackup: async () => {
+          promptCount += 1;
+          return true;
+        },
+        isInteractive: () => true,
+        runCommand: async () => ({
+          stderr: '',
+          stdout: JSON.stringify([
+            {
+              agents: ['Codex'],
+              name: 'demo-skill',
+              path: globalSkillDir,
+              scope: 'global',
+            },
+            {
+              agents: ['Codex'],
+              name: 'demo-skill',
+              path: projectSkillDir,
+              scope: 'project',
+            },
+          ]),
+        }),
+        runInteractiveCommand: async () => 0,
+      });
+
+      assert.equal(exitCode, 0);
+      assert.equal(promptCount, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fails before mutation when a locally modified managed skill is found outside an interactive terminal', async () => {
+    const originalFetch = globalThis.fetch;
+    const installedSkillDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-modified-skill-nontty-'),
+    );
+    tempDirs.push(installedSkillDir);
+    await writeFile(
+      resolve(installedSkillDir, 'SKILL.md'),
+      'locally customized skill\n',
+      'utf8',
+    );
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    let mutationCalls = 0;
+
+    try {
+      await writeManagedSkillBaseline({
+        releaseId: 'catalog-1',
+        skillNames: ['demo-skill'],
+      });
+      await writeGlobalSkillsInstallerLock({
+        'demo-skill': {
+          source: 'PostPlusAI/postplus-skills',
+          sourceType: 'github',
+          sourceUrl: 'https://github.com/PostPlusAI/postplus-skills.git',
+          skillFolderHash: computeSingleFileGitTreeHash(
+            'SKILL.md',
+            'official skill\n',
+          ),
+          skillPath: 'skills/demo-skill/SKILL.md',
+        },
+      });
+
+      await assert.rejects(
+        runPostPlusSkillUpdate({
+          isInteractive: () => false,
+          runCommand: async () => ({
+            stderr: '',
+            stdout: JSON.stringify([
+              {
+                agents: ['Codex'],
+                name: 'demo-skill',
+                path: installedSkillDir,
+                scope: 'global',
+              },
+            ]),
+          }),
+          runInteractiveCommand: async () => {
+            mutationCalls += 1;
+            return 0;
+          },
+        }),
+        /require confirmation.*interactive terminal.*baseline was not changed/i,
+      );
+
+      assert.equal(mutationCalls, 0);
+      assert.equal(
+        (await readLocalConfig())?.managedSkills?.releaseId,
+        'catalog-1',
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not advance the baseline when the installer reports success but a released skill is missing', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+            {
+              name: 'new-skill',
+              path: 'skills/new-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await writeManagedSkillBaseline({
+        releaseId: 'catalog-1',
+        skillNames: ['demo-skill'],
+      });
+
+      await assert.rejects(
+        runPostPlusSkillUpdate({
+          runCommand: async () => ({
+            stderr: '',
+            stdout: JSON.stringify([
+              {
+                agents: ['Codex'],
+                name: 'demo-skill',
+                path: '/tmp/demo-skill',
+                scope: 'global',
+              },
+            ]),
+          }),
+          runInteractiveCommand: async () => 0,
+        }),
+        /did not converge.*missing: new-skill.*baseline was not changed/i,
+      );
+
+      assert.equal(
+        (await readLocalConfig())?.managedSkills?.releaseId,
+        'catalog-1',
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -3607,7 +4079,7 @@ describe('skill management commands', () => {
         releaseId: 'catalog-2',
         skillNames: ['demo-skill'],
       });
-      await writeGlobalSkillsInstallerLock({
+      const currentLock = {
         'demo-skill': {
           source: 'PostPlusAI/postplus-skills',
           sourceType: 'github',
@@ -3627,24 +4099,36 @@ describe('skill management commands', () => {
           skillFolderHash: 'retired-hash',
           skillPath: 'skills/old/retired-skill/SKILL.md',
         },
-      });
+      };
+      await writeGlobalSkillsInstallerLock(currentLock);
 
       const exitCode = await runPostPlusSkillUpdate({
+        runCommand: async () => ({
+          stderr: '',
+          stdout: JSON.stringify([
+            {
+              agents: ['Codex'],
+              name: 'demo-skill',
+              path: '/tmp/demo-skill',
+              scope: 'global',
+            },
+          ]),
+        }),
         runInteractiveCommand: async (_command, args) => {
           calls.push(args);
+          if (args.includes('remove')) {
+            const { ['retired-skill']: _retired, ...remaining } = currentLock;
+            await writeGlobalSkillsInstallerLock(remaining);
+          }
           return 0;
         },
       });
 
       assert.equal(exitCode, 0);
-      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length * 2);
+      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length + 1);
       assert.deepEqual(
         calls[POSTPLUS_SKILLS_AGENT_TARGETS.length],
-        buildPostPlusSkillUninstallArgs(
-          ['retired-skill'],
-          'global',
-          'claude-code',
-        ),
+        buildPostPlusSkillUninstallArgs(['retired-skill'], 'global'),
       );
       assert.doesNotMatch(calls.flat().join(' '), /local-user-skill/);
     } finally {
@@ -3678,6 +4162,17 @@ describe('skill management commands', () => {
     try {
       const exitCode = await runPostPlusSkillUpdate(
         {
+          runCommand: async () => ({
+            stderr: '',
+            stdout: JSON.stringify([
+              {
+                agents: ['Codex'],
+                name: 'demo-skill',
+                path: '/tmp/demo-skill',
+                scope: 'project',
+              },
+            ]),
+          }),
           runInteractiveCommand: async (_command, args) => {
             calls.push(args);
             return 0;
@@ -3695,6 +4190,54 @@ describe('skill management commands', () => {
           'current-directory',
           'claude-code',
         ),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not treat a global skill as a current-directory installation', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await assert.rejects(
+        runPostPlusSkillUpdate(
+          {
+            runCommand: async () => ({
+              stderr: '',
+              stdout: JSON.stringify([
+                {
+                  agents: ['Codex'],
+                  name: 'demo-skill',
+                  path: '/tmp/global-demo-skill',
+                  scope: 'global',
+                },
+              ]),
+            }),
+            runInteractiveCommand: async () => 0,
+          },
+          { scope: 'current-directory' },
+        ),
+        /did not converge.*missing: demo-skill.*baseline was not changed/i,
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -4008,6 +4551,7 @@ describe('skill management commands', () => {
         skillNames: ['demo-skill', 'retired-skill'],
       });
       const exitCode = await runPostPlusSkillUninstall({
+        runCommand: async () => ({ stderr: '', stdout: '[]' }),
         runInteractiveCommand: async (_command, args) => {
           calls.push(args);
           return 0;
@@ -4016,13 +4560,12 @@ describe('skill management commands', () => {
       const config = await readLocalConfig();
 
       assert.equal(exitCode, 0);
-      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length);
+      assert.equal(calls.length, 1);
       assert.deepEqual(
         calls[0],
         buildPostPlusSkillUninstallArgs(
           ['demo-skill', 'retired-skill'],
           'global',
-          'claude-code',
         ),
       );
       assert.equal(config?.managedSkills, undefined);
@@ -4061,6 +4604,7 @@ describe('skill management commands', () => {
       });
       const exitCode = await runPostPlusSkillUninstall(
         {
+          runCommand: async () => ({ stderr: '', stdout: '[]' }),
           runInteractiveCommand: async (_command, args) => {
             calls.push(args);
             return 0;
@@ -4071,16 +4615,70 @@ describe('skill management commands', () => {
       const config = await readLocalConfig();
 
       assert.equal(exitCode, 0);
-      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length);
+      assert.equal(calls.length, 1);
       assert.deepEqual(
         calls[0],
         buildPostPlusSkillUninstallArgs(
           ['demo-skill', 'retired-skill'],
           'current-directory',
-          'claude-code',
         ),
       );
       assert.equal(config?.managedSkills, undefined);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not clear the baseline when uninstall leaves a managed skill behind', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          releaseId: 'catalog-2',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await writeManagedSkillBaseline({
+        releaseId: 'catalog-2',
+        skillNames: ['demo-skill'],
+      });
+
+      await assert.rejects(
+        runPostPlusSkillUninstall({
+          runCommand: async () => ({
+            stderr: '',
+            stdout: JSON.stringify([
+              {
+                agents: ['Gemini CLI'],
+                name: 'demo-skill',
+                path: '/tmp/demo-skill',
+                scope: 'global',
+              },
+            ]),
+          }),
+          runInteractiveCommand: async () => 0,
+        }),
+        /uninstall did not converge.*still present: demo-skill.*baseline was not changed/i,
+      );
+
+      assert.equal(
+        (await readLocalConfig())?.managedSkills?.releaseId,
+        'catalog-2',
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
