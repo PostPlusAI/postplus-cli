@@ -2049,6 +2049,16 @@ process.exit(1);
       userEmail: 'user@example.com',
       userId: 'user-1',
     });
+    // Keep this contract hermetic: hosted runners can define NO_PROXY entries
+    // that would otherwise (correctly) exempt the synthetic test origin.
+    process.env.HTTPS_PROXY = 'http://127.0.0.1:7897';
+    delete process.env.https_proxy;
+    delete process.env.ALL_PROXY;
+    delete process.env.all_proxy;
+    delete process.env.HTTP_PROXY;
+    delete process.env.http_proxy;
+    delete process.env.NO_PROXY;
+    delete process.env.no_proxy;
     delete process.env.NODE_USE_ENV_PROXY;
     let fetchCalls = 0;
     const originalFetch = globalThis.fetch;
