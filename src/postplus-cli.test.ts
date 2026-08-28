@@ -46,6 +46,7 @@ import {
   runRunsCommand,
 } from './hosted-account-commands.js';
 import {
+  HOSTED_ADS_QUERY_BATCH_TIMEOUT_MS,
   HOSTED_ADS_QUERY_TIMEOUT_MS,
   type HostedAdsCommandDependencies,
   runHostedAdsCommand,
@@ -4265,8 +4266,15 @@ describe('hosted Ads read commands', () => {
       body?: unknown;
       method: 'GET' | 'POST';
       pathName: string;
+      readJson?: unknown;
       timeoutMs: number;
     }[] = [
+      {
+        args: ['manifest', '--provider', 'meta_ads', '--json'],
+        method: 'GET',
+        pathName: '/api/postplus-cli/hosted/ads/meta_ads/manifest',
+        timeoutMs: 30_000,
+      },
       {
         args: ['manifest', '--provider', 'google', '--json'],
         method: 'GET',
@@ -4332,11 +4340,39 @@ describe('hosted Ads read commands', () => {
         pathName: '/api/postplus-cli/hosted/ads/google/query',
         timeoutMs: HOSTED_ADS_QUERY_TIMEOUT_MS,
       },
+      {
+        args: [
+          'query-batch',
+          '--provider',
+          'meta_ads',
+          '--request',
+          'query-batch.json',
+          '--json',
+        ],
+        body: {
+          parameters: {},
+          queryId: 'meta_ads.insights.account_daily.v1',
+          scope: { type: 'all_linked' },
+        },
+        method: 'POST',
+        pathName: '/api/postplus-cli/hosted/ads/meta_ads/query-batch',
+        readJson: {
+          parameters: {},
+          queryId: 'meta_ads.insights.account_daily.v1',
+          scope: { type: 'all_linked' },
+        },
+        timeoutMs: HOSTED_ADS_QUERY_BATCH_TIMEOUT_MS,
+      },
     ];
 
     assert.ok(HOSTED_ADS_QUERY_TIMEOUT_MS > 30_000);
+    assert.ok(HOSTED_ADS_QUERY_BATCH_TIMEOUT_MS > HOSTED_ADS_QUERY_TIMEOUT_MS);
     for (const testCase of cases) {
-      const harness = createCommandHarness();
+      const harness = createCommandHarness(
+        testCase.readJson === undefined
+          ? undefined
+          : { readJson: testCase.readJson },
+      );
       assert.equal(
         await runHostedAdsCommand(testCase.args, harness.dependencies),
         0,
@@ -4351,7 +4387,7 @@ describe('hosted Ads read commands', () => {
     }
   });
 
-  it('requires exact google, JSON output, and command-owned flags before auth', async () => {
+  it('requires a supported exact provider, JSON output, and command-owned flags before auth', async () => {
     const invalidArgs = [
       ['manifest', '--json'],
       ['manifest', '--provider', 'meta', '--json'],
@@ -4474,6 +4510,44 @@ describe('hosted Ads read commands', () => {
           harness.dependencies,
         ),
       );
+      assert.equal(harness.requests.length, 0);
+    }
+  });
+
+  it('rejects ambiguous, duplicated, or oversized multi-account scopes before auth', async () => {
+    const invalidScopes = [
+      { bindingIds: [], type: 'selected' },
+      { bindingIds: [bindingId, bindingId], type: 'selected' },
+      {
+        bindingIds: Array.from({ length: 11 }, () => bindingId),
+        type: 'selected',
+      },
+      { bindingIds: [bindingId], type: 'current' },
+      { type: 'default' },
+    ];
+
+    for (const scope of invalidScopes) {
+      const harness = createCommandHarness({
+        readJson: {
+          parameters: {},
+          queryId: 'google_ads.campaign.structure.v1',
+          scope,
+        },
+      });
+      await assert.rejects(() =>
+        runHostedAdsCommand(
+          [
+            'query-batch',
+            '--provider',
+            'google',
+            '--request',
+            'query-batch.json',
+            '--json',
+          ],
+          harness.dependencies,
+        ),
+      );
+      assert.equal(harness.authOptions.length, 0);
       assert.equal(harness.requests.length, 0);
     }
   });
@@ -4722,8 +4796,14 @@ describe('hosted Ads read commands', () => {
       'ads',
       'help',
     ]);
-    assert.match(stdout, /postplus ads manifest --provider google --json/u);
-    assert.match(stdout, /postplus ads query --provider google --request/u);
+    assert.match(
+      stdout,
+      /postplus ads manifest --provider <google\|meta_ads>/u,
+    );
+    assert.match(
+      stdout,
+      /postplus ads query-batch --provider <google\|meta_ads>/u,
+    );
     assert.match(stdout, /read-only/u);
   });
 });
@@ -9608,6 +9688,50 @@ describe('hosted lib / bin request parity', () => {
       // The lib returns the parsed payload OBJECT — not a number exit code and
       // not a stdout string.
       assert.deepEqual(payload, { output: { data: { id: 'run_parity' } } });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('runs a strict Ads batch read in-process without a request file', async () => {
+    const originalFetch = globalThis.fetch;
+    let captured: { body?: unknown; url?: string } = {};
+    globalThis.fetch = async (input, init) => {
+      captured = {
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        url: String(input),
+      };
+      return new Response(
+        JSON.stringify({
+          data: { outcome: 'complete', resolvedBindingIds: [] },
+          kind: 'query_batch_result',
+          namespace: 'ads',
+          ok: true,
+          requestId: 'request-1',
+          schemaVersion: 1,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+    try {
+      const requestJson = {
+        parameters: { dateFrom: '2026-08-01', dateTo: '2026-08-27' },
+        queryId: 'google_ads.campaign.performance_daily.v1',
+        scope: { type: 'all_linked' },
+      };
+      const payload = await runHostedRequest({
+        domain: 'ads',
+        args: ['query-batch', '--provider', 'google', '--json'],
+        requestJson,
+        auth: PARITY_AUTH,
+        skillsReleaseId: PARITY_RELEASE_ID,
+      });
+      assert.equal(
+        captured.url,
+        'https://postplus.test/api/postplus-cli/hosted/ads/google/query-batch',
+      );
+      assert.deepEqual(captured.body, requestJson);
+      assert.equal((payload as { kind?: unknown }).kind, 'query_batch_result');
     } finally {
       globalThis.fetch = originalFetch;
     }

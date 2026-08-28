@@ -90,7 +90,7 @@ Usage:
   postplus balance [--json]
   postplus runs list [--status <status>] [--since <iso>] [--limit <n>] [--json]
   postplus runs show <run-id> [--json]
-  postplus ads manifest|connections|accounts|bindings|readiness|query ... --provider google --json
+  postplus ads manifest|connections|accounts|bindings|readiness|query|query-batch ... --provider <google|meta_ads> --json
   postplus research schema [--collection-key <key>] [--json]
   postplus research collect <collection-key> --request <input.json> --output <result.json> [--skill <skill-id>]
   postplus research collect --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]

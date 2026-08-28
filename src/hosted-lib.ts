@@ -16,12 +16,12 @@
 // (the structured HostedProductRequestError / quote-confirmation error are thrown
 // verbatim) instead of being written to stdout/file with an exit code.
 //
-// Scope: only the hosted spend/write surfaces go through here —
+// Scope: hosted product surfaces go through here — read-only Ads plus
 // media / research / publish / media-file. Read-only diagnostics (status / doctor
 // / skills / whoami / quote / list / --version / --help) are NOT hosted-domain
 // commands and are out of scope for this entry.
-
 import type { AuthedCloudRequestAuth } from './authed-cloud-request.js';
+import { runHostedAdsRequest } from './hosted-ads-commands.js';
 import {
   type HostedRequestContext,
   postHostedCapabilityEnvelope,
@@ -29,7 +29,12 @@ import {
   runMediaFileCommand,
 } from './hosted-domain-commands.js';
 
-export type HostedLibDomain = 'media' | 'research' | 'publish' | 'media-file';
+export type HostedLibDomain =
+  | 'ads'
+  | 'media'
+  | 'research'
+  | 'publish'
+  | 'media-file';
 
 export type RunHostedRequestInput = {
   /** Which hosted verb family `args` belongs to (the first CLI token). */
@@ -57,7 +62,7 @@ export type RunHostedRequestInput = {
 };
 
 /**
- * Runs a hosted media / research / publish / media-file request in-process and
+ * Runs a hosted Ads / media / research / publish / media-file request in-process and
  * returns the parsed hosted payload. Throws the structured
  * HostedProductRequestError / quote-confirmation error VERBATIM on failure — no
  * stdout, no file writes, no exit code. The wire request is identical to the bin
@@ -80,7 +85,29 @@ export async function runHostedRequest(
     return runMediaFileCommand(input.args, context);
   }
 
+  if (input.domain === 'ads') {
+    return runHostedAdsRequest({
+      args: input.args,
+      auth: input.auth,
+      ...(input.requestJson !== undefined
+        ? { requestJson: requireAdsRequestObject(input.requestJson) }
+        : {}),
+      ...(input.skillsReleaseId !== undefined
+        ? { skillsReleaseId: input.skillsReleaseId }
+        : {}),
+    });
+  }
+
   return runHostedDomainCommand(input.domain, input.args, context);
+}
+
+function requireAdsRequestObject(
+  value: Record<string, unknown> | unknown[],
+): Record<string, unknown> {
+  if (Array.isArray(value)) {
+    throw new Error('Ads hosted request JSON must be an object.');
+  }
+  return value;
 }
 
 export type RunHostedCapabilityEnvelopeInput = {

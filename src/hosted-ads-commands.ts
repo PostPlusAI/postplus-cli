@@ -10,20 +10,23 @@ import { formatPostPlusCompatibilityError } from './client-compatibility.js';
 
 const HOSTED_ADS_DIAGNOSTIC_TIMEOUT_MS = 30_000;
 export const HOSTED_ADS_QUERY_TIMEOUT_MS = 45_000;
+export const HOSTED_ADS_QUERY_BATCH_TIMEOUT_MS = 120_000;
 const MAX_BINDING_LIST_LIMIT = 100;
+const MAX_MULTI_ACCOUNT_BINDINGS = 10;
 const MAX_CURSOR_LENGTH = 512;
 const CANONICAL_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const QUERY_ID_PATTERN = /^[a-z][a-z0-9_.]{0,127}$/u;
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/u;
 
-type HostedAdsProvider = 'google';
+type HostedAdsProvider = 'google' | 'meta_ads';
 type HostedAdsSubcommand =
   | 'accounts'
   | 'bindings'
   | 'connections'
   | 'manifest'
   | 'query'
+  | 'query-batch'
   | 'readiness';
 
 type ParsedHostedAdsCommand = {
@@ -33,6 +36,13 @@ type ParsedHostedAdsCommand = {
   provider: HostedAdsProvider;
   subcommand: HostedAdsSubcommand;
   timeoutMs: number;
+};
+
+export type HostedAdsRequestInput = {
+  args: string[];
+  requestJson?: Record<string, unknown>;
+  auth: AuthedCloudRequestAuth;
+  skillsReleaseId?: string;
 };
 
 export type HostedAdsCommandDependencies = {
@@ -114,10 +124,46 @@ export async function runHostedAdsCommand(
   return 0;
 }
 
+/** Trusted-runtime counterpart to the bin command, without disk auth/files. */
+export async function runHostedAdsRequest(
+  input: HostedAdsRequestInput,
+): Promise<unknown> {
+  const [subcommand, ...rest] = input.args;
+  if (!subcommand) {
+    throw new Error('Ads hosted request requires a subcommand.');
+  }
+  const parsed = await parseHostedAdsCommand(
+    subcommand,
+    rest,
+    DEFAULT_DEPENDENCIES,
+    input.requestJson,
+  );
+  const response = await sendAuthedCloudRequest({
+    auth: input.auth,
+    ...(parsed.body === undefined ? {} : { body: parsed.body }),
+    method: parsed.method,
+    pathName: parsed.pathName,
+    skillsReleaseId: input.skillsReleaseId ?? null,
+    timeoutMs: parsed.timeoutMs,
+  });
+  const payload = await readJsonResponse(response);
+  assertNoSessionToken(payload, new Set([input.auth.cliSessionToken]));
+  if (response.ok) return payload;
+
+  const failure = normalizeHostedAdsFailureEnvelope(payload);
+  if (!failure) {
+    throw new Error(
+      `PostPlus hosted Ads request failed (status=${response.status}).`,
+    );
+  }
+  throw new HostedAdsRequestError(failure);
+}
+
 async function parseHostedAdsCommand(
   rawSubcommand: string,
   args: string[],
   dependencies: HostedAdsCommandDependencies,
+  injectedRequestJson?: Record<string, unknown>,
 ): Promise<ParsedHostedAdsCommand> {
   if (!isHostedAdsSubcommand(rawSubcommand)) {
     throw new Error(`Unknown ads command: ${rawSubcommand}`);
@@ -130,22 +176,27 @@ async function parseHostedAdsCommand(
   if (rawSubcommand === 'readiness') {
     allowedValueFlags.add('binding-id');
   }
-  if (rawSubcommand === 'query') {
+  if (
+    (rawSubcommand === 'query' || rawSubcommand === 'query-batch') &&
+    injectedRequestJson === undefined
+  ) {
     allowedValueFlags.add('request');
   }
   const flags = parseStrictFlags(args, allowedValueFlags);
   const provider = flags.values.get('provider');
   if (provider === undefined) {
-    throw new Error(`ads ${rawSubcommand} requires --provider google.`);
+    throw new Error(
+      `ads ${rawSubcommand} requires --provider google or meta_ads.`,
+    );
   }
-  if (provider !== 'google') {
-    throw new Error('Ads provider must be exact lowercase google.');
+  if (provider !== 'google' && provider !== 'meta_ads') {
+    throw new Error('Ads provider must be exact lowercase google or meta_ads.');
   }
   if (!flags.json) {
     throw new Error(`ads ${rawSubcommand} requires --json.`);
   }
 
-  const pathPrefix = '/api/postplus-cli/hosted/ads/google';
+  const pathPrefix = `/api/postplus-cli/hosted/ads/${provider}`;
   if (
     rawSubcommand === 'manifest' ||
     rawSubcommand === 'connections' ||
@@ -161,6 +212,12 @@ async function parseHostedAdsCommand(
   }
 
   if (rawSubcommand === 'bindings') {
+    if (
+      provider === 'meta_ads' &&
+      (flags.values.has('limit') || flags.values.has('cursor'))
+    ) {
+      throw new Error('Meta Ads bindings do not accept --limit or --cursor.');
+    }
     const query = new URLSearchParams();
     const rawLimit = flags.values.get('limit');
     if (rawLimit !== undefined) {
@@ -211,19 +268,30 @@ async function parseHostedAdsCommand(
   }
 
   const requestPath = flags.values.get('request');
-  if (!requestPath) {
-    throw new Error('ads query requires --request <file>.');
+  if (!requestPath && injectedRequestJson === undefined) {
+    throw new Error(`ads ${rawSubcommand} requires --request <file>.`);
   }
-  const body = normalizeQueryRequest(
-    await dependencies.readJsonFile(requestPath),
-  );
+  if (requestPath && injectedRequestJson !== undefined) {
+    throw new Error(
+      `ads ${rawSubcommand} cannot combine --request with injected request JSON.`,
+    );
+  }
+  const requestValue =
+    injectedRequestJson ?? (await dependencies.readJsonFile(requestPath!));
+  const body =
+    rawSubcommand === 'query-batch'
+      ? normalizeQueryBatchRequest(requestValue)
+      : normalizeQueryRequest(requestValue);
   return {
     body,
     method: 'POST',
-    pathName: `${pathPrefix}/query`,
+    pathName: `${pathPrefix}/${rawSubcommand}`,
     provider,
     subcommand: rawSubcommand,
-    timeoutMs: HOSTED_ADS_QUERY_TIMEOUT_MS,
+    timeoutMs:
+      rawSubcommand === 'query-batch'
+        ? HOSTED_ADS_QUERY_BATCH_TIMEOUT_MS
+        : HOSTED_ADS_QUERY_TIMEOUT_MS,
   };
 }
 
@@ -298,6 +366,84 @@ function normalizeQueryRequest(value: unknown): {
   });
 }
 
+function normalizeQueryBatchRequest(value: unknown): {
+  parameters: Record<string, unknown>;
+  queryId: string;
+  scope:
+    | { type: 'all_linked' | 'current' }
+    | { bindingIds: readonly string[]; type: 'selected' };
+} {
+  if (!isPlainObject(value)) {
+    throw new Error('ads query-batch --request must contain a JSON object.');
+  }
+  const keys = Object.keys(value).sort();
+  if (
+    keys.length !== 3 ||
+    keys[0] !== 'parameters' ||
+    keys[1] !== 'queryId' ||
+    keys[2] !== 'scope'
+  ) {
+    throw new Error(
+      'ads query-batch --request accepts only scope, queryId, and parameters.',
+    );
+  }
+  if (
+    typeof value.queryId !== 'string' ||
+    !QUERY_ID_PATTERN.test(value.queryId)
+  ) {
+    throw new Error('queryId must be a canonical named-query identifier.');
+  }
+  if (!isPlainObject(value.parameters)) {
+    throw new Error('parameters must be a JSON object.');
+  }
+  const scope = normalizeAccountScope(value.scope);
+  return Object.freeze({
+    parameters: Object.freeze({ ...value.parameters }),
+    queryId: value.queryId,
+    scope,
+  });
+}
+
+function normalizeAccountScope(
+  value: unknown,
+):
+  | { type: 'all_linked' | 'current' }
+  | { bindingIds: readonly string[]; type: 'selected' } {
+  if (!isPlainObject(value) || typeof value.type !== 'string') {
+    throw new Error('scope must be an explicit Ads account scope.');
+  }
+  const keys = Object.keys(value).sort();
+  if (value.type === 'current' || value.type === 'all_linked') {
+    if (keys.length !== 1 || keys[0] !== 'type') {
+      throw new Error('Current and all-linked scopes accept only type.');
+    }
+    return Object.freeze({ type: value.type });
+  }
+  if (
+    value.type !== 'selected' ||
+    keys.length !== 2 ||
+    keys[0] !== 'bindingIds' ||
+    keys[1] !== 'type' ||
+    !Array.isArray(value.bindingIds) ||
+    value.bindingIds.length < 1 ||
+    value.bindingIds.length > MAX_MULTI_ACCOUNT_BINDINGS
+  ) {
+    throw new Error(
+      'Selected scope requires 1 to 10 unique bindingIds and type.',
+    );
+  }
+  const bindingIds = value.bindingIds.map((bindingId) =>
+    requireCanonicalUuid(bindingId, 'bindingId'),
+  );
+  if (new Set(bindingIds).size !== bindingIds.length) {
+    throw new Error('Selected scope bindingIds must be unique.');
+  }
+  return Object.freeze({
+    bindingIds: Object.freeze(bindingIds),
+    type: 'selected' as const,
+  });
+}
+
 function requireCanonicalUuid(value: unknown, label: string): string {
   if (typeof value !== 'string' || !CANONICAL_UUID_PATTERN.test(value)) {
     throw new Error(`${label} must be a canonical lowercase UUID.`);
@@ -316,7 +462,8 @@ function isHostedAdsSubcommand(value: string): value is HostedAdsSubcommand {
     value === 'accounts' ||
     value === 'bindings' ||
     value === 'readiness' ||
-    value === 'query'
+    value === 'query' ||
+    value === 'query-batch'
   );
 }
 
@@ -370,6 +517,30 @@ function normalizeHostedAdsFailureEnvelope(payload: unknown): unknown | null {
   });
 }
 
+class HostedAdsRequestError extends Error {
+  readonly productError: {
+    code: string;
+    layer: 'ads';
+    message: string;
+    operationId: string;
+  };
+
+  constructor(failure: unknown) {
+    const envelope = failure as {
+      error: { code: string; message: string };
+      requestId: string;
+    };
+    super(envelope.error.message);
+    this.name = 'HostedAdsRequestError';
+    this.productError = Object.freeze({
+      code: envelope.error.code,
+      layer: 'ads',
+      message: envelope.error.message,
+      operationId: envelope.requestId,
+    });
+  }
+}
+
 function assertNoSessionToken(
   payload: unknown,
   protectedTokens: ReadonlySet<string>,
@@ -386,12 +557,14 @@ function printHostedAdsHelp(): void {
   process.stdout.write(`PostPlus CLI — read-only Ads commands
 
 Usage:
-  postplus ads manifest --provider google --json
-  postplus ads connections --provider google --json
-  postplus ads accounts --provider google --json
+  postplus ads manifest --provider <google|meta_ads> --json
+  postplus ads connections --provider <google|meta_ads> --json
+  postplus ads accounts --provider <google|meta_ads> --json
   postplus ads bindings --provider google [--limit N] [--cursor X] --json
-  postplus ads readiness --provider google --binding-id UUID --json
-  postplus ads query --provider google --request <file> --json
+  postplus ads bindings --provider meta_ads --json
+  postplus ads readiness --provider <google|meta_ads> --binding-id UUID --json
+  postplus ads query --provider <google|meta_ads> --request <file> --json
+  postplus ads query-batch --provider <google|meta_ads> --request <file> --json
 
 These commands are read-only. Account connection, discovery, candidate selection,
 and advertiser binding remain browser-owner workflows.
