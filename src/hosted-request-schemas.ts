@@ -4,6 +4,7 @@ import {
   type HostedDomain,
   type ManifestField,
   type MediaGenerationBinding,
+  buildVerbTargetIndex,
   findMediaGenerationBinding,
   manifestTargetKeys,
 } from './hosted-manifest-index.js';
@@ -33,6 +34,9 @@ type FieldContract = {
   canonicalize?: 'lowercase' | 'image-resolution-tier';
   default?: string | number | boolean;
   derivedFrom?: string;
+  integer?: boolean;
+  format?: 'url';
+  description?: string;
 };
 
 // A copy-pasteable example synthesized from the endpoint's own contract (required
@@ -54,18 +58,24 @@ type EndpointContract = {
   example?: EndpointExample;
 };
 
+type ResearchRouteContract = {
+  routeKey: string;
+  fields: FieldContract[];
+  requiredAnyOf?: readonly string[];
+  example: string;
+};
+
 type HostedRequestSchemaReport = {
   schemaVersion: 1;
   domain: HostedSchemaDomain;
   command: string;
   description: string;
   // Full enum sets of selectable targets for this domain.
-  collectionKeys?: string[];
+  routeKeys?: string[];
   endpointKeys?: string[];
   modelKeys?: string[];
-  sourceKeys?: string[];
   operations?: string[];
-  selectedCollectionKey?: string;
+  selectedRouteKey?: string;
   selectedEndpointKey?: string;
   notes: string[];
   schemas: Array<{
@@ -79,6 +89,7 @@ type HostedRequestSchemaReport = {
   // JSON object the agent authors verbatim (research collection, video analysis,
   // social publishing).
   endpoints?: EndpointContract[];
+  routes?: ResearchRouteContract[];
 };
 
 const JSON_OBJECT_SCHEMA = {
@@ -132,6 +143,15 @@ function toFieldContract(field: ManifestField): FieldContract {
   }
   if (field.derivedFrom) {
     contract.derivedFrom = field.derivedFrom;
+  }
+  if (field.integer) {
+    contract.integer = true;
+  }
+  if (field.format) {
+    contract.format = field.format;
+  }
+  if (field.description) {
+    contract.description = field.description;
   }
   return contract;
 }
@@ -221,13 +241,13 @@ function formatFlagValue(value: unknown): string {
 }
 
 export function buildHostedRequestSchemaReport(input: {
-  collectionKey?: string | null;
+  routeKey?: string | null;
   domain: HostedSchemaDomain;
   endpointKey?: string | null;
 }): HostedRequestSchemaReport {
   switch (input.domain) {
     case 'research':
-      return buildResearchSchemaReport(input.collectionKey ?? null);
+      return buildResearchSchemaReport(input.routeKey ?? null);
     case 'media':
       return buildMediaSchemaReport(input.endpointKey ?? null);
     case 'publish':
@@ -236,55 +256,57 @@ export function buildHostedRequestSchemaReport(input: {
 }
 
 function buildResearchSchemaReport(
-  collectionKey: string | null,
+  routeKey: string | null,
 ): HostedRequestSchemaReport {
-  const collectionKeys = manifestTargetKeys('research', 'hosted-collection');
-  const sourceKeys = manifestTargetKeys(
-    'research',
-    'public-content-collection',
-  );
+  const routeTargets = buildVerbTargetIndex('research').get('run');
+  const routeKeys = [...(routeTargets?.keys() ?? [])].sort();
 
-  if (collectionKey && !collectionKeys.includes(collectionKey)) {
+  if (routeKey && !routeKeys.includes(routeKey)) {
     throw new Error(
-      `Unknown research collection ${collectionKey}. Known collections: ${collectionKeys.join(', ')}`,
+      `Unknown research route ${routeKey}. Known routes: ${routeKeys.join(', ')}`,
     );
   }
+
+  const selectedKeys = routeKey ? [routeKey] : routeKeys;
+  const routes = selectedKeys.map((key): ResearchRouteContract => {
+    const resolved = routeTargets?.get(key);
+    const contract = resolved?.collection ?? resolved?.source;
+    if (!contract) {
+      throw new Error(`Research route ${key} has no semantic field contract.`);
+    }
+    const exampleFields = contract.fields.filter(
+      (field) => field.required || field.default === undefined,
+    );
+    return {
+      routeKey: key,
+      fields: contract.fields.map(toFieldContract),
+      ...(contract.requiredAnyOf
+        ? { requiredAnyOf: contract.requiredAnyOf }
+        : {}),
+      example: [
+        `postplus research run ${key}`,
+        ...exampleFields.map(formatExampleFlag),
+        '--wait --output result.json',
+      ].join(' '),
+    };
+  });
 
   return {
     schemaVersion: 1,
     domain: 'research',
     command:
-      'postplus research collect <collection-key> --request <input.json> --output <result.json>; postplus research scrape <source-key> --request <input-array.json> --output <result.json>',
-    description: 'Schemas for files passed to hosted research commands.',
-    collectionKeys,
-    selectedCollectionKey: collectionKey ?? undefined,
-    sourceKeys,
+      'postplus research run <route> --<semantic flags> --wait --output <result.json>',
+    description:
+      'Manifest-driven semantic contracts for PostPlus research routes.',
+    routeKeys,
+    selectedRouteKey: routeKey ?? undefined,
+    routes,
     notes: [
-      'collect / scrape input is an opaque provider-shaped JSON object the agent authors; the collection/source key stays on the CLI flag, not inside the file.',
-      'Use --resume-from <result.json> with research collect or scrape instead of launching a pending run again.',
-      'Use research scrape <source-key> with a JSON array of records for public-content sources.',
-      'The CLI derives operationId before sending requests to PostPlus Cloud.',
+      'Pass public search terms, URLs, account handles, scope, and limits as route-specific flags; do not create request JSON.',
+      'Use research run --resume-from <result.json> instead of launching a pending run again.',
+      'PostPlus handles execution routing, request translation, and credit safeguards.',
     ],
-    schemas: [
-      {
-        id: 'research.collection-input',
-        description:
-          'Hosted research collection input: the provider-shaped JSON object placed in --request <file>.',
-        required: [],
-        jsonSchema: JSON_OBJECT_SCHEMA,
-      },
-      {
-        id: 'public-content-collection.scrape-input',
-        description:
-          'Public-content scrape input: a non-empty JSON array of provider-shaped records placed in --request <file>.',
-        required: [],
-        jsonSchema: {
-          items: JSON_OBJECT_SCHEMA,
-          minItems: 1,
-          type: 'array',
-        },
-      },
-    ],
+    schemas: [],
   };
 }
 
@@ -316,14 +338,13 @@ function buildMediaSchemaReport(
     modelKeys,
     selectedEndpointKey: endpointKey ?? undefined,
     notes: [
-      'Each media-generation endpoint declares its fields as intent (you write it), default (manifest-defaulted; write only to deviate), or runner-managed (minted by the CLI; no flag, never in the body).',
-      'Endpoint-specific input belongs under input; capability / endpointKey come from the verb + positional, not the body.',
+      'Each media endpoint exposes only supported role and intent flags. Omit optional flags to use the published defaults.',
       'Media role flags accept a local file path directly; the CLI stages local bytes before the single hosted submit.',
-      'video-analysis analyze takes normalized --video and --prompt flags; provider payload construction stays server-side.',
-      'The CLI derives operationId and billing dimensions before sending requests to PostPlus Cloud.',
+      'Video analysis accepts normalized --video and --prompt flags; PostPlus owns the remaining execution details.',
+      'PostPlus handles operation identity and credit safeguards before execution.',
       'Run `postplus media <verb> <endpoint-key> --help` for a single endpoint flag/enum/default breakdown.',
       'Each endpoint contract carries a copy-pasteable example (required fields ∪ prompt, enums at their first value) under example.command / example.request.',
-      'Price any request before submitting with no charge: example.estimate (or `postplus media estimate <endpoint-key> …`).',
+      'Estimate PostPlus credits before submitting: example.estimate (or `postplus media estimate <endpoint-key> …`).',
     ],
     schemas: [
       {

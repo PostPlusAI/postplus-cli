@@ -158,11 +158,13 @@ export async function runHostedDomainCommand(
     if (subcommand === 'schema') {
       return runHostedSchema(domain, rest, context);
     }
-    if (subcommand === 'collect') {
-      return runResearchCollect(rest, context);
+    if (subcommand === 'run') {
+      return runResearchRun(rest, context);
     }
-    if (subcommand === 'scrape') {
-      return runResearchScrape(rest, context);
+    if (subcommand === 'collect' || subcommand === 'scrape') {
+      throw new Error(
+        `research ${subcommand} was removed. Migrate to \`postplus research run <route> --<semantic flags> --wait --output <result.json>\`; JSON request files and --max-charge-usd are no longer accepted.`,
+      );
     }
     printResearchHelp();
     return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
@@ -1104,8 +1106,8 @@ Usage:
   postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
   postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
 
-Upload returns a reusable PostPlus media reference. Provider-specific media
-preparation remains internal to the selected endpoint.
+Upload returns a reusable PostPlus media reference. Normal generation commands
+prepare local role files automatically.
 `);
 }
 
@@ -1287,19 +1289,24 @@ async function pollHostedRunUntilSettled(input: {
   }
 }
 
-type ResearchVerb = 'collect' | 'scrape';
+type ResearchVerb = 'run';
 
 type ResearchRunProjection = {
+  routeKey: string | null;
   runHandle: string | null;
   status: string | null;
 };
 
 function readResearchRunRecord(value: unknown): ResearchRunProjection {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { runHandle: null, status: null };
+    return { routeKey: null, runHandle: null, status: null };
   }
   const record = value as Record<string, unknown>;
   return {
+    routeKey:
+      typeof record.routeKey === 'string' && record.routeKey.trim()
+        ? record.routeKey
+        : null,
     // Validate non-blank but return the original bytes. A signed opaque handle
     // must never be normalized, trimmed, or reconstructed by this boundary.
     runHandle:
@@ -1346,19 +1353,6 @@ function assertResearchResumePayload(
     return;
   }
 
-  // Public-content scrape completion is the delivered record array. Pending
-  // responses are objects with output.runHandle/output.status and were handled
-  // above. No other shape is accepted as an implicit terminal result.
-  if (
-    verb === 'scrape' &&
-    payload &&
-    typeof payload === 'object' &&
-    !Array.isArray(payload) &&
-    Array.isArray((payload as Record<string, unknown>).output)
-  ) {
-    return;
-  }
-
   throw new Error(
     `Research ${verb} returned an unrecognized resume response without status.`,
   );
@@ -1368,9 +1362,11 @@ async function resolveResearchResumeInput(input: {
   context: HostedRequestContext | undefined;
   flags: ParsedFlags;
   verb: ResearchVerb;
+  routeKey?: string | null;
 }): Promise<{
   outputPath: string | null;
   preserveCheckpointOnError: boolean;
+  routeKey: string;
   runHandle: string;
 }> {
   const allowedKeys = new Set([
@@ -1398,9 +1394,15 @@ async function resolveResearchResumeInput(input: {
         `research ${input.verb} --resume-from is only available in the local CLI; the hosted runtime must pass its structured run handle.`,
       );
     }
+    if (!input.routeKey) {
+      throw new Error(
+        'research run resume requires the route key before --run-handle.',
+      );
+    }
     return {
       outputPath: input.flags.values.get('output') ?? null,
       preserveCheckpointOnError: false,
+      routeKey: input.routeKey,
       runHandle: requireFlag(input.flags, 'run-handle'),
     };
   }
@@ -1418,7 +1420,7 @@ async function resolveResearchResumeInput(input: {
 
   const checkpointPath = path.resolve(requireFlag(input.flags, 'resume-from'));
   const checkpoint = await readJsonFile(checkpointPath);
-  const { runHandle, status } = readResearchRun(checkpoint);
+  const { routeKey, runHandle, status } = readResearchRun(checkpoint);
   if (status && isTerminalRunStatus(status)) {
     throw new Error(
       `Research ${input.verb} checkpoint is already terminal (${status}).`,
@@ -1429,10 +1431,16 @@ async function resolveResearchResumeInput(input: {
       `Research ${input.verb} checkpoint contains no resumable run handle: ${checkpointPath}`,
     );
   }
+  if (!routeKey) {
+    throw new Error(
+      `Research ${input.verb} checkpoint contains no route key: ${checkpointPath}`,
+    );
+  }
 
   return {
     outputPath: checkpointPath,
     preserveCheckpointOnError: true,
+    routeKey,
     runHandle,
   };
 }
@@ -1564,7 +1572,7 @@ async function runMediaEstimate(
 
   if (rest.some(isHelp)) {
     process.stdout.write(
-      `PostPlus CLI - media estimate ${endpointKey}\n\n  Quote-only dry run (no reserve, no ledger write). Takes the same flags/--request as the matching media submit command for ${endpointKey}.\n  Usage:\n    postplus media estimate ${endpointKey} ${resolved.surface === 'flags' ? '--<intent/default flags>' : '--request <input.json>'} [--json] [--output <result.json>]\n`,
+      `PostPlus CLI - media estimate ${endpointKey}\n\n  Read-only PostPlus credit estimate. Takes the same public inputs as the matching media submit command for ${endpointKey}.\n  Usage:\n    postplus media estimate ${endpointKey} ${resolved.surface === 'flags' ? '--<role-or-intent flags>' : '--request <input.json>'} [--json] [--output <result.json>]\n`,
     );
     return 0;
   }
@@ -1811,28 +1819,37 @@ function buildMediaVerbInput(input: {
   return record;
 }
 
-// Manifest-driven hosted-collection verb (request-json surface). The polling path
-// (`--run-handle`) resumes a pending run unchanged. The launch path resolves the
-// positional `<collectionKey>` against the research verb index for verb `collect`,
-// reads the collection input object directly from `--request <file>` (NOT a
-// schemaVersion envelope), and posts to /hosted/collection. The resolved entry
-// gives the default skillName (overridable by `--skill`); the actorId stays
-// internal and is never placed on the public body.
-async function runResearchCollect(
+// Manifest-driven semantic Research surface. The route contract supplies every
+// accepted flag and default; the CLI sends only canonical product intent. The Web
+// privately compiles that intent to the execution request.
+async function runResearchRun(
   args: string[],
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
   const [first, ...rest] = args;
+  const verb = 'run';
+  const targets = RESEARCH_VERB_TARGETS.get(verb);
+  const hasRoute = Boolean(first && !first.startsWith('--'));
+  const routeKey = hasRoute ? first : null;
+  const resumeArgs = hasRoute ? rest : args;
+  const isResume = resumeArgs.some(
+    (arg) => arg === '--resume-from' || arg === '--run-handle',
+  );
 
-  // Resume path: local CLI reads --resume-from; hosted-lib receives the
-  // structured handle directly. Neither form has a positional collectionKey.
-  // Same bounded in-command wait as `media poll` (see pollHostedRunUntilSettled):
-  // apify collections run 15s-2min, and an agent caller with no sleep primitive
-  // would otherwise hammer this verb in a tight model loop.
-  if (!first || first.startsWith('--')) {
-    const flags = parseFlags(args, new Set(['json']));
-    const { outputPath, preserveCheckpointOnError, runHandle } =
-      await resolveResearchResumeInput({ context, flags, verb: 'collect' });
+  if (!hasRoute || isResume) {
+    const flags = parseFlags(resumeArgs, new Set(['json']));
+    const {
+      outputPath,
+      preserveCheckpointOnError,
+      routeKey: resumeRouteKey,
+      runHandle,
+    } = await resolveResearchResumeInput({
+      context,
+      flags,
+      verb,
+      routeKey,
+    });
+    assertKnownResearchRoute(targets, resumeRouteKey);
     const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
 
     return dispatchHostedCommand(
@@ -1842,18 +1859,18 @@ async function runResearchCollect(
             pollIntervalMs,
             pollOnce: async () => {
               const payload = await postHostedJson({
-                body: { runHandle, runHandleType: 'hosted-collection' },
-                pathName: '/api/postplus-cli/hosted/collection',
+                body: { routeKey: resumeRouteKey, runHandle },
+                pathName: '/api/postplus-cli/hosted/research',
                 skillName: null,
                 context,
               });
-              assertResearchResumePayload(payload, 'collect');
+              assertResearchResumePayload(payload, verb);
               return payload;
             },
             readStatus: readResearchRunStatus,
             waitBudgetMs,
           }),
-        errorInputLabel: 'research-collect-run-handle',
+        errorInputLabel: 'research-run-handle',
         json: flags.booleans.has('json'),
         outputPath,
         preserveOutputOnProductError: preserveCheckpointOnError,
@@ -1862,240 +1879,246 @@ async function runResearchCollect(
     );
   }
 
-  const verb = 'collect';
-  const collectionKey = first;
-  const targets = RESEARCH_VERB_TARGETS.get(verb);
-  const resolved = targets?.get(collectionKey);
+  const resolved = targets?.get(routeKey!);
   if (!resolved) {
     const valid = targets ? [...targets.keys()].join(', ') : '';
-    throw new Error(
-      `Unknown research collect collection ${collectionKey}. Valid: ${valid}.`,
-    );
+    throw new Error(`Unknown research route ${routeKey}. Valid: ${valid}.`);
   }
 
-  // `postplus research collect <collection-key> --help`: opaque-input contract.
   if (rest.some(isHelp)) {
-    printOpaqueTargetHelp('research', verb, collectionKey, resolved);
+    printResearchRouteHelp(routeKey!, resolved);
     return 0;
   }
 
-  const flags = parseFlags(rest, new Set(['json']));
-  const allowedKeys = new Set([
+  const contract = readResolvedResearchContract(routeKey!, resolved);
+  const flagToField = new Map<string, ManifestField>();
+  const booleanKeys = new Set<string>(['json', 'wait']);
+  const arrayKeys = new Set<string>();
+  for (const field of contract.fields) {
+    const key = field.flag!.replace(/^--/u, '');
+    flagToField.set(key, field);
+    if (field.type === 'boolean') {
+      booleanKeys.add(key);
+    }
+    if (field.repeatable) {
+      arrayKeys.add(key);
+    }
+  }
+
+  const flags = parseFlags(rest, booleanKeys, arrayKeys);
+  const controlKeys = new Set([
     'hosted-operation-id',
     'json',
-    'max-charge-usd',
     'output',
+    'poll-interval-seconds',
     'quote-confirmation-token',
-    'request',
     'skill',
+    'wait',
+    'wait-seconds',
   ]);
-  for (const key of [...flags.values.keys(), ...flags.booleans]) {
-    if (!allowedKeys.has(key)) {
-      throw new Error(`Unknown option for research ${verb}: --${key}.`);
+  for (const key of [
+    ...flags.values.keys(),
+    ...flags.booleans,
+    ...flags.arrays.keys(),
+  ]) {
+    if (!flagToField.has(key) && !controlKeys.has(key)) {
+      throw new Error(`Unknown option for research run: --${key}.`);
     }
   }
 
   const outputPath = flags.values.get('output') ?? null;
   if (!context && !outputPath) {
     throw new Error(
-      'Local research collect requires --output <result.json> so an asynchronous run has a durable checkpoint.',
+      'Local research run requires --output <result.json> so an asynchronous run has a durable checkpoint.',
     );
   }
-  const { body: raw, errorInputLabel } = await resolveRequestBody(
-    context,
-    flags,
-  );
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(
-      `research ${verb} ${collectionKey} --request must be a JSON object of collection input.`,
-    );
-  }
-  const input = raw as Record<string, unknown>;
-
+  const input = buildResearchIntent(routeKey!, contract, flags);
   const skillName = flags.values.get('skill') ?? resolved.skill;
   const operationId =
     flags.values.get('hosted-operation-id') ??
-    `postplus-cli:research:collect:${collectionKey}:${randomUUID()}`;
+    `postplus-cli:research:run:${routeKey}:${randomUUID()}`;
   const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
-
-  // Optional per-request cost ceiling (USD) overriding the hosted default.
-  const maxChargeFlag = flags.values.get('max-charge-usd');
-  let maxTotalChargeUsd: number | undefined;
-  if (maxChargeFlag !== undefined) {
-    const parsed = Number(maxChargeFlag);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      throw new Error('--max-charge-usd must be a positive number of USD.');
-    }
-    maxTotalChargeUsd = parsed;
-  }
+  const wait = resolveHostedSubmitWaitOption(flags);
 
   return dispatchHostedCommand(
     {
-      request: () =>
-        postHostedJson({
+      request: async () => {
+        const submitted = await postHostedJson({
           body: {
-            collectionKey,
+            routeKey,
             input,
             operationId,
             quoteConfirmationToken: quoteConfirmationToken ?? undefined,
-            skillName,
-            maxTotalChargeUsd,
           },
-          pathName: '/api/postplus-cli/hosted/collection',
+          pathName: '/api/postplus-cli/hosted/research',
           skillName,
           context,
-        }),
-      errorInputLabel,
+        });
+        assertResearchResumePayload(submitted, verb);
+        if (!wait) {
+          return submitted;
+        }
+        const run = readResearchRun(submitted);
+        if (!run.status || isTerminalRunStatus(run.status)) {
+          return submitted;
+        }
+        if (!run.runHandle) {
+          throw new Error(
+            `Research run returned non-terminal status ${run.status} without a resumable run handle.`,
+          );
+        }
+        return pollHostedRunUntilSettled({
+          pollIntervalMs: wait.pollIntervalMs,
+          pollOnce: () =>
+            postHostedJson({
+              body: { routeKey, runHandle: run.runHandle },
+              pathName: '/api/postplus-cli/hosted/research',
+              skillName: null,
+              context,
+            }),
+          readStatus: readResearchRunStatus,
+          waitBudgetMs: wait.waitBudgetMs,
+        });
+      },
+      errorInputLabel: `research-run-${routeKey}`,
       json: flags.booleans.has('json'),
       outputPath,
       asyncResume: (payload) =>
-        extractResearchResume(payload, 'collect', outputPath),
+        extractResearchResume(payload, verb, outputPath),
     },
     context,
   );
 }
 
-// Manifest-driven public-content-collection verb (request-json surface). Resolves
-// the positional `<sourceKey>` against the research verb index for verb `scrape`,
-// reads the scrape input directly from `--request <file>` as a JSON ARRAY of input
-// records (one per public URL/query), and posts to /hosted/capability with
-// capability `public-content-collection` / operation `scrape`. The resolved entry
-// gives the default skillName (overridable by `--skill`); the datasetId stays
-// internal and is never placed on the public body.
-async function runResearchScrape(
-  args: string[],
-  context: HostedRequestContext | undefined,
-): Promise<number | unknown> {
-  const [first, ...rest] = args;
-
-  const verb = 'scrape';
-  const targets = RESEARCH_VERB_TARGETS.get(verb);
-
-  if (!first || first.startsWith('--')) {
-    const flags = parseFlags(args, new Set(['json']));
-    const { outputPath, preserveCheckpointOnError, runHandle } =
-      await resolveResearchResumeInput({ context, flags, verb: 'scrape' });
-    const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
-
-    return dispatchHostedCommand(
-      {
-        request: () =>
-          pollHostedRunUntilSettled({
-            pollIntervalMs,
-            pollOnce: async () => {
-              const payload = await postHostedJson({
-                body: { runHandle, runHandleType: 'public-content-collection' },
-                pathName: '/api/postplus-cli/hosted/collection',
-                skillName: null,
-                context,
-              });
-              assertResearchResumePayload(payload, 'scrape');
-              return payload;
-            },
-            readStatus: readResearchRunStatus,
-            waitBudgetMs,
-          }),
-        errorInputLabel: 'research-scrape-run-handle',
-        json: flags.booleans.has('json'),
-        outputPath,
-        preserveOutputOnProductError: preserveCheckpointOnError,
-      },
-      context,
-    );
-  }
-
-  const sourceKey = first;
-  const resolved = targets?.get(sourceKey);
-  if (!resolved) {
-    const valid = targets ? [...targets.keys()].join(', ') : '';
+function assertKnownResearchRoute(
+  targets: Map<string, ResolvedVerbTarget> | undefined,
+  routeKey: string,
+): void {
+  if (!targets?.has(routeKey)) {
     throw new Error(
-      `Unknown research scrape source ${sourceKey}. Valid: ${valid}.`,
+      `Unknown research route ${routeKey}. Valid: ${targets ? [...targets.keys()].join(', ') : ''}.`,
     );
   }
+}
 
-  // `postplus research scrape <source-key> --help`: opaque-array-input contract.
-  if (rest.some(isHelp)) {
-    printOpaqueTargetHelp('research', verb, sourceKey, resolved);
-    return 0;
-  }
-
-  const flags = parseFlags(rest, new Set(['json']));
-  const allowedKeys = new Set([
-    'hosted-operation-id',
-    'json',
-    'max-charge-usd',
-    'output',
-    'quote-confirmation-token',
-    'request',
-    'skill',
-  ]);
-  for (const key of [...flags.values.keys(), ...flags.booleans]) {
-    if (!allowedKeys.has(key)) {
-      throw new Error(`Unknown option for research ${verb}: --${key}.`);
-    }
-  }
-
-  const outputPath = flags.values.get('output') ?? null;
-  if (!context && !outputPath) {
+function readResolvedResearchContract(
+  routeKey: string,
+  resolved: ResolvedVerbTarget,
+): { fields: readonly ManifestField[]; requiredAnyOf?: readonly string[] } {
+  const contract = resolved.collection ?? resolved.source;
+  if (!contract || contract.routeKey !== routeKey) {
     throw new Error(
-      'Local research scrape requires --output <result.json> so an asynchronous run has a durable checkpoint.',
+      `Research route ${routeKey} has no semantic field contract.`,
     );
   }
-  const { body: raw, errorInputLabel } = await resolveRequestBody(
-    context,
-    flags,
+  return contract;
+}
+
+function buildResearchIntent(
+  routeKey: string,
+  contract: {
+    fields: readonly ManifestField[];
+    requiredAnyOf?: readonly string[];
+  },
+  flags: ParsedFlags,
+): Record<string, unknown> {
+  const input: Record<string, unknown> = {};
+  const fieldByName = new Map(
+    contract.fields.map((field) => [field.name, field]),
   );
-  if (!Array.isArray(raw) || raw.length === 0) {
+  for (const field of contract.fields) {
+    const key = field.flag!.replace(/^--/u, '');
+    if (field.repeatable) {
+      const list = flags.arrays.get(key) ?? [];
+      if (list.length === 0) {
+        if (field.required) {
+          throw new Error(
+            `Missing required option --${key} for research run ${routeKey}.`,
+          );
+        }
+        continue;
+      }
+      if (field.format === 'url') {
+        list.forEach((value) => assertCliPublicHttpsUrl(key, value));
+      }
+      input[field.name] = list;
+      continue;
+    }
+
+    if (field.type === 'boolean') {
+      const explicit = flags.booleanValues.get(key);
+      if (explicit !== undefined) {
+        input[field.name] = explicit;
+      } else if (typeof field.default === 'boolean') {
+        input[field.name] = field.default;
+      }
+      continue;
+    }
+
+    const raw = flags.values.get(key);
+    if (raw === undefined) {
+      if (field.default !== undefined) {
+        input[field.name] = field.default;
+      } else if (field.required) {
+        throw new Error(
+          `Missing required option --${key} for research run ${routeKey}.`,
+        );
+      }
+      continue;
+    }
+
+    if (field.type === 'number') {
+      const parsed = Number(raw);
+      if (
+        !Number.isFinite(parsed) ||
+        (field.integer === true && !Number.isInteger(parsed)) ||
+        (field.min !== undefined && parsed < field.min) ||
+        (field.max !== undefined && parsed > field.max)
+      ) {
+        throw new Error(`--${key} is outside the supported numeric range.`);
+      }
+      input[field.name] = parsed;
+      continue;
+    }
+
+    if (field.enumValues && !field.enumValues.includes(raw)) {
+      throw new Error(
+        `--${key} must be one of: ${field.enumValues.join(', ')}.`,
+      );
+    }
+    if (field.format === 'url') {
+      assertCliPublicHttpsUrl(key, raw);
+    }
+    input[field.name] = raw;
+  }
+
+  if (
+    contract.requiredAnyOf &&
+    !contract.requiredAnyOf.some((name) => {
+      const value = input[name];
+      return Array.isArray(value) ? value.length > 0 : value !== undefined;
+    })
+  ) {
+    const accepted = contract.requiredAnyOf.map(
+      (name) => fieldByName.get(name)?.flag ?? name,
+    );
     throw new Error(
-      `research ${verb} ${sourceKey} --request must be a non-empty JSON array of scrape input records.`,
+      `research run ${routeKey} requires at least one of: ${accepted.join(', ')}.`,
     );
   }
-  const input = raw as unknown[];
 
-  const skillName = flags.values.get('skill') ?? resolved.skill;
-  const operationId =
-    flags.values.get('hosted-operation-id') ??
-    `postplus-cli:research:scrape:${sourceKey}:${randomUUID()}`;
-  const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
+  return input;
+}
 
-  // Optional per-request cost ceiling (USD) overriding the hosted default.
-  const maxChargeFlag = flags.values.get('max-charge-usd');
-  let maxTotalChargeUsd: number | undefined;
-  if (maxChargeFlag !== undefined) {
-    const parsed = Number(maxChargeFlag);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      throw new Error('--max-charge-usd must be a positive number of USD.');
+function assertCliPublicHttpsUrl(key: string, value: string): void {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'https:') {
+      throw new Error('protocol');
     }
-    maxTotalChargeUsd = parsed;
+  } catch {
+    throw new Error(`--${key} must be a valid public HTTPS URL.`);
   }
-
-  // The Web /hosted/capability scrape contract is a strict object: skillName is
-  // carried as the compatibility header (postHostedJson), never on the public body.
-  return dispatchHostedCommand(
-    {
-      request: () =>
-        postHostedJson({
-          body: {
-            capability: 'public-content-collection',
-            operation: 'scrape',
-            sourceKey,
-            input,
-            operationId,
-            quoteConfirmationToken: quoteConfirmationToken ?? undefined,
-            maxTotalChargeUsd,
-          },
-          pathName: '/api/postplus-cli/hosted/capability',
-          skillName,
-          context,
-        }),
-      errorInputLabel,
-      json: flags.booleans.has('json'),
-      outputPath,
-      asyncResume: (payload) =>
-        extractResearchResume(payload, 'scrape', outputPath),
-    },
-    context,
-  );
 }
 
 // Manifest-driven publish operation (request-json surface). The OPERATION is the
@@ -2119,7 +2142,7 @@ async function runPublishOperation(
 
   // `postplus publish <operation> --help`: opaque-input contract.
   if (args.some(isHelp)) {
-    printOpaqueTargetHelp('publish', operation, operation, resolved);
+    printOpaquePublishHelp(operation);
     return 0;
   }
 
@@ -2231,6 +2254,23 @@ function parsePositiveInt(raw: string, label: string): number {
     throw new Error(`--${label} must be a positive integer.`);
   }
   return parsed;
+}
+
+function parsePositiveCreditsAsMillicredits(
+  raw: string,
+  label: string,
+): number {
+  const credits = Number(raw);
+  const millicredits = Math.round(credits * 1_000);
+  if (
+    !Number.isFinite(credits) ||
+    credits <= 0 ||
+    !Number.isSafeInteger(millicredits) ||
+    millicredits <= 0
+  ) {
+    throw new Error(`--${label} must be a positive PostPlus credit amount.`);
+  }
+  return millicredits;
 }
 
 // Split a required leading `<id>` positional off a workflow subcommand's args.
@@ -2446,8 +2486,8 @@ async function runWorkflowQuote(rest: string[]): Promise<number> {
 // workspace assistant's human approval card: launching is refused unless the
 // operator has quoted the cost first and confirms explicitly. `--confirm` is
 // mandatory (its presence in the command is the visible spend acknowledgement an
-// agent host surfaces to the human), and `--max-reserved-millicredits` is the
-// acknowledged ceiling — the server re-quotes atomically and aborts if the fresh
+// agent host surfaces to the human), and `--max-reserved-credits` is the
+// acknowledged product-unit ceiling — the server re-quotes atomically and aborts if the fresh
 // reservation exceeds it, so the confirmed bound stays binding.
 async function runWorkflowLaunch(rest: string[]): Promise<number> {
   const { id: workflowId, flagArgs } = takeWorkflowId(rest, 'launch');
@@ -2460,7 +2500,7 @@ async function runWorkflowLaunch(rest: string[]): Promise<number> {
       'confirm',
       'title',
       'instances',
-      'max-reserved-millicredits',
+      'max-reserved-credits',
     ]),
     'launch',
   );
@@ -2471,9 +2511,9 @@ async function runWorkflowLaunch(rest: string[]): Promise<number> {
     1,
     5,
   );
-  const maxTotalReservedMillicredits = parsePositiveInt(
-    requireFlag(flags, 'max-reserved-millicredits'),
-    'max-reserved-millicredits',
+  const maxTotalReservedMillicredits = parsePositiveCreditsAsMillicredits(
+    requireFlag(flags, 'max-reserved-credits'),
+    'max-reserved-credits',
   );
 
   if (!flags.booleans.has('confirm')) {
@@ -2481,8 +2521,8 @@ async function runWorkflowLaunch(rest: string[]): Promise<number> {
       [
         'Refusing to launch: launching spends real credits and needs explicit confirmation.',
         `First quote the cost:  postplus workflow quote ${workflowId} --instances ${instanceCount}`,
-        'Then re-run launch with that quote’s reservedMillicredits as the ceiling and --confirm:',
-        `  postplus workflow launch ${workflowId} --title "${workflowTitle}" --instances ${instanceCount} --max-reserved-millicredits <reservedMillicredits> --confirm`,
+        'Then re-run launch with that quote’s reservedCredits as the ceiling and --confirm:',
+        `  postplus workflow launch ${workflowId} --title "${workflowTitle}" --instances ${instanceCount} --max-reserved-credits <reservedCredits> --confirm`,
       ].join('\n'),
     );
   }
@@ -2514,14 +2554,14 @@ Usage:
   postplus workflow propose <workflow-id> --operations <ops.json> [--base-version <n>] [--output <result.json>]
   postplus workflow save <workflow-id> --operations <ops.json> [--base-version <n>] [--output <result.json>]
   postplus workflow quote <workflow-id> --instances <n> [--json] [--output <result.json>]
-  postplus workflow launch <workflow-id> --title <exact-name> --instances <n> --max-reserved-millicredits <n> --confirm [--json] [--output <result.json>]
+  postplus workflow launch <workflow-id> --title <exact-name> --instances <n> --max-reserved-credits <credits> --confirm [--json] [--output <result.json>]
   postplus workflow runs [<workflow-id>] [--limit <n>] [--json] [--output <result.json>]
   postplus workflow run-show <run-id> [--json] [--output <result.json>]
 
 --operations is a JSON array of edit ops (add_node / update_node / remove_node /
 connect_nodes); the server validates and never silently repairs. launch is
-refused without --confirm: quote first, then pass the quote's reservedMillicredits
-as --max-reserved-millicredits and --confirm to acknowledge the spend.
+refused without --confirm: quote first, then pass the quote's reservedCredits
+as --max-reserved-credits and --confirm to acknowledge the spend.
 `);
 }
 
@@ -2562,7 +2602,7 @@ async function runHostedSchema(
     domain === 'media'
       ? new Set(['endpoint'])
       : domain === 'research'
-        ? new Set(['collection-key'])
+        ? new Set(['route'])
         : new Set<string>();
 
   for (const key of flags.values.keys()) {
@@ -2572,9 +2612,9 @@ async function runHostedSchema(
   }
 
   const report = buildHostedRequestSchemaReport({
-    collectionKey: flags.values.get('collection-key') ?? null,
     domain,
     endpointKey: flags.values.get('endpoint') ?? null,
+    routeKey: flags.values.get('route') ?? null,
   });
 
   // In-process / context path: RETURN the structured catalog so the model
@@ -3013,11 +3053,11 @@ function printResearchHelp(): void {
   process.stdout.write(`PostPlus CLI - research commands
 
 Usage:
-  postplus research schema [--collection-key <key>] [--json]
-  postplus research collect <collection-key> --request <input.json> --output <result.json> [--skill <skill-id>] [--max-charge-usd <usd>]
-  postplus research collect --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
-  postplus research scrape <source-key> --request <input-array.json> --output <result.json> [--skill <skill-id>] [--max-charge-usd <usd>]
-  postplus research scrape --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
+  postplus research run <route> --<semantic flags> --wait --output <result.json>
+  postplus research run --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
+  postplus research schema [--route <route>] [--json]
+
+Run \`postplus research run <route> --help\` for route-specific flags.
 `);
 }
 
@@ -3053,7 +3093,7 @@ function printMediaEndpointHelp(
   targetKey: string,
   resolved: ResolvedVerbTarget,
 ): void {
-  // video-analysis: normalized role flags; provider payload stays server-side.
+  // video-analysis uses normalized role flags; execution details stay server-side.
   if (resolved.capability === 'video-analysis') {
     const fields = resolved.model?.fields ?? [];
     process.stdout.write(`PostPlus CLI - ${domain} ${verb} ${targetKey}
@@ -3066,8 +3106,8 @@ function printMediaEndpointHelp(
                     The CLI stages local bytes before the analysis submit.
   --prompt <text>    The analysis question or requested evidence structure.
   --video-seconds <n>  Optional source video duration in seconds. Supplying it
-                    lets the hosted boundary route eligible short videos through
-                    its preflight path; omit it to use the default route.
+                    helps PostPlus validate and route the request; omit it when
+                    the duration is unknown.
   Runner-managed (minted by the CLI; never in the body): operationId, quoteConfirmationToken
 `);
     return;
@@ -3191,34 +3231,50 @@ function formatFieldDetail(field: ManifestField): string {
   return `  [${detail.join('; ')}]`;
 }
 
-// Per-target `--help` for capabilities whose request body is an opaque JSON object
-// (research collect/scrape, publish): there is no field classification to render,
-// so the help states the input shape and the runner-managed protocol fields.
-function printOpaqueTargetHelp(
-  domain: 'research' | 'publish',
-  verb: string,
-  targetKey: string,
+function printResearchRouteHelp(
+  routeKey: string,
   resolved: ResolvedVerbTarget,
 ): void {
-  const inputShape =
-    resolved.capability === 'public-content-collection'
-      ? 'a non-empty JSON array of provider-shaped scrape records'
-      : 'a provider-shaped JSON object of input';
-  // publish's operation is both the verb and the target, so the header/usage show
-  // it once; research shows `<verb> <target>`.
-  const header =
-    domain === 'publish'
-      ? `publish ${targetKey}`
-      : `research ${verb} ${targetKey}`;
-  const usage =
-    domain === 'publish'
-      ? `    postplus publish ${targetKey} --request <input.json> [--json] [--output <result.json>]`
-      : `    postplus research ${verb} ${targetKey} --request <input.json> [--skill <skill-id>] [--max-charge-usd <usd>] [--json] [--output <result.json>]`;
+  const contract = readResolvedResearchContract(routeKey, resolved);
+  const lines = [
+    `PostPlus CLI - research run ${routeKey}`,
+    '',
+    '  Usage:',
+    `    postplus research run ${routeKey} ${formatFlagsUsage(contract.fields)} --wait --output <result.json>`,
+    '',
+    '  Research intent:',
+  ];
+  for (const field of contract.fields) {
+    lines.push(
+      `    ${field.flag}${formatFieldDetail(field)}${field.description ? `  ${field.description}` : ''}`,
+    );
+  }
+  if (contract.requiredAnyOf) {
+    const names = new Map(
+      contract.fields.map((field) => [field.name, field.flag]),
+    );
+    lines.push(
+      '',
+      `  At least one required: ${contract.requiredAnyOf.map((name) => names.get(name) ?? name).join(', ')}`,
+    );
+  }
+  lines.push(
+    '',
+    '  Request translation, credit safeguards, and polling internals are handled by PostPlus.',
+  );
+  process.stdout.write(`${lines.join('\n')}\n`);
+}
+
+// Per-target help for the remaining opaque publishing JSON surface.
+function printOpaquePublishHelp(targetKey: string): void {
+  const inputShape = 'a product request JSON object';
+  const header = `publish ${targetKey}`;
+  const usage = `    postplus publish ${targetKey} --request <input.json> [--json] [--output <result.json>]`;
 
   process.stdout.write(`PostPlus CLI - ${header}
 
   Surface: request-json (opaque input authored by the agent)
-  Capability: ${resolved.capability}
+  Capability: social-publishing
   Usage:
 ${usage}
 

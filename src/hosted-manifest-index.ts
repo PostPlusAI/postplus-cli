@@ -30,30 +30,31 @@ export type ManifestField = {
   default?: string | number | boolean;
   required: boolean;
   derivedFrom?: string;
+  integer?: boolean;
+  format?: 'url';
+  description?: string;
 };
 
 export type ManifestEndpoint = {
   endpointKey: string;
-  provider: string;
-  providerModelPath: string;
   fields: readonly ManifestField[];
-  billingDimensions?: readonly string[];
 };
 
 export type ManifestModel = {
   modelKey: string;
-  providerModelPath: string;
   fields: readonly ManifestField[];
 };
 
 export type ManifestCollection = {
-  collectionKey: string;
-  actorId: string;
+  routeKey: string;
+  fields: readonly ManifestField[];
+  requiredAnyOf?: readonly string[];
 };
 
 export type ManifestSource = {
-  sourceKey: string;
-  datasetId: string;
+  routeKey: string;
+  fields: readonly ManifestField[];
+  requiredAnyOf?: readonly string[];
 };
 
 export type ManifestOperation = {
@@ -82,8 +83,6 @@ export type ManifestEntry = {
   effect?: 'read' | 'spend' | 'write' | 'destructive';
   endpointKeys?: readonly string[];
   modelKeys?: readonly string[];
-  collectionKeys?: readonly string[];
-  sourceKeys?: readonly string[];
   endpoints?: readonly ManifestEndpoint[];
   models?: readonly ManifestModel[];
   collections?: readonly ManifestCollection[];
@@ -149,14 +148,14 @@ export function buildVerbTargetIndex(
 
     if (entry.capability === 'hosted-collection') {
       for (const collection of entry.collections ?? []) {
-        targets.set(collection.collectionKey, { ...base, collection });
+        targets.set(collection.routeKey, { ...base, collection });
       }
       continue;
     }
 
     if (entry.capability === 'public-content-collection') {
       for (const source of entry.sources ?? []) {
-        targets.set(source.sourceKey, { ...base, source });
+        targets.set(source.routeKey, { ...base, source });
       }
       continue;
     }
@@ -177,9 +176,8 @@ export function buildVerbTargetIndex(
 }
 
 // Sorted unique target keys for one domain, optionally narrowed to a capability.
-// Used by the schema report to publish the FULL enum set of selectable targets
-// (every endpointKey / modelKey / collectionKey / sourceKey / operation) instead
-// of a single example, and by the JSON schema to constrain the selector to an enum.
+// Research target keys are public route names; adapter-specific collection/source
+// groupings do not participate in discovery.
 export function manifestTargetKeys(
   domain: HostedDomain,
   capability?: string,
@@ -201,10 +199,10 @@ export function manifestTargetKeys(
       keys.add(model.modelKey);
     }
     for (const collection of entry.collections ?? []) {
-      keys.add(collection.collectionKey);
+      keys.add(collection.routeKey);
     }
     for (const source of entry.sources ?? []) {
-      keys.add(source.sourceKey);
+      keys.add(source.routeKey);
     }
     for (const operation of entry.operations ?? []) {
       keys.add(operation.operation);
