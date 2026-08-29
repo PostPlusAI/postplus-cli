@@ -5500,9 +5500,17 @@ describe('hosted domain commands', () => {
 
     const originalFetch = globalThis.fetch;
     const bodies: Array<Record<string, unknown>> = [];
+    const skillHeaders: Array<string | undefined> = [];
     globalThis.fetch = async (_input, init) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       bodies.push(body);
+      skillHeaders.push(
+        Object.fromEntries(
+          Object.entries((init?.headers ?? {}) as Record<string, string>).map(
+            ([key, value]) => [key.toLowerCase(), value],
+          ),
+        )['x-postplus-skill-name'],
+      );
       return new Response(
         JSON.stringify(
           bodies.length === 1
@@ -5543,6 +5551,154 @@ describe('hosted domain commands', () => {
         routeKey: 'google-trends-fast',
         runHandle: 'sealed-run-1',
       });
+      assert.deepEqual(skillHeaders, ['google-trends-research', undefined]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('checkpoints an accepted Research run before polling and preserves it when polling fails', async () => {
+    const requestDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-research-checkpoint-first-'),
+    );
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'result.json');
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (bodies.length === 1) {
+        return new Response(
+          JSON.stringify({
+            routeKey: 'google-trends-fast',
+            runHandle: 'sealed-run-checkpoint-1',
+            status: 'processing',
+          }),
+          { status: 202, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          code: 'postplus_cli_research_poll_unavailable',
+          error: 'Research status is temporarily unavailable.',
+          status: 503,
+        }),
+        { status: 503, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      assert.equal(
+        await runHostedDomainCommand('research', [
+          'run',
+          'google-trends-fast',
+          '--query',
+          'portable blender',
+          '--wait',
+          '--poll-interval-seconds',
+          '0.001',
+          '--output',
+          outputPath,
+        ]),
+        1,
+      );
+      assert.equal(bodies.length, 2);
+      assert.equal(typeof bodies[0]?.operationId, 'string');
+      assert.deepEqual(bodies[1], {
+        routeKey: 'google-trends-fast',
+        runHandle: 'sealed-run-checkpoint-1',
+      });
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), {
+        routeKey: 'google-trends-fast',
+        runHandle: 'sealed-run-checkpoint-1',
+        status: 'processing',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('resumes a Research checkpoint in a new invocation without submitting again', async () => {
+    const requestDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-research-resume-'),
+    );
+    tempDirs.push(requestDir);
+    const checkpointPath = resolve(requestDir, 'result.json');
+    await writeFile(
+      checkpointPath,
+      JSON.stringify({
+        routeKey: 'google-trends-fast',
+        runHandle: 'sealed-run-resume-1',
+        status: 'processing',
+      }),
+    );
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{
+      body: Record<string, unknown>;
+      headers: Record<string, string>;
+    }> = [];
+    globalThis.fetch = async (_input, init) => {
+      requests.push({
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        headers: Object.fromEntries(
+          Object.entries((init?.headers ?? {}) as Record<string, string>).map(
+            ([key, value]) => [key.toLowerCase(), value],
+          ),
+        ),
+      });
+      return new Response(
+        JSON.stringify({
+          routeKey: 'google-trends-fast',
+          runHandle: null,
+          status: 'completed',
+          output: { items: [{ query: 'portable blender' }] },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      assert.equal(
+        await runHostedDomainCommand('research', [
+          'run',
+          '--resume-from',
+          checkpointPath,
+          '--wait-seconds',
+          '0',
+        ]),
+        0,
+      );
+      assert.equal(requests.length, 1);
+      assert.deepEqual(requests[0]?.body, {
+        routeKey: 'google-trends-fast',
+        runHandle: 'sealed-run-resume-1',
+      });
+      assert.equal(requests[0]?.headers['x-postplus-skill-name'], undefined);
+      assert.equal(
+        (JSON.parse(await readFile(checkpointPath, 'utf8')) as { status: string })
+          .status,
+        'completed',
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }

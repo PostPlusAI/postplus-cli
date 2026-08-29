@@ -1939,6 +1939,7 @@ async function runResearchRun(
     `postplus-cli:research:run:${routeKey}:${randomUUID()}`;
   const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
   const wait = resolveHostedSubmitWaitOption(flags);
+  let checkpointWritten = false;
 
   return dispatchHostedCommand(
     {
@@ -1967,6 +1968,10 @@ async function runResearchRun(
             `Research run returned non-terminal status ${run.status} without a resumable run handle.`,
           );
         }
+        if (!context && outputPath) {
+          await writeResult(submitted, outputPath, false);
+          checkpointWritten = true;
+        }
         return pollHostedRunUntilSettled({
           pollIntervalMs: wait.pollIntervalMs,
           pollOnce: () =>
@@ -1983,6 +1988,17 @@ async function runResearchRun(
       errorInputLabel: `research-run-${routeKey}`,
       json: flags.booleans.has('json'),
       outputPath,
+      preserveOutputOnProductError: () => checkpointWritten,
+      preservedOutputRecovery: () =>
+        checkpointWritten && outputPath
+          ? [
+              'Research run was submitted, but status polling failed.',
+              `Checkpoint preserved at ${path.resolve(outputPath)}.`,
+              `Resume: postplus research ${verb} --resume-from ${shellQuoteArg(
+                path.resolve(outputPath),
+              )}`,
+            ].join(' ')
+          : null,
       asyncResume: (payload) =>
         extractResearchResume(payload, verb, outputPath),
     },
@@ -2698,7 +2714,8 @@ async function runHostedCommand(input: {
   // fails, keep the last valid handle on disk so the caller can retry after the
   // underlying problem is fixed. --json still receives the structured error on
   // stdout; human mode keeps the existing actionable stderr message.
-  preserveOutputOnProductError?: boolean;
+  preserveOutputOnProductError?: boolean | (() => boolean);
+  preservedOutputRecovery?: () => string | null;
   // When an async submit remains pending, render its next safe action. Media
   // keeps its short literal id; research emits only --resume-from <checkpoint>
   // so an agent never rewrites a signed opaque handle. stderr is used in both
@@ -2731,10 +2748,11 @@ async function runHostedCommand(input: {
     }
 
     if (error instanceof HostedProductRequestError) {
-      if (input.preserveOutputOnProductError) {
+      if (shouldPreserveHostedOutput(input.preserveOutputOnProductError)) {
         if (input.json) {
           await writeResult({ error: error.productError }, null, true);
         }
+        writePreservedOutputRecovery(input.preservedOutputRecovery);
       } else {
         await writeResult(
           { error: error.productError },
@@ -2744,6 +2762,10 @@ async function runHostedCommand(input: {
       }
       process.stderr.write(`${error.message}\n`);
       return 1;
+    }
+
+    if (shouldPreserveHostedOutput(input.preserveOutputOnProductError)) {
+      writePreservedOutputRecovery(input.preservedOutputRecovery);
     }
 
     throw error;
@@ -2773,7 +2795,8 @@ async function dispatchHostedCommand(
     errorInputLabel: string;
     json: boolean;
     outputPath: string | null;
-    preserveOutputOnProductError?: boolean;
+    preserveOutputOnProductError?: boolean | (() => boolean);
+    preservedOutputRecovery?: () => string | null;
     asyncResume?: (payload: unknown) => string | null;
   },
   context: HostedRequestContext | undefined,
@@ -2782,6 +2805,21 @@ async function dispatchHostedCommand(
     return runHostedCommand(input);
   }
   return input.request();
+}
+
+function shouldPreserveHostedOutput(
+  value: boolean | (() => boolean) | undefined,
+): boolean {
+  return typeof value === 'function' ? value() : value === true;
+}
+
+function writePreservedOutputRecovery(
+  buildRecovery: (() => string | null) | undefined,
+): void {
+  const recovery = buildRecovery?.() ?? null;
+  if (recovery) {
+    process.stderr.write(`${recovery}\n`);
+  }
 }
 
 // Resume-command extractors (plan E). A media-generation submit returns the run
