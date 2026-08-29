@@ -3066,6 +3066,23 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": false
             },
             {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "adaptive",
+                "21:9",
+                "16:9",
+                "4:3",
+                "1:1",
+                "3:4",
+                "9:16"
+              ],
+              "default": "adaptive",
+              "required": false
+            },
+            {
               "name": "duration",
               "class": "default",
               "flag": "--duration",
@@ -3160,6 +3177,28 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "canonicalize": "lowercase",
               "default": "720p",
               "required": false
+            },
+            {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "adaptive"
+              ],
+              "default": "adaptive",
+              "required": false
+            },
+            {
+              "name": "duration",
+              "class": "default",
+              "flag": "--duration",
+              "type": "number",
+              "default": -1,
+              "required": false,
+              "enumValues": [
+                "-1"
+              ]
             },
             {
               "name": "generate_audio",
@@ -3310,6 +3349,21 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               ],
               "canonicalize": "lowercase",
               "default": "mp4",
+              "required": false
+            },
+            {
+              "name": "omni_reference_task_type",
+              "class": "default",
+              "flag": "--omni-reference-task-type",
+              "type": "string",
+              "enumValues": [
+                "auto",
+                "reference",
+                "edit",
+                "extend"
+              ],
+              "canonicalize": "lowercase",
+              "default": "auto",
               "required": false
             },
             {

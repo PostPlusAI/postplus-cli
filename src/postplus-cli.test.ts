@@ -5695,8 +5695,11 @@ describe('hosted domain commands', () => {
       });
       assert.equal(requests[0]?.headers['x-postplus-skill-name'], undefined);
       assert.equal(
-        (JSON.parse(await readFile(checkpointPath, 'utf8')) as { status: string })
-          .status,
+        (
+          JSON.parse(await readFile(checkpointPath, 'utf8')) as {
+            status: string;
+          }
+        ).status,
         'completed',
       );
     } finally {
@@ -6680,7 +6683,7 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('discovers six semantic Seedance 2.5 scene contracts without private scene fields', () => {
+  it('discovers six Seedance 2.5 contracts while preserving Workflow-controlled scene fields', () => {
     const endpointKeys = [
       'video-seedance-2-5-text',
       'video-seedance-2-5-edit',
@@ -6708,11 +6711,36 @@ describe('hosted domain commands', () => {
     assert.equal(byName.get('reference_images')?.maxItems, 30);
     assert.equal(byName.get('reference_videos')?.maxItems, 10);
     assert.equal(byName.get('reference_audios')?.maxItems, 10);
-    assert.equal(byName.has('omni_reference_task_type'), false);
+    assert.deepEqual(byName.get('omni_reference_task_type')?.enumValues, [
+      'auto',
+      'reference',
+      'edit',
+      'extend',
+    ]);
+
+    const firstFrame = buildHostedRequestSchemaReport({
+      domain: 'media',
+      endpointKey: 'video-seedance-2-5-first-frame',
+    }).endpoints?.[0];
+    const firstFrameNames = new Set(
+      firstFrame?.fields.map((field) => field.name) ?? [],
+    );
+    assert.equal(firstFrameNames.has('aspect_ratio'), true);
+    assert.equal(firstFrameNames.has('duration'), true);
+
+    const firstLast = buildHostedRequestSchemaReport({
+      domain: 'media',
+      endpointKey: 'video-seedance-2-5-first-last-frame',
+    }).endpoints?.[0];
+    const firstLastByName = new Map(
+      firstLast?.fields.map((field) => [field.name, field]) ?? [],
+    );
+    assert.deepEqual(firstLastByName.get('aspect_ratio')?.enumValues, [
+      'adaptive',
+    ]);
+    assert.deepEqual(firstLastByName.get('duration')?.enumValues, ['-1']);
 
     for (const fixedEndpointKey of [
-      'video-seedance-2-5-first-frame',
-      'video-seedance-2-5-first-last-frame',
       'video-seedance-2-5-edit',
       'video-seedance-2-5-extend',
     ]) {
@@ -6724,9 +6752,7 @@ describe('hosted domain commands', () => {
         fixed?.fields.map((field) => field.name) ?? [],
       );
       assert.equal(fixedNames.has('aspect_ratio'), false);
-      if (fixedEndpointKey !== 'video-seedance-2-5-first-frame') {
-        assert.equal(fixedNames.has('duration'), false);
-      }
+      assert.equal(fixedNames.has('duration'), false);
       assert.equal(fixedNames.has('omni_reference_task_type'), false);
     }
   });
@@ -6780,6 +6806,7 @@ describe('hosted domain commands', () => {
             prompt: 'opening scene',
             first_frame: 'https://example.com/open.png',
             resolution: '720p',
+            aspect_ratio: 'adaptive',
             duration: 5,
             generate_audio: true,
             output_format: 'mp4',
@@ -6800,6 +6827,8 @@ describe('hosted domain commands', () => {
             first_frame: 'https://example.com/open.png',
             last_frame: 'https://example.com/close.png',
             resolution: '720p',
+            aspect_ratio: 'adaptive',
+            duration: -1,
             generate_audio: true,
             output_format: 'mp4',
           },
@@ -6826,6 +6855,7 @@ describe('hosted domain commands', () => {
             reference_audios: ['https://example.com/voice.wav'],
             generate_audio: true,
             output_format: 'mp4',
+            omni_reference_task_type: 'auto',
           },
         },
         {
