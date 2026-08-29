@@ -7,7 +7,7 @@ import {
   writeCurrentCliVersionToLocalConfig,
 } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
-import { setLocalSession } from './local-state.js';
+import { resolveApiBaseUrlState, setLocalSession } from './local-state.js';
 
 // Fallback TOTAL POLLING BUDGET for the browser-login handoff loop — how long
 // `waitForCloudAuthLogin` keeps polling when the server's `expiresAt` cannot be
@@ -77,7 +77,10 @@ type SessionWhoAmIErrorPayload = {
 };
 
 export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
-  const baseUrl = await requireHostedBaseUrl();
+  const [baseUrl, apiBaseUrlState] = await Promise.all([
+    requireHostedBaseUrl(),
+    resolveApiBaseUrlState(),
+  ]);
   const started = await startCloudAuthLogin(baseUrl);
 
   process.stdout.write(
@@ -124,6 +127,7 @@ export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
       validated.sessionExpiresAt ?? handoffPayload.sessionExpiresAt ?? null,
     userEmail: validated.userEmail,
     userId: validated.userId,
+    persistApiBaseUrl: apiBaseUrlState.source !== 'env',
   });
   await writeCurrentCliVersionToLocalConfig();
 

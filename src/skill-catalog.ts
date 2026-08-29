@@ -34,13 +34,18 @@ export type PublicSkillCatalogEntry = {
 
 export const PUBLIC_SKILL_REQUIREMENT_KEYS = [
   'accountConnections',
-  'collectionKeys',
+  'capabilities',
   'endpointKeys',
-  'hostedCapabilities',
   'localDependencies',
   'modelKeys',
-  'sourceKeys',
+  'routeKeys',
 ] as const;
+
+const PUBLIC_SKILL_CAPABILITIES = new Set([
+  'media',
+  'publishing',
+  'research',
+]);
 
 export type PublicSkillRequirementKey =
   (typeof PUBLIC_SKILL_REQUIREMENT_KEYS)[number];
@@ -151,7 +156,7 @@ function parsePublicSkillCatalog(
       : null;
 
   if (
-    record.schemaVersion !== 1 ||
+    record.schemaVersion !== 2 ||
     source !== POSTPLUS_SKILLS_REPO ||
     !releaseId
   ) {
@@ -222,6 +227,18 @@ function parsePublicSkillRequirements(value: unknown): PublicSkillRequirements {
 
   const record = value as Record<string, unknown>;
   const requirements = createEmptyRequirements();
+  const unknownKeys = Object.keys(record).filter(
+    (key) =>
+      !PUBLIC_SKILL_REQUIREMENT_KEYS.includes(
+        key as PublicSkillRequirementKey,
+      ),
+  );
+
+  if (unknownKeys.length > 0) {
+    throw new Error(
+      `PostPlus public skill catalog has unsupported requirements: ${unknownKeys.join(', ')}.`,
+    );
+  }
 
   for (const key of PUBLIC_SKILL_REQUIREMENT_KEYS) {
     const raw = record[key];
@@ -245,6 +262,17 @@ function parsePublicSkillRequirements(value: unknown): PublicSkillRequirements {
 
       return item.trim();
     });
+
+    if (
+      key === 'capabilities' &&
+      requirements[key].some(
+        (capability) => !PUBLIC_SKILL_CAPABILITIES.has(capability),
+      )
+    ) {
+      throw new Error(
+        'PostPlus public skill catalog has unsupported capabilities.',
+      );
+    }
   }
 
   return requirements;
@@ -253,11 +281,10 @@ function parsePublicSkillRequirements(value: unknown): PublicSkillRequirements {
 function createEmptyRequirements(): PublicSkillRequirements {
   return {
     accountConnections: [],
-    collectionKeys: [],
+    capabilities: [],
     endpointKeys: [],
-    hostedCapabilities: [],
     localDependencies: [],
     modelKeys: [],
-    sourceKeys: [],
+    routeKeys: [],
   };
 }

@@ -29,6 +29,7 @@ import {
 import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import {
   POSTPLUS_CLIENT_COMPATIBILITY_HEADERS,
+  POSTPLUS_CLIENT_CONTRACT_VERSION,
   POSTPLUS_CLI_UPDATE_COMMAND,
   POSTPLUS_UPDATE_COMMAND,
   formatPostPlusClientUpgradeError,
@@ -110,12 +111,11 @@ const NEXT_CLI_VERSION = CURRENT_CLI_VERSION.replace(
 function createEmptySkillRequirements(): PublicSkillRequirements {
   return {
     accountConnections: [],
-    collectionKeys: [],
+    capabilities: [],
     endpointKeys: [],
-    hostedCapabilities: [],
     localDependencies: [],
     modelKeys: [],
-    sourceKeys: [],
+    routeKeys: [],
   };
 }
 
@@ -146,7 +146,7 @@ function isPublicCatalogUrl(url: string): boolean {
 function createPublicCatalogResponse(): Response {
   return new Response(
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       releaseId: 'catalog-1',
       source: 'PostPlusAI/postplus-skills',
       skills: [
@@ -170,7 +170,7 @@ function createPublicCatalogResponse(): Response {
 function createVideoAnalysisCatalogResponse(): Response {
   return new Response(
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       releaseId: 'catalog-1',
       source: 'PostPlusAI/postplus-skills',
       skills: [
@@ -178,7 +178,7 @@ function createVideoAnalysisCatalogResponse(): Response {
           name: 'video-analysis',
           path: 'skills/video-analysis/SKILL.md',
           requirements: {
-            hostedCapabilities: ['media-file', 'video-analysis'],
+            capabilities: ['media'],
             modelKeys: ['video-analysis'],
             localDependencies: [],
           },
@@ -189,7 +189,7 @@ function createVideoAnalysisCatalogResponse(): Response {
           path: 'skills/image-batch-runner/SKILL.md',
           requirements: {
             endpointKeys: ['image-bad'],
-            hostedCapabilities: ['media-generation'],
+            capabilities: ['media'],
             localDependencies: [],
           },
           status: 'released',
@@ -206,7 +206,7 @@ function createVideoAnalysisCatalogResponse(): Response {
 function createSocialPublishingCatalogResponse(): Response {
   return new Response(
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       releaseId: 'catalog-1',
       source: 'PostPlusAI/postplus-skills',
       skills: [
@@ -215,7 +215,7 @@ function createSocialPublishingCatalogResponse(): Response {
           path: 'skills/50-publishing/social-media-publisher/SKILL.md',
           requirements: {
             accountConnections: ['social-publishing-workspace'],
-            hostedCapabilities: ['social-publishing'],
+            capabilities: ['publishing'],
             localDependencies: [],
           },
           status: 'released',
@@ -295,21 +295,6 @@ function createMediaReadinessResponse(): Response {
           required: true,
         },
         {
-          checks: [
-            {
-              id: 'provider_configuration',
-              label: 'Provider configuration',
-              ok: false,
-              required: true,
-            },
-          ],
-          id: 'media-file:upload',
-          label: 'Media file: upload',
-          mediaFileOperation: 'upload',
-          ok: false,
-          required: true,
-        },
-        {
           id: 'video-analysis:video-analysis',
           label: 'Video analysis: video-analysis',
           modelKey: 'video-analysis',
@@ -373,7 +358,7 @@ function createSocialPublishingReadinessResponse(): Response {
 function createYoutubeResearchCatalogResponse(): Response {
   return new Response(
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       releaseId: 'catalog-1',
       source: 'PostPlusAI/postplus-skills',
       skills: [
@@ -381,17 +366,13 @@ function createYoutubeResearchCatalogResponse(): Response {
           name: 'youtube-research',
           path: 'skills/20-research/youtube-research/SKILL.md',
           requirements: {
-            collectionKeys: [
+            routeKeys: [
               'youtube-channel-summary',
               'youtube-comments',
               'youtube-video-download',
+              'youtube-videos',
             ],
-            hostedCapabilities: [
-              'hosted-collection',
-              'public-content-collection',
-              'public-content-discovery',
-            ],
-            sourceKeys: ['youtube-videos'],
+            capabilities: ['research'],
             localDependencies: [],
           },
           status: 'released',
@@ -565,6 +546,10 @@ beforeEach(async () => {
   tempDirs.push(configDir);
   tempDirs.push(stateDir);
   process.env.POSTPLUS_CONFIG_DIR = configDir;
+  // The test host declares proxy variables; production Node requires this at
+  // process start. Unit requests are mocked, and this keeps them aligned with
+  // the explicit transport preflight contract.
+  process.env.NODE_USE_ENV_PROXY = '1';
   process.env.XDG_STATE_HOME = stateDir;
 });
 
@@ -611,7 +596,7 @@ describe('doctor and status', () => {
           (init?.headers as Record<string, string>)[
             POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.contractVersion
           ],
-          '2',
+          String(POSTPLUS_CLIENT_CONTRACT_VERSION),
         );
         assert.equal(
           (init?.headers as Record<string, string>)[
@@ -769,7 +754,7 @@ process.exit(1);
       if (isPublicCatalogUrl(url)) {
         return new Response(
           JSON.stringify({
-            schemaVersion: 1,
+            schemaVersion: 2,
             releaseId: 'catalog-2',
             source: 'PostPlusAI/postplus-skills',
             skills: [
@@ -2018,6 +2003,72 @@ process.exit(1);
     assert.doesNotMatch(formatted, /Workspace slug:/);
   });
 
+  it('keeps an environment API override process-local and binds the session to its origin', async () => {
+    await writeLocalConfig({ apiBaseUrl: 'https://postplus.example.com' });
+    process.env.POSTPLUS_API_BASE_URL = 'https://staging.postplus.example.com';
+    await setLocalSession({
+      accountId: 'account-staging',
+      accountName: 'Staging',
+      accountSlug: null,
+      accountType: 'team',
+      apiBaseUrl: 'https://staging.postplus.example.com',
+      cliSessionToken: 'staging-session',
+      sessionExpiresAt: null,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+      persistApiBaseUrl: false,
+    });
+    const stagedConfig = await readLocalConfig();
+    assert.equal(stagedConfig?.apiBaseUrl, 'https://postplus.example.com');
+    assert.equal(
+      stagedConfig?.sessionApiBaseUrl,
+      'https://staging.postplus.example.com',
+    );
+
+    delete process.env.POSTPLUS_API_BASE_URL;
+    await assert.rejects(
+      () => validateRemoteAuth(),
+      /session belongs to https:\/\/staging\.postplus\.example\.com, but this process targets https:\/\/postplus\.example\.com/u,
+    );
+  });
+
+  it('fails immediately when proxy variables exist but Node environment proxy support is disabled', async () => {
+    await setLocalSession({
+      accountId: 'account-1',
+      accountName: 'Account',
+      accountSlug: null,
+      accountType: 'personal',
+      apiBaseUrl: 'https://postplus.example.com',
+      cliSessionToken: 'session',
+      sessionExpiresAt: null,
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    });
+    // Keep this contract hermetic: hosted runners can define NO_PROXY entries
+    // that would otherwise (correctly) exempt the synthetic test origin.
+    process.env.HTTPS_PROXY = 'http://127.0.0.1:7897';
+    delete process.env.https_proxy;
+    delete process.env.ALL_PROXY;
+    delete process.env.all_proxy;
+    delete process.env.HTTP_PROXY;
+    delete process.env.http_proxy;
+    delete process.env.NO_PROXY;
+    delete process.env.no_proxy;
+    delete process.env.NODE_USE_ENV_PROXY;
+    let fetchCalls = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(null, { status: 200 });
+    };
+    try {
+      await assert.rejects(() => validateRemoteAuth(), /NODE_USE_ENV_PROXY=1/u);
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('refreshes a rejected CLI session before doctor checks remote auth', async () => {
     process.env.POSTPLUS_ACCESS_TOKEN = 'stale-env-access-token';
     process.env.POSTPLUS_REFRESH_TOKEN = 'stale-env-refresh-token';
@@ -2416,7 +2467,7 @@ describe('public skill catalog', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -2424,12 +2475,11 @@ describe('public skill catalog', () => {
               name: 'demo-skill',
               path: 'skills/demo-skill/SKILL.md',
               requirements: {
-                collectionKeys: ['instagram-posts'],
+                routeKeys: ['facebook-post-by-url', 'instagram-posts'],
                 endpointKeys: ['image-demo'],
-                hostedCapabilities: ['hosted-collection'],
+                capabilities: ['media', 'research'],
                 localDependencies: ['ffmpeg', 'python3:yt_dlp'],
                 modelKeys: ['video-analysis'],
-                sourceKeys: ['facebook-post-by-url'],
               },
               status: 'released',
             },
@@ -2457,12 +2507,11 @@ describe('public skill catalog', () => {
           localDependencies: ['ffmpeg', 'python3:yt_dlp'],
           requirements: {
             ...createEmptySkillRequirements(),
-            collectionKeys: ['instagram-posts'],
+            capabilities: ['media', 'research'],
             endpointKeys: ['image-demo'],
-            hostedCapabilities: ['hosted-collection'],
             localDependencies: ['ffmpeg', 'python3:yt_dlp'],
             modelKeys: ['video-analysis'],
-            sourceKeys: ['facebook-post-by-url'],
+            routeKeys: ['facebook-post-by-url', 'instagram-posts'],
           },
           skillId: 'demo-skill',
           path: 'skills/demo-skill/SKILL.md',
@@ -2497,6 +2546,76 @@ describe('public skill catalog', () => {
     }
   });
 
+  it('fails fast when the public skill catalog exposes private routing requirements', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 2,
+          releaseId: 'catalog-private-routing',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              requirements: {
+                collectionKeys: ['facebook-posts'],
+              },
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await assert.rejects(
+        () => loadPublicSkillCatalog(),
+        /unsupported requirements: collectionKeys/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fails fast when the public skill catalog uses a non-semantic capability', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 2,
+          releaseId: 'catalog-private-capability',
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              requirements: {
+                capabilities: ['hosted-collection'],
+              },
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await assert.rejects(
+        () => loadPublicSkillCatalog(),
+        /unsupported capabilities/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('fails with a catalog-specific error when the catalog endpoint returns HTML', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
@@ -2520,7 +2639,7 @@ describe('public skill catalog', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-1',
           source: 'PostPlusAI/postplus-skills',
           skills: [],
@@ -2553,7 +2672,7 @@ describe('public skill catalog', () => {
 
       return new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'skills-1-a9d5f9215864e899',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -2865,7 +2984,7 @@ describe('update checks', () => {
       if (isPublicCatalogUrl(url)) {
         return new Response(
           JSON.stringify({
-            schemaVersion: 1,
+            schemaVersion: 2,
             releaseId: 'catalog-2',
             source: 'PostPlusAI/postplus-skills',
             skills: [
@@ -2930,7 +3049,7 @@ describe('update checks', () => {
       if (isPublicCatalogUrl(url)) {
         return new Response(
           JSON.stringify({
-            schemaVersion: 1,
+            schemaVersion: 2,
             releaseId: catalogReleaseId,
             source: 'PostPlusAI/postplus-skills',
             skills: [
@@ -3110,8 +3229,8 @@ describe('skill management commands', () => {
 
     const notice = JSON.parse(notices[0]);
     assert.equal(notice.event, 'quote_auto_confirm');
-    assert.equal(notice.costMillicredits, 288_000);
-    assert.equal(notice.ceilingMillicredits, 300_000);
+    assert.equal(notice.costCredits, 288);
+    assert.equal(notice.ceilingCredits, 300);
 
     const config = await readLocalConfig();
     assert.equal(
@@ -3141,8 +3260,8 @@ describe('skill management commands', () => {
           error.code,
           'postplus_cli_quote_auto_confirm_ceiling_exceeded',
         );
-        assert.equal(error.costMillicredits, 288_000);
-        assert.equal(error.ceilingMillicredits, 100_000);
+        assert.equal(error.costCredits, 288);
+        assert.equal(error.ceilingCredits, 100);
         assert.deepEqual(error.challenge, challenge);
         return true;
       },
@@ -3352,7 +3471,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -3412,7 +3531,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -3469,7 +3588,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -3524,7 +3643,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -3612,7 +3731,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -3686,7 +3805,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -3844,7 +3963,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -3923,7 +4042,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -3996,7 +4115,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -4056,7 +4175,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -4141,7 +4260,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -4201,7 +4320,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -4249,7 +4368,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -4323,7 +4442,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -4403,7 +4522,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -4470,7 +4589,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -4527,7 +4646,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -4579,7 +4698,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -4634,7 +4753,7 @@ describe('skill management commands', () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: 'catalog-2',
           source: 'PostPlusAI/postplus-skills',
           skills: [
@@ -4811,6 +4930,10 @@ describe('hosted domain commands', () => {
       topLevelHelp,
       /postplus media-file upload .* \[--json\] \[--output <result\.json>\]/u,
     );
+    assert.doesNotMatch(
+      topLevelHelp,
+      /storage-only|storageReference|WaveSpeed|asset:\/\//u,
+    );
 
     const { stdout: researchHelp } = await execFileAsync(process.execPath, [
       '--import',
@@ -4819,9 +4942,12 @@ describe('hosted domain commands', () => {
       'research',
       'help',
     ]);
-    assert.match(researchHelp, /postplus research collect/u);
-    assert.match(researchHelp, /postplus research scrape/u);
+    assert.match(researchHelp, /postplus research run <route>/u);
     assert.match(researchHelp, /postplus research schema/u);
+    assert.doesNotMatch(
+      researchHelp,
+      /research (collect|scrape)|--request|max-charge-usd/u,
+    );
 
     for (const domain of ['media', 'publish']) {
       const { stdout } = await execFileAsync(process.execPath, [
@@ -4886,7 +5012,7 @@ describe('hosted domain commands', () => {
       'src/index.ts',
       'research',
       'schema',
-      '--collection-key',
+      '--route',
       'youtube-channel-summary',
       '--json',
     ]);
@@ -4894,29 +5020,31 @@ describe('hosted domain commands', () => {
       string,
       unknown
     >;
-    assert.equal(
-      researchReport.selectedCollectionKey,
-      'youtube-channel-summary',
-    );
+    assert.equal(researchReport.selectedRouteKey, 'youtube-channel-summary');
     // The full enum sets of selectable targets come from the manifest, not a
     // hand-maintained catalog of example payloads.
     assert.ok(
-      (researchReport.collectionKeys as string[]).includes(
+      (researchReport.routeKeys as string[]).includes(
         'youtube-channel-summary',
       ),
     );
+    const researchRoutes = researchReport.routes as Array<{
+      routeKey: string;
+      fields: Array<{ name: string; flag: string | null }>;
+      example: string;
+    }>;
+    assert.equal(researchRoutes.length, 1);
+    assert.equal(researchRoutes[0]?.routeKey, 'youtube-channel-summary');
     assert.ok(
-      (researchReport.sourceKeys as string[]).includes('youtube-videos'),
+      researchRoutes[0]?.fields.some((field) => field.flag === '--channel'),
     );
-    // Research collection/scrape input is opaque JSON the agent authors, so the
-    // report describes input shapes rather than fabricated example payloads.
-    assert.equal(Object.hasOwn(researchReport, 'examples'), false);
-    const researchSchemaIds = (
-      researchReport.schemas as Array<{ id: string }>
-    ).map((schema) => schema.id);
-    assert.ok(researchSchemaIds.includes('research.collection-input'));
-    assert.ok(
-      researchSchemaIds.includes('public-content-collection.scrape-input'),
+    assert.match(
+      researchRoutes[0]?.example ?? '',
+      /research run youtube-channel-summary/u,
+    );
+    assert.doesNotMatch(
+      researchStdout,
+      /actorId|datasetId|providerModelPath|collectionKey|sourceKey|--request/u,
     );
 
     const { stdout } = await execFileAsync(process.execPath, [
@@ -5156,7 +5284,7 @@ describe('hosted domain commands', () => {
     );
   });
 
-  it('rejects unknown hosted research schema collection keys', async () => {
+  it('rejects unknown hosted research schema routes', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
         '--import',
@@ -5164,7 +5292,7 @@ describe('hosted domain commands', () => {
         'src/index.ts',
         'research',
         'schema',
-        '--collection-key',
+        '--route',
         'instagram-missing-provider',
         '--json',
       ]),
@@ -5175,7 +5303,7 @@ describe('hosted domain commands', () => {
 
         assert.match(
           execError.stderr ?? '',
-          /Unknown research collection instagram-missing-provider/u,
+          /Unknown research route instagram-missing-provider/u,
         );
         assert.match(execError.stderr ?? '', /youtube-channel-summary/u);
         return true;
@@ -5197,7 +5325,10 @@ describe('hosted domain commands', () => {
     assert.match(stdout, /media transcribe transcription/u);
     assert.match(stdout, /Surface: flags/u);
     assert.match(stdout, /Intent \(you must \/ may write\):/u);
-    assert.match(stdout, /--audio {2}\[media-url; required\]/u);
+    assert.match(
+      stdout,
+      /--audio {2}\[audio input: local path \| HTTPS \| PostPlus media reference \| data URI; required\]/u,
+    );
     assert.match(
       stdout,
       /--task {2}\[string; optional; one of \{transcribe, translate\}; default transcribe\]/u,
@@ -5245,33 +5376,22 @@ describe('hosted domain commands', () => {
     assert.match(stdout, /\n {4}requestDimensions\n/u);
   });
 
-  it('prints per-target --help for opaque research, video-analysis, and publish surfaces', async () => {
-    const { stdout: collectHelp } = await execFileAsync(process.execPath, [
+  it('prints per-target help for semantic research, opaque publish, and normalized video analysis', async () => {
+    const { stdout: researchHelp } = await execFileAsync(process.execPath, [
       '--import',
       'tsx',
       'src/index.ts',
       'research',
-      'collect',
+      'run',
       'tiktok-videos',
       '--help',
     ]);
-    assert.match(collectHelp, /research collect tiktok-videos/u);
-    assert.match(collectHelp, /Capability: hosted-collection/u);
-    assert.match(collectHelp, /a provider-shaped JSON object of input/u);
-
-    const { stdout: scrapeHelp } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
-      'research',
-      'scrape',
-      'facebook-profile-posts',
-      '--help',
-    ]);
-    assert.match(scrapeHelp, /Capability: public-content-collection/u);
-    assert.match(
-      scrapeHelp,
-      /a non-empty JSON array of provider-shaped scrape records/u,
+    assert.match(researchHelp, /research run tiktok-videos/u);
+    assert.match(researchHelp, /--query/u);
+    assert.match(researchHelp, /--limit/u);
+    assert.doesNotMatch(
+      researchHelp,
+      /provider|actor|dataset|collectionKey|sourceKey|--request/u,
     );
 
     const { stdout: analyzeHelp } = await execFileAsync(process.execPath, [
@@ -5283,7 +5403,9 @@ describe('hosted domain commands', () => {
       'video-analysis',
       '--help',
     ]);
-    assert.match(analyzeHelp, /opaque Gemini request payload/u);
+    assert.match(analyzeHelp, /flags \(normalized media intent\)/u);
+    assert.match(analyzeHelp, /--video <video>.*--prompt <prompt>/u);
+    assert.doesNotMatch(analyzeHelp, /Gemini request payload|file_reference/u);
 
     const { stdout: publishHelp } = await execFileAsync(process.execPath, [
       '--import',
@@ -5297,20 +5419,12 @@ describe('hosted domain commands', () => {
     assert.match(publishHelp, /Capability: social-publishing/u);
   });
 
-  it('posts the manifest-driven research collect verb to /hosted/collection', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+  it('submits semantic Research flags to the unified route without private fields', async () => {
+    const requestDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-research-run-'),
+    );
     tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
     const outputPath = resolve(requestDir, 'result.json');
-    await writeFile(
-      requestPath,
-      JSON.stringify({
-        keyword: 'portable blender',
-        geo: 'US',
-        timeframe: 'today 12-m',
-        enableTrendingSearches: false,
-      }),
-    );
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -5323,639 +5437,307 @@ describe('hosted domain commands', () => {
 
     const originalFetch = globalThis.fetch;
     let postedUrl: string | null = null;
-    let postedBody: unknown = null;
+    let postedBody: Record<string, unknown> | null = null;
     globalThis.fetch = async (input, init) => {
       postedUrl = String(input);
-      postedBody = JSON.parse(String(init?.body));
-      return new Response(
-        JSON.stringify({ status: 'completed', payload: { itemCount: 1 } }),
-        {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        },
-      );
-    };
-
-    try {
-      const result = await runHostedDomainCommand('research', [
-        'collect',
-        'google-trends-fast',
-        '--request',
-        requestPath,
-        '--output',
-        outputPath,
-      ]);
-      assert.equal(result, 0);
-      assert.equal(
-        postedUrl,
-        'https://postplus.test/api/postplus-cli/hosted/collection',
-      );
-      const body = postedBody as Record<string, unknown>;
-      assert.equal(body.collectionKey, 'google-trends-fast');
-      assert.equal(body.skillName, 'google-trends-research');
-      assert.deepEqual(body.input, {
-        keyword: 'portable blender',
-        geo: 'US',
-        timeframe: 'today 12-m',
-        enableTrendingSearches: false,
-      });
-      assert.match(
-        String(body.operationId),
-        /^postplus-cli:research:collect:google-trends-fast:/u,
-      );
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('emits only a checkpoint-based resume command for pending local research', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    const outputPath = resolve(requestDir, 'result.json');
-    const runHandle = `signed.${'opaque-payload.'.repeat(80)}signature`;
-    await writeFile(
-      requestPath,
-      JSON.stringify({ keyword: 'portable blender' }),
-    );
-    await setLocalSession({
-      accountId: 'account_1',
-      accountName: 'Account',
-      apiBaseUrl: 'https://postplus.test',
-      cliSessionToken: 'cli-session-token',
-      sessionExpiresAt: null,
-      userEmail: 'agent@example.com',
-      userId: 'user_1',
-    });
-
-    const originalFetch = globalThis.fetch;
-    const originalStderrWrite = process.stderr.write.bind(process.stderr);
-    const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-    let stderrText = '';
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ runHandle, status: 'RUNNING' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    process.stderr.write = ((chunk: unknown) => {
-      stderrText += String(chunk);
-      return true;
-    }) as typeof process.stderr.write;
-    process.stdout.write = (() => true) as typeof process.stdout.write;
-
-    try {
-      const result = await runHostedDomainCommand('research', [
-        'collect',
-        'google-trends-fast',
-        '--request',
-        requestPath,
-        '--output',
-        outputPath,
-      ]);
-      assert.equal(result, 0);
-      assert.equal(
-        (
-          JSON.parse(await readFile(outputPath, 'utf8')) as {
-            runHandle: string;
-          }
-        ).runHandle,
-        runHandle,
-      );
-      assert.match(
-        stderrText,
-        new RegExp(
-          `postplus research collect --resume-from '${outputPath.replace(
-            /[.*+?^${}()|[\]\\]/gu,
-            '\\$&',
-          )}'`,
-          'u',
-        ),
-      );
-      assert.doesNotMatch(stderrText, /--run-handle/u);
-      assert.equal(stderrText.includes(runHandle), false);
-    } finally {
-      globalThis.fetch = originalFetch;
-      process.stderr.write = originalStderrWrite;
-      process.stdout.write = originalStdoutWrite;
-    }
-  });
-
-  it('polls hosted research collection handles through the hosted collection route', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const outputPath = resolve(requestDir, 'poll-result.json');
-    const runHandle = `signed.${'opaque-payload.'.repeat(80)}signature`;
-    await writeFile(
-      outputPath,
-      JSON.stringify({ runHandle, status: 'RUNNING' }),
-    );
-    await setLocalSession({
-      accountId: 'account_1',
-      accountName: 'Account',
-      apiBaseUrl: 'https://postplus.test',
-      cliSessionToken: 'cli-session-token',
-      sessionExpiresAt: null,
-      userEmail: 'agent@example.com',
-      userId: 'user_1',
-    });
-
-    const originalFetch = globalThis.fetch;
-    let postedUrl: string | null = null;
-    let postedBody: unknown = null;
-    globalThis.fetch = async (input, init) => {
-      postedUrl = String(input);
-      postedBody = JSON.parse(String(init?.body));
+      postedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return new Response(
         JSON.stringify({
-          charged: false,
-          payload: { itemCount: 1 },
-          runHandle: null,
-          status: 'SUCCEEDED',
-        }),
-        {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        },
-      );
-    };
-
-    try {
-      const result = await runHostedDomainCommand('research', [
-        'collect',
-        '--resume-from',
-        outputPath,
-      ]);
-      assert.equal(result, 0);
-      assert.equal(
-        postedUrl,
-        'https://postplus.test/api/postplus-cli/hosted/collection',
-      );
-      assert.deepEqual(postedBody, {
-        runHandle,
-        runHandleType: 'hosted-collection',
-      });
-      assert.equal(
-        (JSON.parse(await readFile(outputPath, 'utf8')) as { status: string })
-          .status,
-        'SUCCEEDED',
-      );
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('polls public-content research scrape handles through the hosted collection route', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const outputPath = resolve(requestDir, 'poll-result.json');
-    await writeFile(
-      outputPath,
-      JSON.stringify({
-        output: {
-          pending: true,
-          runHandle: 's_public_content_snapshot',
-          status: 'pending',
-        },
-      }),
-    );
-    await setLocalSession({
-      accountId: 'account_1',
-      accountName: 'Account',
-      apiBaseUrl: 'https://postplus.test',
-      cliSessionToken: 'cli-session-token',
-      sessionExpiresAt: null,
-      userEmail: 'agent@example.com',
-      userId: 'user_1',
-    });
-
-    const originalFetch = globalThis.fetch;
-    let postedUrl: string | null = null;
-    let postedBody: unknown = null;
-    globalThis.fetch = async (input, init) => {
-      postedUrl = String(input);
-      postedBody = JSON.parse(String(init?.body));
-      return new Response(
-        JSON.stringify({
-          charged: false,
-          output: [{ url: 'https://www.facebook.com/facebook/' }],
-        }),
-        {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        },
-      );
-    };
-
-    try {
-      const result = await runHostedDomainCommand('research', [
-        'scrape',
-        '--resume-from',
-        outputPath,
-      ]);
-      assert.equal(result, 0);
-      assert.equal(
-        postedUrl,
-        'https://postplus.test/api/postplus-cli/hosted/collection',
-      );
-      assert.deepEqual(postedBody, {
-        runHandle: 's_public_content_snapshot',
-        runHandleType: 'public-content-collection',
-      });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('keeps polling a research collect run handle inside one invocation until terminal', async () => {
-    const originalFetch = globalThis.fetch;
-    const statuses = ['RUNNING', 'RUNNING', 'SUCCEEDED'];
-    let fetchCalls = 0;
-    globalThis.fetch = async () => {
-      const status = statuses[Math.min(fetchCalls, statuses.length - 1)];
-      fetchCalls += 1;
-      return new Response(
-        JSON.stringify({ runHandle: 'run_h', status, output: null }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
-    };
-
-    try {
-      const payload = (await runHostedDomainCommand(
-        'research',
-        [
-          'collect',
-          '--run-handle',
-          'run_h',
-          '--wait-seconds',
-          '5',
-          '--poll-interval-seconds',
-          '0.05',
-        ],
-        {
-          auth: {
-            apiBaseUrl: 'https://postplus.test',
-            cliSessionToken: 'cli-session-token',
-          },
-        },
-      )) as { status: string };
-      assert.equal(fetchCalls, 3);
-      assert.equal(payload.status, 'SUCCEEDED');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('keeps polling nested public-content state until terminal records arrive', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const outputPath = resolve(requestDir, 'scrape-result.json');
-    await writeFile(
-      outputPath,
-      JSON.stringify({
-        output: { runHandle: 's_snapshot', status: 'pending' },
-      }),
-    );
-    await setLocalSession({
-      accountId: 'account_1',
-      accountName: 'Account',
-      apiBaseUrl: 'https://postplus.test',
-      cliSessionToken: 'cli-session-token',
-      sessionExpiresAt: null,
-      userEmail: 'agent@example.com',
-      userId: 'user_1',
-    });
-
-    const originalFetch = globalThis.fetch;
-    let fetchCalls = 0;
-    globalThis.fetch = async () => {
-      fetchCalls += 1;
-      const responseBody =
-        fetchCalls < 3
-          ? { output: { runHandle: 's_snapshot', status: 'pending' } }
-          : { output: [{ id: 'post_1' }] };
-      return new Response(JSON.stringify(responseBody), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    };
-
-    try {
-      const result = await runHostedDomainCommand('research', [
-        'scrape',
-        '--resume-from',
-        outputPath,
-        '--wait-seconds',
-        '1',
-        '--poll-interval-seconds',
-        '0.01',
-      ]);
-      assert.equal(result, 0);
-      assert.equal(fetchCalls, 3);
-      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), {
-        output: [{ id: 'post_1' }],
-      });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('honors --wait-seconds 0 as a single research scrape status check', async () => {
-    const originalFetch = globalThis.fetch;
-    let fetchCalls = 0;
-    globalThis.fetch = async () => {
-      fetchCalls += 1;
-      return new Response(
-        JSON.stringify({
-          output: { runHandle: 'run_h', status: 'pending' },
+          routeKey: 'google-trends-fast',
+          status: 'completed',
+          output: { items: [] },
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     };
 
     try {
-      const payload = (await runHostedDomainCommand(
-        'research',
-        ['scrape', '--run-handle', 'run_h', '--wait-seconds', '0'],
-        {
-          auth: {
-            apiBaseUrl: 'https://postplus.test',
-            cliSessionToken: 'cli-session-token',
-          },
-        },
-      )) as { output: { status: string } };
-      assert.equal(fetchCalls, 1);
-      assert.equal(payload.output.status, 'pending');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('rejects unsafe or invalid local research resume inputs before the network', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const invalidJsonPath = resolve(requestDir, 'invalid.json');
-    const missingHandlePath = resolve(requestDir, 'missing-handle.json');
-    const terminalPath = resolve(requestDir, 'terminal.json');
-    await writeFile(invalidJsonPath, '{');
-    await writeFile(missingHandlePath, JSON.stringify({ status: 'pending' }));
-    await writeFile(
-      terminalPath,
-      JSON.stringify({ runHandle: null, status: 'SUCCEEDED' }),
-    );
-
-    const originalFetch = globalThis.fetch;
-    let fetchCalls = 0;
-    globalThis.fetch = async () => {
-      fetchCalls += 1;
-      throw new Error('network must not be called');
-    };
-
-    try {
-      await assert.rejects(
-        runHostedDomainCommand('research', [
-          'collect',
-          '--run-handle',
-          'opaque',
-        ]),
-        /Direct --run-handle is not accepted/u,
-      );
-      await assert.rejects(
-        runHostedDomainCommand('research', [
-          'collect',
-          '--resume-from',
-          missingHandlePath,
-          '--output',
-          resolve(requestDir, 'other.json'),
-        ]),
-        /do not also pass --output/u,
-      );
-      await assert.rejects(
-        runHostedDomainCommand('research', [
-          'collect',
-          '--resume-from',
-          invalidJsonPath,
-        ]),
-        /Failed to read JSON file/u,
-      );
-      await assert.rejects(
-        runHostedDomainCommand('research', [
-          'collect',
-          '--resume-from',
-          missingHandlePath,
-        ]),
-        /contains no resumable run handle/u,
-      );
-      await assert.rejects(
-        runHostedDomainCommand('research', [
-          'collect',
-          '--resume-from',
-          terminalPath,
-        ]),
-        /checkpoint is already terminal/u,
-      );
-      assert.equal(fetchCalls, 0);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('requires a durable output before a local research launch', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const collectRequestPath = resolve(requestDir, 'collect.json');
-    const scrapeRequestPath = resolve(requestDir, 'scrape.json');
-    await writeFile(collectRequestPath, JSON.stringify({ keyword: 'x' }));
-    await writeFile(
-      scrapeRequestPath,
-      JSON.stringify([{ url: 'https://x.test' }]),
-    );
-
-    const originalFetch = globalThis.fetch;
-    let fetchCalls = 0;
-    globalThis.fetch = async () => {
-      fetchCalls += 1;
-      throw new Error('network must not be called');
-    };
-
-    try {
-      await assert.rejects(
-        runHostedDomainCommand('research', [
-          'collect',
+      assert.equal(
+        await runHostedDomainCommand('research', [
+          'run',
           'google-trends-fast',
-          '--request',
-          collectRequestPath,
+          '--query',
+          'portable blender',
+          '--output',
+          outputPath,
         ]),
-        /requires --output <result\.json>/u,
+        0,
+      );
+      assert.equal(
+        postedUrl,
+        'https://postplus.test/api/postplus-cli/hosted/research',
+      );
+      assert.equal(postedBody?.routeKey, 'google-trends-fast');
+      assert.deepEqual(postedBody?.input, {
+        query: 'portable blender',
+        country: 'US',
+        time_range: 'today 12-m',
+      });
+      assert.doesNotMatch(
+        JSON.stringify(postedBody),
+        /actorId|datasetId|collectionKey|sourceKey|maxTotalChargeUsd/u,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('waits by polling the same unified Research handle and never resubmits', async () => {
+    const requestDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-research-wait-'),
+    );
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'result.json');
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    const skillHeaders: Array<string | undefined> = [];
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      skillHeaders.push(
+        Object.fromEntries(
+          Object.entries((init?.headers ?? {}) as Record<string, string>).map(
+            ([key, value]) => [key.toLowerCase(), value],
+          ),
+        )['x-postplus-skill-name'],
+      );
+      return new Response(
+        JSON.stringify(
+          bodies.length === 1
+            ? {
+                routeKey: 'google-trends-fast',
+                runHandle: 'sealed-run-1',
+                status: 'processing',
+              }
+            : {
+                routeKey: 'google-trends-fast',
+                runHandle: null,
+                status: 'completed',
+                output: { items: [{ query: 'portable blender' }] },
+              },
+        ),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      assert.equal(
+        await runHostedDomainCommand('research', [
+          'run',
+          'google-trends-fast',
+          '--query',
+          'portable blender',
+          '--wait',
+          '--poll-interval-seconds',
+          '0.001',
+          '--output',
+          outputPath,
+        ]),
+        0,
+      );
+      assert.equal(bodies.length, 2);
+      assert.equal(bodies[0]?.routeKey, 'google-trends-fast');
+      assert.deepEqual(bodies[1], {
+        routeKey: 'google-trends-fast',
+        runHandle: 'sealed-run-1',
+      });
+      assert.deepEqual(skillHeaders, ['google-trends-research', undefined]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('checkpoints an accepted Research run before polling and preserves it when polling fails', async () => {
+    const requestDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-research-checkpoint-first-'),
+    );
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'result.json');
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (bodies.length === 1) {
+        return new Response(
+          JSON.stringify({
+            routeKey: 'google-trends-fast',
+            runHandle: 'sealed-run-checkpoint-1',
+            status: 'processing',
+          }),
+          { status: 202, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          code: 'postplus_cli_research_poll_unavailable',
+          error: 'Research status is temporarily unavailable.',
+          status: 503,
+        }),
+        { status: 503, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      assert.equal(
+        await runHostedDomainCommand('research', [
+          'run',
+          'google-trends-fast',
+          '--query',
+          'portable blender',
+          '--wait',
+          '--poll-interval-seconds',
+          '0.001',
+          '--output',
+          outputPath,
+        ]),
+        1,
+      );
+      assert.equal(bodies.length, 2);
+      assert.equal(typeof bodies[0]?.operationId, 'string');
+      assert.deepEqual(bodies[1], {
+        routeKey: 'google-trends-fast',
+        runHandle: 'sealed-run-checkpoint-1',
+      });
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), {
+        routeKey: 'google-trends-fast',
+        runHandle: 'sealed-run-checkpoint-1',
+        status: 'processing',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('resumes a Research checkpoint in a new invocation without submitting again', async () => {
+    const requestDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-research-resume-'),
+    );
+    tempDirs.push(requestDir);
+    const checkpointPath = resolve(requestDir, 'result.json');
+    await writeFile(
+      checkpointPath,
+      JSON.stringify({
+        routeKey: 'google-trends-fast',
+        runHandle: 'sealed-run-resume-1',
+        status: 'processing',
+      }),
+    );
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{
+      body: Record<string, unknown>;
+      headers: Record<string, string>;
+    }> = [];
+    globalThis.fetch = async (_input, init) => {
+      requests.push({
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        headers: Object.fromEntries(
+          Object.entries((init?.headers ?? {}) as Record<string, string>).map(
+            ([key, value]) => [key.toLowerCase(), value],
+          ),
+        ),
+      });
+      return new Response(
+        JSON.stringify({
+          routeKey: 'google-trends-fast',
+          runHandle: null,
+          status: 'completed',
+          output: { items: [{ query: 'portable blender' }] },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    try {
+      assert.equal(
+        await runHostedDomainCommand('research', [
+          'run',
+          '--resume-from',
+          checkpointPath,
+          '--wait-seconds',
+          '0',
+        ]),
+        0,
+      );
+      assert.equal(requests.length, 1);
+      assert.deepEqual(requests[0]?.body, {
+        routeKey: 'google-trends-fast',
+        runHandle: 'sealed-run-resume-1',
+      });
+      assert.equal(requests[0]?.headers['x-postplus-skill-name'], undefined);
+      assert.equal(
+        (JSON.parse(await readFile(checkpointPath, 'utf8')) as { status: string })
+          .status,
+        'completed',
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects legacy Research commands and invalid semantic intent before network access', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}');
+    };
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('research', [
+            'collect',
+            'google-trends-fast',
+            '--request',
+            'request.json',
+          ]),
+        /research collect was removed/u,
       );
       await assert.rejects(
-        runHostedDomainCommand('research', [
-          'scrape',
-          'facebook-profile-posts',
-          '--request',
-          scrapeRequestPath,
-        ]),
-        /requires --output <result\.json>/u,
+        () =>
+          runHostedDomainCommand('research', [
+            'run',
+            'google-trends-fast',
+            '--query',
+            'portable blender',
+            '--limit',
+            '20',
+          ]),
+        /Unknown option for research run: --limit/u,
       );
       assert.equal(fetchCalls, 0);
     } finally {
       globalThis.fetch = originalFetch;
     }
-  });
-
-  it('preserves a research checkpoint when a resume returns a product error', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const outputPath = resolve(requestDir, 'result.json');
-    const checkpointText = `${JSON.stringify({
-      runHandle: 'signed-opaque-handle',
-      status: 'RUNNING',
-    })}\n`;
-    await writeFile(outputPath, checkpointText);
-    await setLocalSession({
-      accountId: 'account_1',
-      accountName: 'Account',
-      apiBaseUrl: 'https://postplus.test',
-      cliSessionToken: 'cli-session-token',
-      sessionExpiresAt: null,
-      userEmail: 'agent@example.com',
-      userId: 'user_1',
-    });
-
-    const originalFetch = globalThis.fetch;
-    const originalStderrWrite = process.stderr.write.bind(process.stderr);
-    process.stderr.write = (() => true) as typeof process.stderr.write;
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          code: 'postplus_cli_hosted_provider_timeout',
-          error: 'Research status is temporarily unavailable.',
-          layer: 'hosted-collection',
-          operationId: 'op-status-1',
-          status: 504,
-        }),
-        { status: 504, headers: { 'content-type': 'application/json' } },
-      );
-
-    try {
-      const result = await runHostedDomainCommand('research', [
-        'collect',
-        '--resume-from',
-        outputPath,
-      ]);
-      assert.equal(result, 1);
-      assert.equal(await readFile(outputPath, 'utf8'), checkpointText);
-    } finally {
-      globalThis.fetch = originalFetch;
-      process.stderr.write = originalStderrWrite;
-    }
-  });
-
-  it('rejects an unknown research collect collection key', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(requestPath, JSON.stringify({ keyword: 'x' }));
-
-    await assert.rejects(
-      runHostedDomainCommand('research', [
-        'collect',
-        'not-a-collection',
-        '--request',
-        requestPath,
-      ]),
-      /Unknown research collect collection not-a-collection/u,
-    );
-  });
-
-  it('posts the manifest-driven research scrape verb to /hosted/capability with an array input', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    const outputPath = resolve(requestDir, 'result.json');
-    await writeFile(
-      requestPath,
-      JSON.stringify([
-        {
-          url: 'https://www.facebook.com/openai',
-          num_of_posts: 5,
-        },
-      ]),
-    );
-    await setLocalSession({
-      accountId: 'account_1',
-      accountName: 'Account',
-      apiBaseUrl: 'https://postplus.test',
-      cliSessionToken: 'cli-session-token',
-      sessionExpiresAt: null,
-      userEmail: 'agent@example.com',
-      userId: 'user_1',
-    });
-
-    const originalFetch = globalThis.fetch;
-    let postedUrl: string | null = null;
-    let postedBody: unknown = null;
-    globalThis.fetch = async (input, init) => {
-      postedUrl = String(input);
-      postedBody = JSON.parse(String(init?.body));
-      return new Response(
-        JSON.stringify({ charged: true, output: [{ post_id: 'p1' }] }),
-        {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        },
-      );
-    };
-
-    try {
-      const result = await runHostedDomainCommand('research', [
-        'scrape',
-        'facebook-profile-posts',
-        '--request',
-        requestPath,
-        '--output',
-        outputPath,
-      ]);
-      assert.equal(result, 0);
-      assert.equal(
-        postedUrl,
-        'https://postplus.test/api/postplus-cli/hosted/capability',
-      );
-      const body = postedBody as Record<string, unknown>;
-      assert.equal(body.capability, 'public-content-collection');
-      assert.equal(body.operation, 'scrape');
-      assert.equal(body.sourceKey, 'facebook-profile-posts');
-      assert.deepEqual(body.input, [
-        {
-          url: 'https://www.facebook.com/openai',
-          num_of_posts: 5,
-        },
-      ]);
-      // skillName is the compatibility header, never on the public capability body.
-      assert.equal('skillName' in body, false);
-      assert.match(
-        String(body.operationId),
-        /^postplus-cli:research:scrape:facebook-profile-posts:/u,
-      );
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('rejects an unknown research scrape source key', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(requestPath, JSON.stringify([{ url: 'https://x.test' }]));
-
-    await assert.rejects(
-      runHostedDomainCommand('research', [
-        'scrape',
-        'not-a-source',
-        '--request',
-        requestPath,
-      ]),
-      /Unknown research scrape source not-a-source/u,
-    );
   });
 
   it('submits a manifest-driven transcribe request with derived billing dimensions', async () => {
@@ -6038,7 +5820,6 @@ describe('hosted domain commands', () => {
           estimateOnly: true,
           endpointKey: 'transcription',
           estimatedCredits: 2,
-          estimatedMillicredits: 2000,
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
@@ -6076,6 +5857,88 @@ describe('hosted domain commands', () => {
       assert.equal(Object.hasOwn(body, 'operation'), false);
       assert.equal(Object.hasOwn(body, 'quoteConfirmationToken'), false);
       assert.equal(Object.hasOwn(body, 'requestDimensions'), false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('stages a local role input for an exact estimate without a provider submit', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const inputDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-estimate-media-'),
+    );
+    tempDirs.push(inputDir);
+    const localImage = resolve(inputDir, 'person.png');
+    await writeFile(localImage, 'png-bytes');
+
+    const originalFetch = globalThis.fetch;
+    const hostedBodies: Record<string, unknown>[] = [];
+    let putCount = 0;
+    globalThis.fetch = async (input, init) => {
+      if (String(input) === 'https://storage.example.com/estimate-upload') {
+        putCount += 1;
+        return new Response(null, { status: 200 });
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      hostedBodies.push(body);
+      if (body.capability === 'media-file') {
+        return new Response(
+          JSON.stringify({
+            output: {
+              mediaReference:
+                'postplus-media://uploads/users/user_1/hosted-media/inputs/person.png',
+              signedUpload: {
+                method: 'PUT',
+                requiredHeaders: { 'content-type': 'image/png' },
+                url: 'https://storage.example.com/estimate-upload',
+              },
+              storageReference: {
+                bucket: 'uploads',
+                mimeType: 'image/png',
+                name: 'person.png',
+                storagePath: 'users/user_1/hosted-media/inputs/person.png',
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ estimateOnly: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          'estimate',
+          'image-gpt-image-2-edit',
+          '--prompt',
+          'change the jacket color',
+          '--reference-image',
+          localImage,
+        ]),
+        0,
+      );
+      assert.equal(putCount, 1);
+      assert.equal(hostedBodies.length, 2);
+      assert.equal(hostedBodies[0]!.operation, 'create-upload-url');
+      assert.deepEqual(
+        (hostedBodies[1]!.input as Record<string, unknown>).images,
+        [
+          'postplus-media://uploads/users/user_1/hosted-media/inputs/person.png',
+        ],
+      );
+      assert.equal(Object.hasOwn(hostedBodies[1]!, 'operationId'), false);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -6198,6 +6061,54 @@ describe('hosted domain commands', () => {
       output: { data: { id: 'run_1', status: 'completed' } },
     });
     assert.doesNotMatch(terminalStderr, /resume/iu);
+  });
+
+  it('submits once and waits by polling only the returned run handle', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const bodies: Record<string, unknown>[] = [];
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      const payload =
+        body.operation === 'request'
+          ? { output: { data: { id: 'run_wait_1', status: 'processing' } } }
+          : { output: { data: { id: 'run_wait_1', status: 'completed' } } };
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'image-gpt-image-2-text',
+        '--prompt',
+        'a red umbrella',
+        '--wait',
+        '--wait-seconds',
+        '0',
+      ]);
+      assert.equal(result, 0);
+      assert.equal(bodies.length, 2);
+      assert.equal(bodies[0]?.operation, 'request');
+      assert.equal(bodies[1]?.operation, 'status');
+      assert.equal(bodies[1]?.handle, 'run_wait_1');
+      assert.equal('input' in bodies[1]!, false);
+      assert.equal('quoteConfirmationToken' in bodies[1]!, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('polls a pending media run by handle against /hosted/capability', async () => {
@@ -6769,9 +6680,11 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('discovers and projects four independent Seedance 2.5 scene contracts', () => {
+  it('discovers six semantic Seedance 2.5 scene contracts without private scene fields', () => {
     const endpointKeys = [
       'video-seedance-2-5-text',
+      'video-seedance-2-5-edit',
+      'video-seedance-2-5-extend',
       'video-seedance-2-5-first-frame',
       'video-seedance-2-5-first-last-frame',
       'video-seedance-2-5-reference',
@@ -6795,12 +6708,27 @@ describe('hosted domain commands', () => {
     assert.equal(byName.get('reference_images')?.maxItems, 30);
     assert.equal(byName.get('reference_videos')?.maxItems, 10);
     assert.equal(byName.get('reference_audios')?.maxItems, 10);
-    assert.deepEqual(byName.get('omni_reference_task_type')?.enumValues, [
-      'auto',
-      'reference',
-      'edit',
-      'extend',
-    ]);
+    assert.equal(byName.has('omni_reference_task_type'), false);
+
+    for (const fixedEndpointKey of [
+      'video-seedance-2-5-first-frame',
+      'video-seedance-2-5-first-last-frame',
+      'video-seedance-2-5-edit',
+      'video-seedance-2-5-extend',
+    ]) {
+      const fixed = buildHostedRequestSchemaReport({
+        domain: 'media',
+        endpointKey: fixedEndpointKey,
+      }).endpoints?.[0];
+      const fixedNames = new Set(
+        fixed?.fields.map((field) => field.name) ?? [],
+      );
+      assert.equal(fixedNames.has('aspect_ratio'), false);
+      if (fixedEndpointKey !== 'video-seedance-2-5-first-frame') {
+        assert.equal(fixedNames.has('duration'), false);
+      }
+      assert.equal(fixedNames.has('omni_reference_task_type'), false);
+    }
   });
 
   it('maps each Seedance 2.5 scene flags to its exact, non-overlapping Web input', async () => {
@@ -6852,7 +6780,6 @@ describe('hosted domain commands', () => {
             prompt: 'opening scene',
             first_frame: 'https://example.com/open.png',
             resolution: '720p',
-            aspect_ratio: 'adaptive',
             duration: 5,
             generate_audio: true,
             output_format: 'mp4',
@@ -6867,16 +6794,12 @@ describe('hosted domain commands', () => {
             'https://example.com/open.png',
             '--last-frame',
             'https://example.com/close.png',
-            '--duration',
-            '-1',
           ],
           expected: {
             prompt: 'bridge two frames',
             first_frame: 'https://example.com/open.png',
             last_frame: 'https://example.com/close.png',
             resolution: '720p',
-            aspect_ratio: 'adaptive',
-            duration: -1,
             generate_audio: true,
             output_format: 'mp4',
           },
@@ -6903,7 +6826,25 @@ describe('hosted domain commands', () => {
             reference_audios: ['https://example.com/voice.wav'],
             generate_audio: true,
             output_format: 'mp4',
-            omni_reference_task_type: 'auto',
+          },
+        },
+        {
+          args: [
+            'video-seedance-2-5-edit',
+            '--prompt',
+            'replace the subject',
+            '--reference-video',
+            'https://example.com/source.mp4',
+            '--reference-image',
+            'https://example.com/person.png',
+          ],
+          expected: {
+            prompt: 'replace the subject',
+            resolution: '720p',
+            reference_videos: ['https://example.com/source.mp4'],
+            reference_images: ['https://example.com/person.png'],
+            generate_audio: true,
+            output_format: 'mp4',
           },
         },
       ];
@@ -7304,21 +7245,7 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('submits a manifest-driven video-analysis request (request-json) posting the opaque Gemini payload verbatim', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    const payload = {
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: 'Analyze this video for hook, pacing, and CTA.' }],
-        },
-      ],
-      generationConfig: { temperature: 0.2 },
-    };
-    await writeFile(requestPath, JSON.stringify(payload));
-
+  it('submits normalized video-analysis intent without a provider payload', async () => {
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -7347,24 +7274,30 @@ describe('hosted domain commands', () => {
       const result = await runHostedDomainCommand('media', [
         'analyze',
         'video-analysis',
-        '--request',
-        requestPath,
+        '--video',
+        'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
+        '--prompt',
+        'Analyze this video for hook, pacing, and CTA.',
       ]);
       assert.equal(result, 0);
       const body = postedBody as Record<string, unknown>;
       assert.equal(body.capability, 'video-analysis');
       assert.equal(body.operation, 'analyze');
       assert.equal(body.modelKey, 'video-analysis');
-      assert.deepEqual(body.payload, payload);
+      assert.deepEqual(body.input, {
+        prompt: 'Analyze this video for hook, pacing, and CTA.',
+        video:
+          'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
+      });
       assert.match(
         String(body.operationId),
         /^postplus-cli:media:video-analysis:analyze:/u,
       );
-      // The locked Web contract is strict — the body carries no media-generation
-      // envelope keys (no requestDimensions, endpointKey, input, estimatedUsage).
+      // The locked Web contract is strict — no provider request JSON or
+      // media-generation billing dimensions can be authored by the agent.
       assert.equal(Object.hasOwn(body, 'requestDimensions'), false);
       assert.equal(Object.hasOwn(body, 'endpointKey'), false);
-      assert.equal(Object.hasOwn(body, 'input'), false);
+      assert.equal(Object.hasOwn(body, 'payload'), false);
       assert.equal(Object.hasOwn(body, 'estimatedUsage'), false);
     } finally {
       globalThis.fetch = originalFetch;
@@ -7372,16 +7305,6 @@ describe('hosted domain commands', () => {
   });
 
   it('media analyze forwards --video-seconds as estimatedUsage.videoSeconds', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    const payload = {
-      contents: [
-        { role: 'user', parts: [{ text: 'Analyze this short clip.' }] },
-      ],
-    };
-    await writeFile(requestPath, JSON.stringify(payload));
-
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -7406,8 +7329,10 @@ describe('hosted domain commands', () => {
       const result = await runHostedDomainCommand('media', [
         'analyze',
         'video-analysis',
-        '--request',
-        requestPath,
+        '--video',
+        'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
+        '--prompt',
+        'Analyze this short clip.',
         '--video-seconds',
         '30',
       ]);
@@ -7422,11 +7347,6 @@ describe('hosted domain commands', () => {
   });
 
   it('media analyze fast-fails on a non-positive --video-seconds before any hosted call', async () => {
-    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
-    tempDirs.push(requestDir);
-    const requestPath = resolve(requestDir, 'request.json');
-    await writeFile(requestPath, JSON.stringify({ contents: [] }));
-
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -7453,8 +7373,10 @@ describe('hosted domain commands', () => {
           runHostedDomainCommand('media', [
             'analyze',
             'video-analysis',
-            '--request',
-            requestPath,
+            '--video',
+            'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
+            '--prompt',
+            'Analyze this short clip.',
             '--video-seconds',
             '0',
           ]),
@@ -7466,7 +7388,7 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('media-file upload returns a hosted media URL after create-upload-url, PUT, and upload', async () => {
+  it('media-file upload pre-stages once and returns only durable PostPlus identities', async () => {
     const uploadDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-upload-'));
     tempDirs.push(uploadDir);
     const videoPath = resolve(uploadDir, 'clip.mp4');
@@ -7502,21 +7424,6 @@ describe('hosted domain commands', () => {
       if (url === 'https://postplus.test/api/postplus-cli/hosted/capability') {
         const requestBody = JSON.parse(String(init?.body));
         hostedBodies.push(requestBody);
-        if (requestBody.operation === 'upload') {
-          // Faithful to production: the provider upload response nests the fetch
-          // URL under `data` and does NOT carry storageReference. The CLI itself
-          // composes storageReference back in at output.storageReference.
-          return new Response(
-            JSON.stringify({
-              output: {
-                data: {
-                  download_url: 'https://uploads.example.com/clip.mp4',
-                },
-              },
-            }),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          );
-        }
         return new Response(
           JSON.stringify({
             output: {
@@ -7564,7 +7471,7 @@ describe('hosted domain commands', () => {
       ]);
       assert.equal(result, 0);
 
-      assert.equal(hostedBodies.length, 2);
+      assert.equal(hostedBodies.length, 1);
       const body = hostedBodies[0] as Record<string, unknown>;
       assert.equal(body.capability, 'media-file');
       assert.equal(body.operation, 'create-upload-url');
@@ -7574,40 +7481,24 @@ describe('hosted domain commands', () => {
         sizeBytes: fileBytes.length,
       });
       assert.equal(body.operationId, 'upload-test-op');
-      const uploadBody = hostedBodies[1] as Record<string, unknown>;
-      assert.equal(uploadBody.capability, 'media-file');
-      assert.equal(uploadBody.operation, 'upload');
-      assert.equal(uploadBody.operationId, 'upload-test-op:upload');
-      assert.deepEqual(uploadBody.file, {
-        mimeType: 'video/mp4',
-        name: 'clip.mp4',
-        storageReference,
-      });
       // The bytes were streamed to the signed target, not embedded in the JSON body.
       assert.equal(putContentType, 'video/mp4');
       assert.deepEqual(putBytes, fileBytes);
 
       const output = JSON.parse(await readFile(outputPath, 'utf8'));
-      assert.equal(
-        output.output.data.download_url,
-        'https://uploads.example.com/clip.mp4',
-      );
-      assert.deepEqual(output.output.storageReference, storageReference);
-      // The persistent postplus-media:// reference minted by create-upload-url is
-      // composed into the final result beside storageReference/download_url.
       assert.equal(output.output.mediaReference, mediaReference);
+      assert.equal(Object.hasOwn(output.output, 'storageReference'), false);
+      assert.equal(Object.hasOwn(output.output, 'signedUpload'), false);
+      assert.equal(Object.hasOwn(output.output, 'data'), false);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it('media-file --storage-only stops after PostPlus storage and returns the durable handoff', async () => {
-    const uploadDir = await mkdtemp(
-      resolve(tmpdir(), 'postplus-cli-storage-only-'),
-    );
+  it('media-file upload rejects the retired --storage-only switch before network access', async () => {
+    const uploadDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-upload-'));
     tempDirs.push(uploadDir);
     const imagePath = resolve(uploadDir, 'person.png');
-    const outputPath = resolve(uploadDir, 'result.json');
     await writeFile(imagePath, Buffer.from('fake-png-bytes'));
 
     await setLocalSession({
@@ -7620,69 +7511,25 @@ describe('hosted domain commands', () => {
       userId: 'user_1',
     });
 
-    const storageReference = {
-      bucket: 'uploads',
-      mimeType: 'image/png',
-      name: 'person.png',
-      sizeBytes: 14,
-      storagePath: 'user_1/hosted-media/inputs/storage-only/person.png',
-    };
-    const mediaReference =
-      'postplus-media://uploads/user_1/hosted-media/inputs/storage-only/person.png';
     const originalFetch = globalThis.fetch;
-    const hostedBodies: Array<Record<string, unknown>> = [];
-    let storagePutCount = 0;
-    globalThis.fetch = async (input, init) => {
-      const url = String(input);
-      if (url === 'https://postplus.test/api/postplus-cli/hosted/capability') {
-        hostedBodies.push(
-          JSON.parse(String(init?.body)) as Record<string, unknown>,
-        );
-        return new Response(
-          JSON.stringify({
-            output: {
-              mediaReference,
-              signedUpload: {
-                expiresInSeconds: 600,
-                method: 'PUT',
-                requiredHeaders: { 'content-type': 'image/png' },
-                token: 'signed-token',
-                url: 'https://upload.test/storage-only',
-              },
-              storageReference,
-            },
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        );
-      }
-      if (url === 'https://upload.test/storage-only') {
-        storagePutCount += 1;
-        return new Response('{}', { status: 200 });
-      }
-      throw new Error(`unexpected fetch ${url}`);
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      throw new Error('fetch should not be called');
     };
 
     try {
-      const result = await runMediaFileCommand([
-        'upload',
-        '--input-file',
-        imagePath,
-        '--storage-only',
-        '--output',
-        outputPath,
-      ]);
-      assert.equal(result, 0);
-      assert.equal(hostedBodies.length, 1);
-      assert.equal(hostedBodies[0]?.operation, 'create-upload-url');
-      assert.equal(storagePutCount, 1);
-
-      const output = JSON.parse(await readFile(outputPath, 'utf8'));
-      assert.deepEqual(output.output, {
-        mediaReference,
-        storageReference,
-      });
-      assert.equal(Object.hasOwn(output.output, 'signedUpload'), false);
-      assert.equal(Object.hasOwn(output.output, 'data'), false);
+      await assert.rejects(
+        () =>
+          runMediaFileCommand([
+            'upload',
+            '--input-file',
+            imagePath,
+            '--storage-only',
+          ]),
+        /storage-only/u,
+      );
+      assert.equal(fetchCalls, 0);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -8380,7 +8227,320 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('rejects a local file path in a media-url field locally with the upload remedy', async () => {
+  it('stages a local media field durably before the single generation submit', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const inputDir = await mkdtemp(resolve(tmpdir(), 'postplus-local-media-'));
+    tempDirs.push(inputDir);
+    const localImage = resolve(inputDir, 'reference image.png');
+    await writeFile(localImage, 'png-bytes');
+
+    const originalFetch = globalThis.fetch;
+    const hostedBodies: Record<string, unknown>[] = [];
+    let signedPutCount = 0;
+    globalThis.fetch = async (input, init) => {
+      if (String(input) === 'https://storage.example.com/signed-upload') {
+        signedPutCount += 1;
+        assert.equal(init?.method, 'PUT');
+        return new Response(null, { status: 200 });
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      hostedBodies.push(body);
+      if (body.capability === 'media-file') {
+        assert.equal(body.operation, 'create-upload-url');
+        return new Response(
+          JSON.stringify({
+            output: {
+              mediaReference:
+                'postplus-media://uploads/users/user_1/hosted-media/inputs/ref.png',
+              signedUpload: {
+                method: 'PUT',
+                requiredHeaders: { 'content-type': 'image/png' },
+                url: 'https://storage.example.com/signed-upload',
+              },
+              storageReference: {
+                bucket: 'postplus-media',
+                mimeType: 'image/png',
+                name: 'reference image.png',
+                storagePath: 'uploads/user_1/ref.png',
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'create',
+        'image-gpt-image-2-edit',
+        '--prompt',
+        'recolor the jacket to navy',
+        '--reference-image',
+        localImage,
+      ]);
+      assert.equal(result, 0);
+      assert.equal(signedPutCount, 1);
+      assert.equal(hostedBodies.length, 2);
+      const submit = hostedBodies[1]!;
+      assert.equal(submit.capability, 'media-generation');
+      assert.deepEqual((submit.input as Record<string, unknown>).images, [
+        'postplus-media://uploads/users/user_1/hosted-media/inputs/ref.png',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('deduplicates repeated local media by content and reuses the scoped cache', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const inputDir = await mkdtemp(resolve(tmpdir(), 'postplus-local-media-'));
+    tempDirs.push(inputDir);
+    const localImage = resolve(inputDir, '同一张图片.png');
+    await writeFile(localImage, 'same-png-bytes');
+
+    const originalFetch = globalThis.fetch;
+    let createUploadCount = 0;
+    let putCount = 0;
+    let submitCount = 0;
+    globalThis.fetch = async (input, init) => {
+      if (String(input) === 'https://storage.example.com/cache-upload') {
+        putCount += 1;
+        return new Response(null, { status: 200 });
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (body.capability === 'media-file') {
+        createUploadCount += 1;
+        return new Response(
+          JSON.stringify({
+            output: {
+              mediaReference:
+                'postplus-media://uploads/users/user_1/hosted-media/inputs/cached.png',
+              signedUpload: {
+                method: 'PUT',
+                requiredHeaders: {},
+                url: 'https://storage.example.com/cache-upload',
+              },
+              storageReference: {
+                bucket: 'postplus-media',
+                mimeType: 'image/png',
+                name: 'cached.png',
+                storagePath: 'uploads/user_1/cached.png',
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      submitCount += 1;
+      assert.deepEqual((body.input as Record<string, unknown>).images, [
+        'postplus-media://uploads/users/user_1/hosted-media/inputs/cached.png',
+        'postplus-media://uploads/users/user_1/hosted-media/inputs/cached.png',
+      ]);
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    const command = [
+      'create',
+      'image-gpt-image-2-edit',
+      '--prompt',
+      'keep both references',
+      '--reference-image',
+      localImage,
+      '--reference-image',
+      `@${localImage}`,
+    ];
+    try {
+      assert.equal(await runHostedDomainCommand('media', command), 0);
+      assert.equal(await runHostedDomainCommand('media', command), 0);
+      assert.equal(createUploadCount, 1);
+      assert.equal(putCount, 1);
+      assert.equal(submitCount, 2);
+      const cache = JSON.parse(
+        await readFile(
+          resolve(process.env.POSTPLUS_CONFIG_DIR!, 'media-staging-cache.json'),
+          'utf8',
+        ),
+      ) as { entries: Record<string, unknown> };
+      assert.equal(Object.keys(cache.entries).length, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('persists partial staging progress and resumes at the first failed media item', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const inputDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-partial-media-'),
+    );
+    tempDirs.push(inputDir);
+    const firstImage = resolve(inputDir, 'first.png');
+    const secondImage = resolve(inputDir, 'second.png');
+    await writeFile(firstImage, 'first-png-bytes');
+    await writeFile(secondImage, 'second-png-bytes');
+
+    const originalFetch = globalThis.fetch;
+    const stageCounts = new Map<string, number>();
+    let submitCount = 0;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.startsWith('https://storage.example.com/partial-')) {
+        return new Response(null, { status: 200 });
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (body.capability === 'media-file') {
+        const file = body.file as { name: string };
+        const attempt = (stageCounts.get(file.name) ?? 0) + 1;
+        stageCounts.set(file.name, attempt);
+        if (file.name === 'second.png' && attempt === 1) {
+          return new Response(
+            JSON.stringify({
+              code: 'postplus_cli_hosted_media_storage_unavailable',
+              layer: 'hosted-capability',
+              message: 'Mock second input staging failed.',
+              operationId: body.operationId,
+              userMessageRule: 'retry_later',
+            }),
+            { status: 503, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            output: {
+              mediaReference: `postplus-media://uploads/users/user_1/hosted-media/inputs/${file.name}`,
+              signedUpload: {
+                method: 'PUT',
+                requiredHeaders: { 'content-type': 'image/png' },
+                url: `https://storage.example.com/partial-${file.name}`,
+              },
+              storageReference: {
+                bucket: 'uploads',
+                mimeType: 'image/png',
+                name: file.name,
+                storagePath: `users/user_1/hosted-media/inputs/${file.name}`,
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      submitCount += 1;
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    const command = [
+      'create',
+      'image-gpt-image-2-edit',
+      '--prompt',
+      'combine the references',
+      '--reference-image',
+      firstImage,
+      '--reference-image',
+      secondImage,
+    ];
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('media', command),
+        /postplus_cli_hosted_media_storage_unavailable/u,
+      );
+      assert.equal(submitCount, 0);
+
+      assert.equal(await runHostedDomainCommand('media', command), 0);
+      assert.equal(stageCounts.get('first.png'), 1);
+      assert.equal(stageCounts.get('second.png'), 2);
+      assert.equal(submitCount, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects missing explicit paths and wrong media kinds before the network', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const inputDir = await mkdtemp(resolve(tmpdir(), 'postplus-local-media-'));
+    tempDirs.push(inputDir);
+    const imagePath = resolve(inputDir, 'not-audio.png');
+    await writeFile(imagePath, 'png-bytes');
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(null, { status: 500 });
+    };
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'image-gpt-image-2-edit',
+            '--prompt',
+            'test',
+            '--reference-image',
+            '@missing-image.png',
+          ]),
+        /Local media file is not readable/u,
+      );
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'voice-clone',
+            '--text',
+            'hello',
+            '--audio',
+            imagePath,
+          ]),
+        /--audio expects audio.*image\/png/u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects non-file bare and insecure media values before any hosted call', async () => {
     await setLocalSession({
       accountId: 'account_1',
       accountName: 'Account',
@@ -8395,16 +8555,11 @@ describe('hosted domain commands', () => {
     let fetchCalls = 0;
     globalThis.fetch = async () => {
       fetchCalls += 1;
-      return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
+      return new Response(null, { status: 500 });
     };
-
     try {
       for (const badReference of [
-        '/Users/agent/product-shots/ref-a.png',
-        'ref-a.png',
+        'definitely-not-a-local-file.png',
         'http://example.com/ref-a.png',
       ]) {
         await assert.rejects(
@@ -8417,10 +8572,9 @@ describe('hosted domain commands', () => {
               '--reference-image',
               badReference,
             ]),
-          /image-gpt-image-2-edit images must be an https:\/\/ URL, a postplus-media:\/\/ reference, or a data: URI; received ".*"\. A local file must be uploaded first: `postplus media-file upload --input-file <file>`/u,
+          /must be an https:\/\/ URL, a postplus-media:\/\/ reference, or a data: URI/u,
         );
       }
-      // Fast-failed at flag parse: no hosted call was ever made.
       assert.equal(fetchCalls, 0);
     } finally {
       globalThis.fetch = originalFetch;
@@ -8785,6 +8939,50 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('invalidates the update cache immediately on a hosted 426 response', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const cachePath = resolve(
+      process.env.POSTPLUS_CONFIG_DIR!,
+      'update-check.json',
+    );
+    await writeFile(cachePath, '{"checkedAt":"2099-01-01T00:00:00.000Z"}\n');
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          code: 'postplus_client_upgrade_required',
+          error: 'Update required.',
+          compatibility: { upgrade: { command: 'postplus update' } },
+        }),
+        { status: 426, headers: { 'content-type': 'application/json' } },
+      );
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'image-gpt-image-2-text',
+            '--prompt',
+            'test',
+          ]),
+        /Run: postplus update/u,
+      );
+      await assert.rejects(() => readFile(cachePath, 'utf8'), {
+        code: 'ENOENT',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('writes quote confirmation challenges beside hosted command outputs', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);
@@ -8888,8 +9086,7 @@ describe('account read-only commands', () => {
           accountType: 'team',
           accountName: 'Acme',
           availableCredits: 42,
-          availableMillicredits: 42000,
-          reservedMillicredits: 1500,
+          reservedCredits: 1.5,
           subscriptionStatus: 'active',
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
@@ -8909,12 +9106,12 @@ describe('account read-only commands', () => {
         accountType: 'team',
         accountName: 'Acme',
         availableCredits: 42,
-        availableMillicredits: 42000,
-        reservedMillicredits: 1500,
+        reservedCredits: 1.5,
         subscriptionStatus: 'active',
       });
       const human = formatHostedBalanceReport(report);
       assert.match(human, /Available credits: 42/u);
+      assert.match(human, /Reserved \(in-flight\): 1\.5 credits/u);
       assert.match(human, /Acme \(team\)/u);
       assert.match(human, /Subscription: active/u);
     } finally {
@@ -9001,9 +9198,8 @@ describe('account read-only commands', () => {
               target: 'video-seedance-2-text',
               createdAt: '2026-07-02T10:00:00Z',
               updatedAt: '2026-07-02T10:05:00Z',
-              finalizedMillicredits: 3200,
-              reservedMillicredits: 4000,
-              providerStatus: 'succeeded',
+              finalizedCredits: 3.2,
+              reservedCredits: 4,
               hasError: false,
             },
           ],
@@ -9024,7 +9220,8 @@ describe('account read-only commands', () => {
       assert.equal(report.runs.length, 1);
       const human = formatHostedRunsListReport(report);
       assert.match(human, /run_1/u);
-      assert.match(human, /3200mc/u);
+      assert.match(human, /3\.2 credits/u);
+      assert.doesNotMatch(human, /provider|millicredit/u);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -9053,43 +9250,15 @@ describe('account read-only commands', () => {
           status: 'completed',
           target: 'video-seedance-2-text',
           operationId: 'postplus-cli:media:media-generation:request:abc',
-          providerFamily: 'moyu',
-          providerModelPath: 'video-generation/seedance',
-          providerStatus: 'succeeded',
-          providerTaskId: 'task_9',
-          providerUrls: { get: 'https://cdn.example.com/x.mp4' },
           outputs: { data: { id: 'run_1' } },
           error: null,
-          requestDimensions: { seconds: 5 },
-          settlementEvidence: {
-            estimatedExternalCostUsd: 0.00059,
-            estimatedOnly: false,
-            usage: {
-              completionTokens: 90,
-              promptTokens: 0,
-              providerRawUsage: {
-                actualCostUsd: 0.00059,
-                moyuCostSource: 'provider_poll_total_cost',
-                moyuProviderCost: {
-                  currency: 'CNY',
-                  total_cost: '0.00413',
-                },
-                moyuProviderUsage: {
-                  completion_tokens: 90,
-                  total_tokens: 90,
-                },
-                moyuUsageSource: 'provider_poll',
-              },
-              totalTokens: 90,
-            },
-          },
           createdAt: '2026-07-02T10:00:00Z',
           updatedAt: '2026-07-02T10:05:00Z',
           completedAt: '2026-07-02T10:05:00Z',
           failedAt: null,
           expiresAt: '2026-07-09T10:00:00Z',
-          finalizedMillicredits: 3200,
-          reservedMillicredits: 4000,
+          finalizedCredits: 3.2,
+          reservedCredits: 4,
           hasError: false,
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
@@ -9102,31 +9271,12 @@ describe('account read-only commands', () => {
         requestedUrl,
         'https://postplus.test/api/postplus-cli/hosted/runs/run_1',
       );
-      assert.equal(report.finalizedMillicredits, 3200);
-      assert.deepEqual(report.settlementEvidence, {
-        estimatedExternalCostUsd: 0.00059,
-        estimatedOnly: false,
-        usage: {
-          completionTokens: 90,
-          promptTokens: 0,
-          providerRawUsage: {
-            actualCostUsd: 0.00059,
-            moyuCostSource: 'provider_poll_total_cost',
-            moyuProviderCost: {
-              currency: 'CNY',
-              total_cost: '0.00413',
-            },
-            moyuProviderUsage: {
-              completion_tokens: 90,
-              total_tokens: 90,
-            },
-            moyuUsageSource: 'provider_poll',
-          },
-          totalTokens: 90,
-        },
-      });
+      assert.equal(report.finalizedCredits, 3.2);
+      assert.equal(Object.hasOwn(report, 'providerFamily'), false);
+      assert.equal(Object.hasOwn(report, 'settlementEvidence'), false);
       const human = formatHostedRunDetailReport(report);
-      assert.match(human, /Settled cost: 3200 millicredits \(actual\)/u);
+      assert.match(human, /Finalized: 3\.2 PostPlus credits/u);
+      assert.doesNotMatch(human, /Moyu|provider|total_cost|markup/u);
       assert.match(human, /This run is terminal\./u);
     } finally {
       globalThis.fetch = originalFetch;
@@ -9497,8 +9647,8 @@ describe('workflow commands', () => {
             'Glasses ad',
             '--instances',
             '1',
-            '--max-reserved-millicredits',
-            '40000',
+            '--max-reserved-credits',
+            '40',
           ]),
         (error: unknown) =>
           error instanceof Error && /Refusing to launch/u.test(error.message),
@@ -9524,9 +9674,7 @@ describe('workflow commands', () => {
         ]),
       (error: unknown) =>
         error instanceof Error &&
-        /Missing required option --max-reserved-millicredits/u.test(
-          error.message,
-        ),
+        /Missing required option --max-reserved-credits/u.test(error.message),
     );
   });
 
@@ -9546,8 +9694,8 @@ describe('workflow commands', () => {
           'Glasses ad',
           '--instances',
           '1',
-          '--max-reserved-millicredits',
-          '40000',
+          '--max-reserved-credits',
+          '40',
           '--confirm',
         ]),
       );
@@ -9794,10 +9942,13 @@ describe('hosted lib / bin request parity', () => {
         body:
           init?.body === undefined ? undefined : JSON.parse(String(init.body)),
       };
-      return new Response(JSON.stringify({ ok: true, parity: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({ ok: true, parity: true, status: 'completed' }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
     };
     try {
       await run();
@@ -9875,20 +10026,20 @@ describe('hosted lib / bin request parity', () => {
       ],
     },
     {
-      name: 'research collect google-trends-fast',
+      name: 'research run google-trends-fast',
       domain: 'research',
       baseArgs: [
-        'collect',
+        'run',
         'google-trends-fast',
+        '--query',
+        'portable blender',
+        '--country',
+        'US',
+        '--time-range',
+        'today 12-m',
         '--hosted-operation-id',
         PARITY_OP_ID,
       ],
-      requestJson: {
-        keyword: 'portable blender',
-        geo: 'US',
-        timeframe: 'today 12-m',
-        enableTrendingSearches: false,
-      },
     },
     {
       name: 'publish create-post',

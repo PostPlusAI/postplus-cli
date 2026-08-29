@@ -21,14 +21,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "endpoints": [
         {
           "endpointKey": "transcription",
-          "provider": "wavespeed",
-          "providerModelPath": "wavespeed-ai/openai-whisper",
           "fields": [
             {
               "name": "audio",
               "class": "intent",
               "flag": "--audio",
               "type": "media-url",
+              "mediaKind": "audio",
               "required": true
             },
             {
@@ -95,9 +94,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "mediaSeconds"
           ]
         }
       ]
@@ -107,86 +103,381 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "facebook-research",
       "mode": "cli-runner",
-      "surface": "request-json",
-      "verb": "scrape",
+      "surface": "flags",
+      "verb": "run",
       "domain": "research",
       "capability": "public-content-collection",
-      "sourceKeys": [
-        "facebook-group-posts",
-        "facebook-post-by-url",
-        "facebook-profile-posts"
-      ],
       "effect": "spend",
       "sources": [
         {
-          "sourceKey": "facebook-group-posts",
-          "datasetId": "gd_lz11l67o2cb3r0lkj3"
+          "routeKey": "facebook-group-posts",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 50,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         },
         {
-          "sourceKey": "facebook-post-by-url",
-          "datasetId": "gd_lyclm1571iy3mv57zw"
+          "routeKey": "facebook-post-by-url",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            }
+          ]
         },
         {
-          "sourceKey": "facebook-profile-posts",
-          "datasetId": "gd_lkaxegm826bjpoo9m5"
+          "routeKey": "facebook-profile-posts",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 50,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         }
       ]
     },
     {
       "skill": "facebook-research",
       "mode": "cli-runner",
-      "surface": "request-json",
-      "verb": "collect",
+      "surface": "flags",
+      "verb": "run",
       "domain": "research",
       "capability": "hosted-collection",
-      "collectionKeys": [
-        "facebook-ads-library",
-        "facebook-comments",
-        "facebook-events",
-        "facebook-groups",
-        "facebook-marketplace",
-        "facebook-pages",
-        "facebook-posts",
-        "facebook-reels",
-        "facebook-search"
-      ],
       "effect": "spend",
       "collections": [
         {
-          "collectionKey": "facebook-ads-library",
-          "actorId": "curious_coder/facebook-ads-library-scraper"
+          "routeKey": "facebook-ads-library",
+          "fields": [
+            {
+              "name": "query",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
+              "required": true,
+              "description": "Public search phrase."
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "country",
+              "class": "default",
+              "flag": "--country",
+              "type": "string",
+              "required": false,
+              "description": "Two-letter market code.",
+              "default": "US"
+            },
+            {
+              "name": "status",
+              "class": "default",
+              "flag": "--status",
+              "type": "string",
+              "required": false,
+              "description": "Ad activity status.",
+              "default": "active",
+              "enumValues": [
+                "active",
+                "inactive",
+                "all"
+              ]
+            }
+          ]
         },
         {
-          "collectionKey": "facebook-comments",
-          "actorId": "apify/facebook-comments-scraper"
+          "routeKey": "facebook-comments",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "include_replies",
+              "class": "default",
+              "flag": "--include-replies",
+              "type": "boolean",
+              "required": false,
+              "description": "Include nested public replies.",
+              "default": false
+            }
+          ]
         },
         {
-          "collectionKey": "facebook-events",
-          "actorId": "apify/facebook-events-scraper"
+          "routeKey": "facebook-events",
+          "fields": [
+            {
+              "name": "queries",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
+              "required": false,
+              "description": "Event search phrase; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": false,
+              "description": "Public event URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ],
+          "requiredAnyOf": [
+            "queries",
+            "urls"
+          ]
         },
         {
-          "collectionKey": "facebook-groups",
-          "actorId": "apify/facebook-groups-scraper"
+          "routeKey": "facebook-groups",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "query",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
+              "required": false,
+              "description": "Optional keyword within the group."
+            }
+          ]
         },
         {
-          "collectionKey": "facebook-marketplace",
-          "actorId": "apify/facebook-marketplace-scraper"
+          "routeKey": "facebook-marketplace",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         },
         {
-          "collectionKey": "facebook-pages",
-          "actorId": "apify/facebook-pages-scraper"
+          "routeKey": "facebook-pages",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            }
+          ]
         },
         {
-          "collectionKey": "facebook-posts",
-          "actorId": "apify/facebook-posts-scraper"
+          "routeKey": "facebook-posts",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         },
         {
-          "collectionKey": "facebook-reels",
-          "actorId": "apify/facebook-reels-scraper"
+          "routeKey": "facebook-reels",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         },
         {
-          "collectionKey": "facebook-search",
-          "actorId": "apify/facebook-search-scraper"
+          "routeKey": "facebook-search",
+          "fields": [
+            {
+              "name": "categories",
+              "class": "intent",
+              "flag": "--category",
+              "type": "string",
+              "required": true,
+              "description": "Search category; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "locations",
+              "class": "intent",
+              "flag": "--location",
+              "type": "string",
+              "required": false,
+              "description": "Search location; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         }
       ]
     }
@@ -195,18 +486,42 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "google-trends-research",
       "mode": "cli-runner",
-      "surface": "request-json",
-      "verb": "collect",
+      "surface": "flags",
+      "verb": "run",
       "domain": "research",
       "capability": "hosted-collection",
-      "collectionKeys": [
-        "google-trends-fast"
-      ],
       "effect": "spend",
       "collections": [
         {
-          "collectionKey": "google-trends-fast",
-          "actorId": "google-trends-fast-scraper"
+          "routeKey": "google-trends-fast",
+          "fields": [
+            {
+              "name": "query",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
+              "required": true,
+              "description": "Public search phrase."
+            },
+            {
+              "name": "country",
+              "class": "default",
+              "flag": "--country",
+              "type": "string",
+              "required": false,
+              "description": "Two-letter market code.",
+              "default": "US"
+            },
+            {
+              "name": "time_range",
+              "class": "default",
+              "flag": "--time-range",
+              "type": "string",
+              "required": false,
+              "description": "Trend time window, for example today 12-m.",
+              "default": "today 12-m"
+            }
+          ]
         }
       ]
     }
@@ -240,8 +555,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "endpoints": [
         {
           "endpointKey": "image-gpt-image-2-text",
-          "provider": "openai-image",
-          "providerModelPath": "openai/gpt-image-2/text-to-image",
           "fields": [
             {
               "name": "prompt",
@@ -311,16 +624,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "imageSize",
-            "quality"
           ]
         },
         {
           "endpointKey": "image-gpt-image-2-edit",
-          "provider": "openai-image",
-          "providerModelPath": "openai/gpt-image-2/edit",
           "fields": [
             {
               "name": "prompt",
@@ -334,6 +641,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -398,16 +706,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "imageSize",
-            "quality"
           ]
         },
         {
           "endpointKey": "image-nano-banana-2-text",
-          "provider": "wavespeed",
-          "providerModelPath": "google/nano-banana-2/text-to-image",
           "fields": [
             {
               "name": "prompt",
@@ -472,15 +774,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "imageSize"
           ]
         },
         {
           "endpointKey": "image-nano-banana-2-edit",
-          "provider": "wavespeed",
-          "providerModelPath": "google/nano-banana-2/edit",
           "fields": [
             {
               "name": "prompt",
@@ -494,6 +791,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -553,15 +851,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "imageSize"
           ]
         },
         {
           "endpointKey": "image-nano-banana-pro-text-1k",
-          "provider": "wavespeed",
-          "providerModelPath": "google/nano-banana-pro/text-to-image",
           "fields": [
             {
               "name": "prompt",
@@ -623,15 +916,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "imageSize"
           ]
         },
         {
           "endpointKey": "image-nano-banana-pro-text-2k",
-          "provider": "wavespeed",
-          "providerModelPath": "google/nano-banana-pro/text-to-image",
           "fields": [
             {
               "name": "prompt",
@@ -693,15 +981,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "imageSize"
           ]
         },
         {
           "endpointKey": "image-nano-banana-pro-text-4k",
-          "provider": "wavespeed",
-          "providerModelPath": "google/nano-banana-pro/text-to-image",
           "fields": [
             {
               "name": "prompt",
@@ -763,15 +1046,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "imageSize"
           ]
         },
         {
           "endpointKey": "image-nano-banana-pro-edit-1k",
-          "provider": "wavespeed",
-          "providerModelPath": "google/nano-banana-pro/edit",
           "fields": [
             {
               "name": "prompt",
@@ -785,6 +1063,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -839,15 +1118,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "imageSize"
           ]
         },
         {
           "endpointKey": "image-nano-banana-pro-edit-2k",
-          "provider": "wavespeed",
-          "providerModelPath": "google/nano-banana-pro/edit",
           "fields": [
             {
               "name": "prompt",
@@ -861,6 +1135,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -915,15 +1190,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "imageSize"
           ]
         },
         {
           "endpointKey": "image-nano-banana-pro-edit-4k",
-          "provider": "wavespeed",
-          "providerModelPath": "google/nano-banana-pro/edit",
           "fields": [
             {
               "name": "prompt",
@@ -937,6 +1207,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -991,15 +1262,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "imageSize"
           ]
         },
         {
           "endpointKey": "image-seedream-v5-lite-text",
-          "provider": "wavespeed",
-          "providerModelPath": "bytedance/seedream-v5.0-lite",
           "fields": [
             {
               "name": "prompt",
@@ -1043,15 +1309,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "billableUnitCount"
           ]
         },
         {
           "endpointKey": "image-seedream-v5-lite-sequential",
-          "provider": "wavespeed",
-          "providerModelPath": "bytedance/seedream-v5.0-lite/sequential",
           "fields": [
             {
               "name": "prompt",
@@ -1104,15 +1365,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "billableUnitCount"
           ]
         },
         {
           "endpointKey": "image-seedream-v5-lite-edit",
-          "provider": "wavespeed",
-          "providerModelPath": "bytedance/seedream-v5.0-lite/edit",
           "fields": [
             {
               "name": "prompt",
@@ -1126,6 +1382,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -1164,15 +1421,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "billableUnitCount"
           ]
         },
         {
           "endpointKey": "image-seedream-v5-lite-edit-sequential",
-          "provider": "wavespeed",
-          "providerModelPath": "bytedance/seedream-v5.0-lite/edit-sequential",
           "fields": [
             {
               "name": "prompt",
@@ -1186,6 +1438,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "required": true
             },
@@ -1233,15 +1486,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "billableUnitCount"
           ]
         },
         {
           "endpointKey": "image-higgsfield-soul-text",
-          "provider": "higgsfield",
-          "providerModelPath": "higgsfield-ai/soul/standard",
           "fields": [
             {
               "name": "prompt",
@@ -1309,9 +1557,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "billableUnitCount"
           ]
         }
       ]
@@ -1321,43 +1566,194 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "instagram-research",
       "mode": "cli-runner",
-      "surface": "request-json",
-      "verb": "collect",
+      "surface": "flags",
+      "verb": "run",
       "domain": "research",
       "capability": "hosted-collection",
-      "collectionKeys": [
-        "instagram-comments",
-        "instagram-email-search",
-        "instagram-hashtags",
-        "instagram-posts",
-        "instagram-profiles",
-        "instagram-search"
-      ],
       "effect": "spend",
       "collections": [
         {
-          "collectionKey": "instagram-comments",
-          "actorId": "apify/instagram-comment-scraper"
+          "routeKey": "instagram-comments",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "include_replies",
+              "class": "default",
+              "flag": "--include-replies",
+              "type": "boolean",
+              "required": false,
+              "description": "Include nested public replies.",
+              "default": false
+            }
+          ]
         },
         {
-          "collectionKey": "instagram-email-search",
-          "actorId": "bhansalisoft/instagram-email-scraper"
+          "routeKey": "instagram-email-search",
+          "fields": [
+            {
+              "name": "handles",
+              "class": "intent",
+              "flag": "--handle",
+              "type": "string",
+              "required": true,
+              "description": "Public account handle; repeat for more than one.",
+              "repeatable": true
+            }
+          ]
         },
         {
-          "collectionKey": "instagram-hashtags",
-          "actorId": "apify/instagram-hashtag-scraper"
+          "routeKey": "instagram-hashtags",
+          "fields": [
+            {
+              "name": "hashtags",
+              "class": "intent",
+              "flag": "--hashtag",
+              "type": "string",
+              "required": true,
+              "description": "Hashtag without #; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "kind",
+              "class": "default",
+              "flag": "--kind",
+              "type": "string",
+              "required": false,
+              "description": "Content type.",
+              "default": "posts",
+              "enumValues": [
+                "posts",
+                "reels",
+                "stories"
+              ]
+            }
+          ]
         },
         {
-          "collectionKey": "instagram-posts",
-          "actorId": "apify/instagram-post-scraper"
+          "routeKey": "instagram-posts",
+          "fields": [
+            {
+              "name": "handles",
+              "class": "intent",
+              "flag": "--handle",
+              "type": "string",
+              "required": true,
+              "description": "Public account handle; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         },
         {
-          "collectionKey": "instagram-profiles",
-          "actorId": "apify/instagram-profile-scraper"
+          "routeKey": "instagram-profiles",
+          "fields": [
+            {
+              "name": "handles",
+              "class": "intent",
+              "flag": "--handle",
+              "type": "string",
+              "required": true,
+              "description": "Public account handle; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         },
         {
-          "collectionKey": "instagram-search",
-          "actorId": "apify/instagram-search-scraper"
+          "routeKey": "instagram-search",
+          "fields": [
+            {
+              "name": "queries",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
+              "required": true,
+              "description": "Public search phrase; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "kind",
+              "class": "default",
+              "flag": "--kind",
+              "type": "string",
+              "required": false,
+              "description": "Search result type.",
+              "default": "user",
+              "enumValues": [
+                "user",
+                "hashtag",
+                "place",
+                "popular"
+              ]
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         }
       ]
     }
@@ -1366,26 +1762,47 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "pinterest-search",
       "mode": "cli-runner",
-      "surface": "request-json",
-      "verb": "collect",
+      "surface": "flags",
+      "verb": "run",
       "domain": "research",
       "capability": "hosted-collection",
-      "collectionKeys": [
-        "pinterest-search"
-      ],
       "effect": "spend",
       "collections": [
         {
-          "collectionKey": "pinterest-search",
-          "actorId": "easyapi/pinterest-search-scraper",
-          "inputFields": [
+          "routeKey": "pinterest-search",
+          "fields": [
+            {
+              "name": "query",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
+              "required": true,
+              "description": "Public search phrase."
+            },
             {
               "name": "limit",
+              "class": "default",
+              "flag": "--limit",
               "type": "number",
               "required": false,
+              "description": "Maximum pin count; service minimum is 20.",
+              "default": 20,
               "integer": true,
               "min": 20,
-              "default": 20
+              "max": 10000
+            },
+            {
+              "name": "kind",
+              "class": "default",
+              "flag": "--kind",
+              "type": "string",
+              "required": false,
+              "description": "Pin type filter.",
+              "default": "all",
+              "enumValues": [
+                "all",
+                "videos"
+              ]
             }
           ]
         }
@@ -1396,92 +1813,181 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "reddit-search",
       "mode": "cli-runner",
-      "surface": "request-json",
-      "verb": "collect",
+      "surface": "flags",
+      "verb": "run",
       "domain": "research",
       "capability": "hosted-collection",
-      "collectionKeys": [
-        "reddit-search",
-        "reddit-post-comments",
-        "reddit-subreddit-posts",
-        "reddit-user-activity"
-      ],
       "effect": "spend",
       "collections": [
         {
-          "collectionKey": "reddit-search",
-          "actorId": "harshmaur/reddit-scraper",
-          "inputFields": [
+          "routeKey": "reddit-search",
+          "fields": [
             {
-              "name": "maxPostsCount",
-              "type": "number",
+              "name": "queries",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
               "required": false,
-              "integer": true,
-              "min": 0,
-              "max": 50000,
-              "default": 10
+              "description": "Search phrase; repeat for more than one.",
+              "repeatable": true
             },
             {
-              "name": "maxCommunitiesCount",
-              "type": "number",
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
               "required": false,
-              "integer": true,
-              "min": 0,
-              "default": 2
-            }
-          ]
-        },
-        {
-          "collectionKey": "reddit-post-comments",
-          "actorId": "harshmaur/reddit-comments-scraper",
-          "inputFields": [
-            {
-              "name": "maxCommentsPerPost",
-              "type": "number",
-              "required": false,
-              "integer": true,
-              "min": 1,
-              "max": 10000,
-              "default": 100
-            }
-          ]
-        },
-        {
-          "collectionKey": "reddit-subreddit-posts",
-          "actorId": "harshmaur/reddit-subreddit-scraper",
-          "inputFields": [
-            {
-              "name": "maxPostsCount",
-              "type": "number",
-              "required": false,
-              "integer": true,
-              "min": 1,
-              "max": 50000,
-              "default": 1000
-            }
-          ]
-        },
-        {
-          "collectionKey": "reddit-user-activity",
-          "actorId": "harshmaur/reddit-user-scraper",
-          "inputFields": [
-            {
-              "name": "maxPostsCount",
-              "type": "number",
-              "required": false,
-              "integer": true,
-              "min": 0,
-              "max": 50000,
-              "default": 25
+              "description": "Public Reddit feed URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
             },
             {
-              "name": "maxCommentsCount",
+              "name": "sort",
+              "class": "default",
+              "flag": "--sort",
+              "type": "string",
+              "required": false,
+              "description": "Search ordering.",
+              "default": "relevance",
+              "enumValues": [
+                "relevance",
+                "hot",
+                "top",
+                "new",
+                "comments"
+              ]
+            },
+            {
+              "name": "time_range",
+              "class": "default",
+              "flag": "--time-range",
+              "type": "string",
+              "required": false,
+              "description": "Search time window.",
+              "default": "year",
+              "enumValues": [
+                "hour",
+                "day",
+                "week",
+                "month",
+                "year",
+                "all"
+              ]
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
               "type": "number",
               "required": false,
+              "description": "Maximum post count.",
+              "default": 10,
+              "integer": true,
+              "min": 1,
+              "max": 50000
+            }
+          ],
+          "requiredAnyOf": [
+            "queries",
+            "urls"
+          ]
+        },
+        {
+          "routeKey": "reddit-post-comments",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum comments per post.",
+              "default": 100,
+              "integer": true,
+              "min": 1,
+              "max": 10000
+            }
+          ]
+        },
+        {
+          "routeKey": "reddit-subreddit-posts",
+          "fields": [
+            {
+              "name": "subreddits",
+              "class": "intent",
+              "flag": "--subreddit",
+              "type": "string",
+              "required": true,
+              "description": "Subreddit name without r/; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum post count.",
+              "default": 100,
+              "integer": true,
+              "min": 1,
+              "max": 50000
+            },
+            {
+              "name": "posted_after",
+              "class": "intent",
+              "flag": "--posted-after",
+              "type": "string",
+              "required": false,
+              "description": "Optional inclusive ISO date lower bound."
+            }
+          ]
+        },
+        {
+          "routeKey": "reddit-user-activity",
+          "fields": [
+            {
+              "name": "handles",
+              "class": "intent",
+              "flag": "--handle",
+              "type": "string",
+              "required": true,
+              "description": "Reddit username; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "post_limit",
+              "class": "default",
+              "flag": "--post-limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum posts per user.",
+              "default": 25,
               "integer": true,
               "min": 0,
-              "max": 50000,
-              "default": 25
+              "max": 50000
+            },
+            {
+              "name": "comment_limit",
+              "class": "default",
+              "flag": "--comment-limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum comments per user.",
+              "default": 25,
+              "integer": true,
+              "min": 0,
+              "max": 50000
             }
           ]
         }
@@ -1560,43 +2066,221 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "tiktok-research",
       "mode": "cli-runner",
-      "surface": "request-json",
-      "verb": "collect",
+      "surface": "flags",
+      "verb": "run",
       "domain": "research",
       "capability": "hosted-collection",
-      "collectionKeys": [
-        "tiktok-ads-top",
-        "tiktok-comments",
-        "tiktok-profiles",
-        "tiktok-related-videos",
-        "tiktok-users",
-        "tiktok-videos"
-      ],
       "effect": "spend",
       "collections": [
         {
-          "collectionKey": "tiktok-ads-top",
-          "actorId": "tiktok-creative-center-top-ads"
+          "routeKey": "tiktok-ads-top",
+          "fields": [
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum ad count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         },
         {
-          "collectionKey": "tiktok-comments",
-          "actorId": "clockworks/tiktok-comments-scraper"
+          "routeKey": "tiktok-comments",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "include_replies",
+              "class": "default",
+              "flag": "--include-replies",
+              "type": "boolean",
+              "required": false,
+              "description": "Include comment replies.",
+              "default": false
+            }
+          ]
         },
         {
-          "collectionKey": "tiktok-profiles",
-          "actorId": "clockworks/tiktok-profile-scraper"
+          "routeKey": "tiktok-profiles",
+          "fields": [
+            {
+              "name": "handles",
+              "class": "intent",
+              "flag": "--handle",
+              "type": "string",
+              "required": true,
+              "description": "Public account handle; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         },
         {
-          "collectionKey": "tiktok-related-videos",
-          "actorId": "clockworks/tiktok-scraper"
+          "routeKey": "tiktok-related-videos",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "country",
+              "class": "default",
+              "flag": "--country",
+              "type": "string",
+              "required": false,
+              "description": "Two-letter market code.",
+              "default": "US"
+            }
+          ]
         },
         {
-          "collectionKey": "tiktok-users",
-          "actorId": "clockworks/tiktok-user-search-scraper"
+          "routeKey": "tiktok-users",
+          "fields": [
+            {
+              "name": "queries",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
+              "required": true,
+              "description": "Public search phrase; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         },
         {
-          "collectionKey": "tiktok-videos",
-          "actorId": "clockworks/tiktok-scraper"
+          "routeKey": "tiktok-videos",
+          "fields": [
+            {
+              "name": "queries",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
+              "required": false,
+              "description": "Video search phrase; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "handles",
+              "class": "intent",
+              "flag": "--handle",
+              "type": "string",
+              "required": false,
+              "description": "Creator handle; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "hashtags",
+              "class": "intent",
+              "flag": "--hashtag",
+              "type": "string",
+              "required": false,
+              "description": "Hashtag without #; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": false,
+              "description": "Public video URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "country",
+              "class": "default",
+              "flag": "--country",
+              "type": "string",
+              "required": false,
+              "description": "Two-letter market code.",
+              "default": "US"
+            }
+          ],
+          "requiredAnyOf": [
+            "queries",
+            "handles",
+            "hashtags",
+            "urls"
+          ]
         }
       ]
     }
@@ -1605,7 +2289,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "video-analysis",
       "mode": "cli-runner",
-      "surface": "request-json",
+      "surface": "flags",
       "verb": "analyze",
       "domain": "media",
       "capability": "video-analysis",
@@ -1616,7 +2300,23 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "models": [
         {
           "modelKey": "video-analysis",
-          "providerModelPath": "gemini-3.5-flash"
+          "fields": [
+            {
+              "name": "video",
+              "class": "intent",
+              "flag": "--video",
+              "type": "media-url",
+              "mediaKind": "video",
+              "required": true
+            },
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            }
+          ]
         }
       ]
     }
@@ -1637,6 +2337,8 @@ export const HOSTED_EXECUTION_MANIFESTS = {
         "video-infinitetalk",
         "video-kling-v2-6-pro-motion-control",
         "video-seedance-2-5-text",
+        "video-seedance-2-5-edit",
+        "video-seedance-2-5-extend",
         "video-seedance-2-5-first-frame",
         "video-seedance-2-5-first-last-frame",
         "video-seedance-2-5-reference",
@@ -1651,8 +2353,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "endpoints": [
         {
           "endpointKey": "video-kling-v3-0-pro-text",
-          "provider": "wavespeed",
-          "providerModelPath": "kwaivgi/kling-v3.0-pro/text-to-video",
           "fields": [
             {
               "name": "prompt",
@@ -1712,16 +2412,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "duration",
-            "audioMode"
           ]
         },
         {
           "endpointKey": "video-kling-v3-0-pro-image",
-          "provider": "wavespeed",
-          "providerModelPath": "kwaivgi/kling-v3.0-pro/image-to-video",
           "fields": [
             {
               "name": "prompt",
@@ -1735,6 +2429,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -1776,16 +2471,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "duration",
-            "audioMode"
           ]
         },
         {
           "endpointKey": "video-kling-v3-0-std-text",
-          "provider": "wavespeed",
-          "providerModelPath": "kwaivgi/kling-v3.0-std/text-to-video",
           "fields": [
             {
               "name": "prompt",
@@ -1845,16 +2534,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "duration",
-            "audioMode"
           ]
         },
         {
           "endpointKey": "video-kling-v3-0-std-image",
-          "provider": "wavespeed",
-          "providerModelPath": "kwaivgi/kling-v3.0-std/image-to-video",
           "fields": [
             {
               "name": "prompt",
@@ -1868,6 +2551,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -1909,22 +2593,17 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "duration",
-            "audioMode"
           ]
         },
         {
           "endpointKey": "video-infinitetalk",
-          "provider": "wavespeed",
-          "providerModelPath": "wavespeed-ai/infinitetalk",
           "fields": [
             {
               "name": "image",
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -1932,6 +2611,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--audio",
               "type": "media-url",
+              "mediaKind": "audio",
               "required": true
             },
             {
@@ -1961,6 +2641,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--mask-image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": false
             },
             {
@@ -1984,21 +2665,17 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "duration"
           ]
         },
         {
           "endpointKey": "video-kling-v2-6-pro-motion-control",
-          "provider": "wavespeed",
-          "providerModelPath": "kwaivgi/kling-v2.6-pro/motion-control",
           "fields": [
             {
               "name": "image",
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -2006,6 +2683,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--video",
               "type": "media-url",
+              "mediaKind": "video",
               "required": true
             },
             {
@@ -2057,15 +2735,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "duration"
           ]
         },
         {
           "endpointKey": "video-seedance-2-5-text",
-          "provider": "moyu-enterprise",
-          "providerModelPath": "doubao-seedance-2.5",
           "fields": [
             {
               "name": "prompt",
@@ -2159,226 +2832,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": []
+          ]
         },
         {
-          "endpointKey": "video-seedance-2-5-first-frame",
-          "provider": "moyu-enterprise",
-          "providerModelPath": "doubao-seedance-2.5",
-          "fields": [
-            {
-              "name": "prompt",
-              "class": "intent",
-              "flag": "--prompt",
-              "type": "string",
-              "required": true
-            },
-            {
-              "name": "first_frame",
-              "class": "intent",
-              "flag": "--first-frame",
-              "type": "media-url",
-              "required": true
-            },
-            {
-              "name": "resolution",
-              "class": "default",
-              "flag": "--resolution",
-              "type": "string",
-              "enumValues": [
-                "480p",
-                "720p"
-              ],
-              "canonicalize": "lowercase",
-              "default": "720p",
-              "required": false
-            },
-            {
-              "name": "aspect_ratio",
-              "class": "default",
-              "flag": "--aspect-ratio",
-              "type": "string",
-              "enumValues": [
-                "adaptive",
-                "21:9",
-                "16:9",
-                "4:3",
-                "1:1",
-                "3:4",
-                "9:16"
-              ],
-              "default": "adaptive",
-              "required": false
-            },
-            {
-              "name": "duration",
-              "class": "default",
-              "flag": "--duration",
-              "type": "number",
-              "default": 5,
-              "required": false,
-              "min": 4,
-              "max": 30,
-              "specialValues": [
-                -1
-              ]
-            },
-            {
-              "name": "generate_audio",
-              "class": "default",
-              "flag": "--generate-audio",
-              "type": "boolean",
-              "default": true,
-              "required": false
-            },
-            {
-              "name": "output_format",
-              "class": "default",
-              "flag": "--output-format",
-              "type": "string",
-              "enumValues": [
-                "mp4",
-                "mov"
-              ],
-              "canonicalize": "lowercase",
-              "default": "mp4",
-              "required": false
-            },
-            {
-              "name": "operationId",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "quoteConfirmationToken",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "requestDimensions",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            }
-          ],
-          "billingDimensions": []
-        },
-        {
-          "endpointKey": "video-seedance-2-5-first-last-frame",
-          "provider": "moyu-enterprise",
-          "providerModelPath": "doubao-seedance-2.5",
-          "fields": [
-            {
-              "name": "prompt",
-              "class": "intent",
-              "flag": "--prompt",
-              "type": "string",
-              "required": true
-            },
-            {
-              "name": "first_frame",
-              "class": "intent",
-              "flag": "--first-frame",
-              "type": "media-url",
-              "required": true
-            },
-            {
-              "name": "last_frame",
-              "class": "intent",
-              "flag": "--last-frame",
-              "type": "media-url",
-              "required": true
-            },
-            {
-              "name": "resolution",
-              "class": "default",
-              "flag": "--resolution",
-              "type": "string",
-              "enumValues": [
-                "480p",
-                "720p"
-              ],
-              "canonicalize": "lowercase",
-              "default": "720p",
-              "required": false
-            },
-            {
-              "name": "aspect_ratio",
-              "class": "default",
-              "flag": "--aspect-ratio",
-              "type": "string",
-              "enumValues": [
-                "adaptive"
-              ],
-              "default": "adaptive",
-              "required": false
-            },
-            {
-              "name": "duration",
-              "class": "default",
-              "flag": "--duration",
-              "type": "number",
-              "default": -1,
-              "required": false,
-              "enumValues": [
-                "-1"
-              ]
-            },
-            {
-              "name": "generate_audio",
-              "class": "default",
-              "flag": "--generate-audio",
-              "type": "boolean",
-              "default": true,
-              "required": false
-            },
-            {
-              "name": "output_format",
-              "class": "default",
-              "flag": "--output-format",
-              "type": "string",
-              "enumValues": [
-                "mp4",
-                "mov"
-              ],
-              "canonicalize": "lowercase",
-              "default": "mp4",
-              "required": false
-            },
-            {
-              "name": "operationId",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "quoteConfirmationToken",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            },
-            {
-              "name": "requestDimensions",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            }
-          ],
-          "billingDimensions": []
-        },
-        {
-          "endpointKey": "video-seedance-2-5-reference",
-          "provider": "moyu-enterprise",
-          "providerModelPath": "doubao-seedance-2.5",
+          "endpointKey": "video-seedance-2-5-edit",
           "fields": [
             {
               "name": "prompt",
@@ -2399,42 +2856,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "canonicalize": "lowercase",
               "default": "720p",
               "required": false
-            },
-            {
-              "name": "aspect_ratio",
-              "class": "default",
-              "flag": "--aspect-ratio",
-              "type": "string",
-              "enumValues": [
-                "adaptive",
-                "21:9",
-                "16:9",
-                "4:3",
-                "1:1",
-                "3:4",
-                "9:16"
-              ],
-              "default": "adaptive",
-              "required": false
-            },
-            {
-              "name": "duration",
-              "class": "default",
-              "flag": "--duration",
-              "type": "number",
-              "default": 5,
-              "required": false,
-              "min": 4,
-              "max": 30,
-              "specialValues": [
-                -1
-              ]
             },
             {
               "name": "reference_images",
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 30,
@@ -2445,6 +2873,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-video",
               "type": "media-url",
+              "mediaKind": "video",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 10,
@@ -2455,6 +2884,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-audio",
               "type": "media-url",
+              "mediaKind": "audio",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 10,
@@ -2482,18 +2912,103 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": false
             },
             {
-              "name": "omni_reference_task_type",
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "requestDimensions",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ]
+        },
+        {
+          "endpointKey": "video-seedance-2-5-extend",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "resolution",
               "class": "default",
-              "flag": "--omni-reference-task-type",
+              "flag": "--resolution",
               "type": "string",
               "enumValues": [
-                "auto",
-                "reference",
-                "edit",
-                "extend"
+                "480p",
+                "720p"
               ],
               "canonicalize": "lowercase",
-              "default": "auto",
+              "default": "720p",
+              "required": false
+            },
+            {
+              "name": "reference_images",
+              "class": "intent",
+              "flag": "--reference-image",
+              "type": "media-url",
+              "mediaKind": "image",
+              "repeatable": true,
+              "minItems": 1,
+              "maxItems": 30,
+              "required": false
+            },
+            {
+              "name": "reference_videos",
+              "class": "intent",
+              "flag": "--reference-video",
+              "type": "media-url",
+              "mediaKind": "video",
+              "repeatable": true,
+              "minItems": 1,
+              "maxItems": 10,
+              "required": false
+            },
+            {
+              "name": "reference_audios",
+              "class": "intent",
+              "flag": "--reference-audio",
+              "type": "media-url",
+              "mediaKind": "audio",
+              "repeatable": true,
+              "minItems": 1,
+              "maxItems": 10,
+              "required": false
+            },
+            {
+              "name": "generate_audio",
+              "class": "default",
+              "flag": "--generate-audio",
+              "type": "boolean",
+              "default": true,
+              "required": false
+            },
+            {
+              "name": "output_format",
+              "class": "default",
+              "flag": "--output-format",
+              "type": "string",
+              "enumValues": [
+                "mp4",
+                "mov"
+              ],
+              "canonicalize": "lowercase",
+              "default": "mp4",
               "required": false
             },
             {
@@ -2517,13 +3032,311 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": []
+          ]
+        },
+        {
+          "endpointKey": "video-seedance-2-5-first-frame",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "first_frame",
+              "class": "intent",
+              "flag": "--first-frame",
+              "type": "media-url",
+              "mediaKind": "image",
+              "required": true
+            },
+            {
+              "name": "resolution",
+              "class": "default",
+              "flag": "--resolution",
+              "type": "string",
+              "enumValues": [
+                "480p",
+                "720p"
+              ],
+              "canonicalize": "lowercase",
+              "default": "720p",
+              "required": false
+            },
+            {
+              "name": "duration",
+              "class": "default",
+              "flag": "--duration",
+              "type": "number",
+              "default": 5,
+              "required": false,
+              "min": 4,
+              "max": 30,
+              "specialValues": [
+                -1
+              ]
+            },
+            {
+              "name": "generate_audio",
+              "class": "default",
+              "flag": "--generate-audio",
+              "type": "boolean",
+              "default": true,
+              "required": false
+            },
+            {
+              "name": "output_format",
+              "class": "default",
+              "flag": "--output-format",
+              "type": "string",
+              "enumValues": [
+                "mp4",
+                "mov"
+              ],
+              "canonicalize": "lowercase",
+              "default": "mp4",
+              "required": false
+            },
+            {
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "requestDimensions",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ]
+        },
+        {
+          "endpointKey": "video-seedance-2-5-first-last-frame",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "first_frame",
+              "class": "intent",
+              "flag": "--first-frame",
+              "type": "media-url",
+              "mediaKind": "image",
+              "required": true
+            },
+            {
+              "name": "last_frame",
+              "class": "intent",
+              "flag": "--last-frame",
+              "type": "media-url",
+              "mediaKind": "image",
+              "required": true
+            },
+            {
+              "name": "resolution",
+              "class": "default",
+              "flag": "--resolution",
+              "type": "string",
+              "enumValues": [
+                "480p",
+                "720p"
+              ],
+              "canonicalize": "lowercase",
+              "default": "720p",
+              "required": false
+            },
+            {
+              "name": "generate_audio",
+              "class": "default",
+              "flag": "--generate-audio",
+              "type": "boolean",
+              "default": true,
+              "required": false
+            },
+            {
+              "name": "output_format",
+              "class": "default",
+              "flag": "--output-format",
+              "type": "string",
+              "enumValues": [
+                "mp4",
+                "mov"
+              ],
+              "canonicalize": "lowercase",
+              "default": "mp4",
+              "required": false
+            },
+            {
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "requestDimensions",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ]
+        },
+        {
+          "endpointKey": "video-seedance-2-5-reference",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "resolution",
+              "class": "default",
+              "flag": "--resolution",
+              "type": "string",
+              "enumValues": [
+                "480p",
+                "720p"
+              ],
+              "canonicalize": "lowercase",
+              "default": "720p",
+              "required": false
+            },
+            {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "adaptive",
+                "21:9",
+                "16:9",
+                "4:3",
+                "1:1",
+                "3:4",
+                "9:16"
+              ],
+              "default": "adaptive",
+              "required": false
+            },
+            {
+              "name": "duration",
+              "class": "default",
+              "flag": "--duration",
+              "type": "number",
+              "default": 5,
+              "required": false,
+              "min": 4,
+              "max": 30,
+              "specialValues": [
+                -1
+              ]
+            },
+            {
+              "name": "reference_images",
+              "class": "intent",
+              "flag": "--reference-image",
+              "type": "media-url",
+              "mediaKind": "image",
+              "repeatable": true,
+              "minItems": 1,
+              "maxItems": 30,
+              "required": false
+            },
+            {
+              "name": "reference_videos",
+              "class": "intent",
+              "flag": "--reference-video",
+              "type": "media-url",
+              "mediaKind": "video",
+              "repeatable": true,
+              "minItems": 1,
+              "maxItems": 10,
+              "required": false
+            },
+            {
+              "name": "reference_audios",
+              "class": "intent",
+              "flag": "--reference-audio",
+              "type": "media-url",
+              "mediaKind": "audio",
+              "repeatable": true,
+              "minItems": 1,
+              "maxItems": 10,
+              "required": false
+            },
+            {
+              "name": "generate_audio",
+              "class": "default",
+              "flag": "--generate-audio",
+              "type": "boolean",
+              "default": true,
+              "required": false
+            },
+            {
+              "name": "output_format",
+              "class": "default",
+              "flag": "--output-format",
+              "type": "string",
+              "enumValues": [
+                "mp4",
+                "mov"
+              ],
+              "canonicalize": "lowercase",
+              "default": "mp4",
+              "required": false
+            },
+            {
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "requestDimensions",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ]
         },
         {
           "endpointKey": "video-seedance-2-image",
-          "provider": "moyu-enterprise",
-          "providerModelPath": "doubao-seedance-2-0-260128",
           "fields": [
             {
               "name": "prompt",
@@ -2537,6 +3350,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -2584,18 +3398,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "duration",
-            "resolution",
-            "referenceVideoCount",
-            "referenceVideoMode"
           ]
         },
         {
           "endpointKey": "video-seedance-2-text",
-          "provider": "moyu-enterprise",
-          "providerModelPath": "doubao-seedance-2-0-260128",
           "fields": [
             {
               "name": "prompt",
@@ -2648,6 +3454,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 9,
@@ -2658,6 +3465,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-video",
               "type": "media-url",
+              "mediaKind": "video",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 3,
@@ -2668,6 +3476,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-audio",
               "type": "media-url",
+              "mediaKind": "audio",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 3,
@@ -2702,18 +3511,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "duration",
-            "resolution",
-            "referenceVideoCount",
-            "referenceVideoMode"
           ]
         },
         {
           "endpointKey": "video-seedance-2-fast-image",
-          "provider": "moyu-enterprise",
-          "providerModelPath": "doubao-seedance-2-0-fast-260128",
           "fields": [
             {
               "name": "prompt",
@@ -2727,6 +3528,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -2773,18 +3575,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "duration",
-            "resolution",
-            "referenceVideoCount",
-            "referenceVideoMode"
           ]
         },
         {
           "endpointKey": "video-seedance-2-fast-text",
-          "provider": "moyu-enterprise",
-          "providerModelPath": "doubao-seedance-2-0-fast-260128",
           "fields": [
             {
               "name": "prompt",
@@ -2836,6 +3630,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 9,
@@ -2846,6 +3641,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-video",
               "type": "media-url",
+              "mediaKind": "video",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 3,
@@ -2856,6 +3652,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-audio",
               "type": "media-url",
+              "mediaKind": "audio",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 3,
@@ -2890,18 +3687,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "duration",
-            "resolution",
-            "referenceVideoCount",
-            "referenceVideoMode"
           ]
         },
         {
           "endpointKey": "video-seedance-2-mini-image",
-          "provider": "moyu-enterprise",
-          "providerModelPath": "doubao-seedance-2-0-mini-260615",
           "fields": [
             {
               "name": "prompt",
@@ -2915,6 +3704,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--image",
               "type": "media-url",
+              "mediaKind": "image",
               "required": true
             },
             {
@@ -2961,18 +3751,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "duration",
-            "resolution",
-            "referenceVideoCount",
-            "referenceVideoMode"
           ]
         },
         {
           "endpointKey": "video-seedance-2-mini-text",
-          "provider": "moyu-enterprise",
-          "providerModelPath": "doubao-seedance-2-0-mini-260615",
           "fields": [
             {
               "name": "prompt",
@@ -3024,6 +3806,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--reference-image",
               "type": "media-url",
+              "mediaKind": "image",
               "repeatable": true,
               "minItems": 1,
               "maxItems": 9,
@@ -3058,12 +3841,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "duration",
-            "resolution",
-            "referenceVideoCount",
-            "referenceVideoMode"
           ]
         }
       ]
@@ -3084,14 +3861,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "endpoints": [
         {
           "endpointKey": "transcription-video",
-          "provider": "wavespeed",
-          "providerModelPath": "wavespeed-ai/openai-whisper-with-video",
           "fields": [
             {
               "name": "video",
               "class": "intent",
               "flag": "--video",
               "type": "media-url",
+              "mediaKind": "video",
               "required": true
             },
             {
@@ -3158,9 +3934,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "mediaSeconds"
           ]
         }
       ]
@@ -3182,8 +3955,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "endpoints": [
         {
           "endpointKey": "voice-design",
-          "provider": "wavespeed",
-          "providerModelPath": "wavespeed-ai/qwen3-tts/voice-design",
           "fields": [
             {
               "name": "text",
@@ -3241,15 +4012,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "billableUnitCount"
           ]
         },
         {
           "endpointKey": "voice-clone",
-          "provider": "wavespeed",
-          "providerModelPath": "wavespeed-ai/qwen3-tts/voice-clone",
           "fields": [
             {
               "name": "text",
@@ -3263,6 +4029,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--audio",
               "type": "media-url",
+              "mediaKind": "audio",
               "required": true
             },
             {
@@ -3314,9 +4081,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "string",
               "required": false
             }
-          ],
-          "billingDimensions": [
-            "billableUnitCount"
           ]
         }
       ]
@@ -3326,28 +4090,126 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "x-research",
       "mode": "cli-runner",
-      "surface": "request-json",
-      "verb": "collect",
+      "surface": "flags",
+      "verb": "run",
       "domain": "research",
       "capability": "hosted-collection",
-      "collectionKeys": [
-        "x-posts",
-        "x-profiles",
-        "x-user-search"
-      ],
       "effect": "spend",
       "collections": [
         {
-          "collectionKey": "x-posts",
-          "actorId": "apidojo/twitter-scraper-lite"
+          "routeKey": "x-posts",
+          "fields": [
+            {
+              "name": "queries",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
+              "required": false,
+              "description": "Public post search phrase; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "handles",
+              "class": "intent",
+              "flag": "--handle",
+              "type": "string",
+              "required": false,
+              "description": "Account handle; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": false,
+              "description": "Public post or profile URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "sort",
+              "class": "default",
+              "flag": "--sort",
+              "type": "string",
+              "required": false,
+              "description": "Post ordering.",
+              "default": "Latest",
+              "enumValues": [
+                "Latest",
+                "Top"
+              ]
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ],
+          "requiredAnyOf": [
+            "queries",
+            "handles",
+            "urls"
+          ]
         },
         {
-          "collectionKey": "x-profiles",
-          "actorId": "apidojo/twitter-user-scraper"
+          "routeKey": "x-profiles",
+          "fields": [
+            {
+              "name": "handles",
+              "class": "intent",
+              "flag": "--handle",
+              "type": "string",
+              "required": true,
+              "description": "Public account handle; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         },
         {
-          "collectionKey": "x-user-search",
-          "actorId": "apidojo/twitter-user-scraper"
+          "routeKey": "x-user-search",
+          "fields": [
+            {
+              "name": "queries",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
+              "required": true,
+              "description": "Public search phrase; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         }
       ]
     }
@@ -3356,46 +4218,154 @@ export const HOSTED_EXECUTION_MANIFESTS = {
     {
       "skill": "youtube-research",
       "mode": "cli-runner",
-      "surface": "request-json",
-      "verb": "scrape",
+      "surface": "flags",
+      "verb": "run",
       "domain": "research",
       "capability": "public-content-collection",
-      "sourceKeys": [
-        "youtube-videos"
-      ],
       "effect": "spend",
       "sources": [
         {
-          "sourceKey": "youtube-videos",
-          "datasetId": "gd_lk56epmy2i5g7lzu0k"
+          "routeKey": "youtube-videos",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 50,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
         }
       ]
     },
     {
       "skill": "youtube-research",
       "mode": "cli-runner",
-      "surface": "request-json",
-      "verb": "collect",
+      "surface": "flags",
+      "verb": "run",
       "domain": "research",
       "capability": "hosted-collection",
-      "collectionKeys": [
-        "youtube-channel-summary",
-        "youtube-comments",
-        "youtube-video-download"
-      ],
       "effect": "spend",
       "collections": [
         {
-          "collectionKey": "youtube-channel-summary",
-          "actorId": "automation-lab/youtube-channel-scraper"
+          "routeKey": "youtube-channel-summary",
+          "fields": [
+            {
+              "name": "channels",
+              "class": "intent",
+              "flag": "--channel",
+              "type": "string",
+              "required": true,
+              "description": "Channel URL, ID, or @handle; repeat for more than one.",
+              "repeatable": true
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum recent videos per channel.",
+              "default": 20,
+              "integer": true,
+              "min": 0,
+              "max": 200
+            }
+          ]
         },
         {
-          "collectionKey": "youtube-comments",
-          "actorId": "apidojo/youtube-comments-scraper"
+          "routeKey": "youtube-comments",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "sort",
+              "class": "default",
+              "flag": "--sort",
+              "type": "string",
+              "required": false,
+              "description": "Comment ordering.",
+              "default": "top",
+              "enumValues": [
+                "top",
+                "newest"
+              ]
+            },
+            {
+              "name": "include_replies",
+              "class": "default",
+              "flag": "--include-replies",
+              "type": "boolean",
+              "required": false,
+              "description": "Include comment replies.",
+              "default": true
+            }
+          ]
         },
         {
-          "collectionKey": "youtube-video-download",
-          "actorId": "scrapearchitect/youtube-video-downloader"
+          "routeKey": "youtube-video-download",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "resolution",
+              "class": "default",
+              "flag": "--resolution",
+              "type": "string",
+              "required": false,
+              "description": "Desired download resolution.",
+              "default": "720p",
+              "enumValues": [
+                "360p",
+                "480p",
+                "720p",
+                "1080p"
+              ]
+            }
+          ]
         }
       ]
     }

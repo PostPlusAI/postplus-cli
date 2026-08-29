@@ -26,6 +26,11 @@ import {
   buildVerbTargetIndex,
   capabilityEndpointsWithFlag,
 } from './hosted-manifest-index.js';
+import {
+  type LocalMediaFile,
+  inferMediaMimeType,
+  resolveManifestMediaInputs,
+} from './hosted-media-input.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import {
@@ -38,6 +43,7 @@ import {
   type LargeCreditQuoteConfirmationChallenge,
   readLargeCreditQuoteConfirmationChallenge,
 } from './quote-confirmation.js';
+import { clearUpdateCheckCache } from './update-check.js';
 
 // Manifest-driven verb grammar indexes (SSOT projected from apps/web +
 // public-skill-metadata via the generated manifest). The verb/flag grammar,
@@ -152,11 +158,13 @@ export async function runHostedDomainCommand(
     if (subcommand === 'schema') {
       return runHostedSchema(domain, rest, context);
     }
-    if (subcommand === 'collect') {
-      return runResearchCollect(rest, context);
+    if (subcommand === 'run') {
+      return runResearchRun(rest, context);
     }
-    if (subcommand === 'scrape') {
-      return runResearchScrape(rest, context);
+    if (subcommand === 'collect' || subcommand === 'scrape') {
+      throw new Error(
+        `research ${subcommand} was removed. Migrate to \`postplus research run <route> --<semantic flags> --wait --output <result.json>\`; JSON request files and --max-charge-usd are no longer accepted.`,
+      );
     }
     printResearchHelp();
     return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
@@ -282,7 +290,7 @@ async function runMediaVerbFlags(args: {
   const endpoint = requireResolvedEndpoint(resolved, verb, endpointKey);
   const fields = endpoint.fields;
   const flagToField = new Map<string, ManifestField>();
-  const booleanKeys = new Set<string>(['json']);
+  const booleanKeys = new Set<string>(['json', 'wait']);
   const arrayKeys = new Set<string>();
 
   for (const field of fields) {
@@ -307,6 +315,9 @@ async function runMediaVerbFlags(args: {
     'output',
     'quote-confirmation-token',
     'skill',
+    'wait',
+    'wait-seconds',
+    'poll-interval-seconds',
   ]);
 
   // Reject unknown flags. This is how runner-managed fields (no flag) and typos
@@ -332,7 +343,7 @@ async function runMediaVerbFlags(args: {
     }
   }
 
-  const input = buildMediaVerbInput({
+  let input = buildMediaVerbInput({
     endpointKey,
     fields,
     flags,
@@ -344,6 +355,19 @@ async function runMediaVerbFlags(args: {
   // stays authoritative). It runs on the built input so a mixed-case "4K"/"High"
   // passes while an out-of-enum value fast-fails locally before the hosted call.
   assertModelledFieldValuesInRange(endpointKey, fields, input);
+  input = await resolveManifestMediaInputs({
+    endpointKey,
+    fields,
+    request: input,
+    stage: context
+      ? null
+      : ({ file, operationId }) =>
+          stageHostedMediaFile({
+            file,
+            operationId,
+            skillName: flags.values.get('skill') ?? resolved.skill,
+          }),
+  });
   // media-url fields fast-fail here on a local path / bare string; the Web
   // boundary enforces the same scheme set at submit time.
   assertMediaUrlFieldSchemes(endpointKey, fields, input);
@@ -361,6 +385,7 @@ async function runMediaVerbFlags(args: {
     quoteConfirmationToken: flags.values.get('quote-confirmation-token'),
     skillName: flags.values.get('skill') ?? resolved.skill,
     context,
+    wait: resolveHostedSubmitWaitOption(flags),
   });
 }
 
@@ -377,7 +402,7 @@ async function runMediaVerbRequestJson(args: {
 }): Promise<number | unknown> {
   const { endpointKey, resolved, verb, context } = args;
   const endpoint = requireResolvedEndpoint(resolved, verb, endpointKey);
-  const flags = parseFlags(args.args, new Set(['json']));
+  const flags = parseFlags(args.args, new Set(['json', 'wait']));
   const allowedKeys = new Set([
     'hosted-operation-id',
     'json',
@@ -385,6 +410,9 @@ async function runMediaVerbRequestJson(args: {
     'quote-confirmation-token',
     'request',
     'skill',
+    'wait',
+    'wait-seconds',
+    'poll-interval-seconds',
   ]);
   for (const key of [...flags.values.keys(), ...flags.booleans]) {
     if (!allowedKeys.has(key)) {
@@ -402,7 +430,7 @@ async function runMediaVerbRequestJson(args: {
       `media ${verb} ${endpointKey} --request must be a JSON object of media-generation input.`,
     );
   }
-  const input = raw as Record<string, unknown>;
+  let input = raw as Record<string, unknown>;
 
   assertNoUnknownModelledFields(endpointKey, endpoint.fields, input);
 
@@ -422,6 +450,19 @@ async function runMediaVerbRequestJson(args: {
   // resolution ("999p") fast-fails locally before the hosted call while a mixed-case
   // "720P" passes.
   assertModelledFieldValuesInRange(endpointKey, endpoint.fields, input);
+  input = await resolveManifestMediaInputs({
+    endpointKey,
+    fields: endpoint.fields,
+    request: input,
+    stage: context
+      ? null
+      : ({ file, operationId }) =>
+          stageHostedMediaFile({
+            file,
+            operationId,
+            skillName: flags.values.get('skill') ?? resolved.skill,
+          }),
+  });
   // media-url fields fast-fail here on a local path / bare string; the Web
   // boundary enforces the same scheme set at submit time.
   assertMediaUrlFieldSchemes(endpointKey, endpoint.fields, input);
@@ -439,6 +480,7 @@ async function runMediaVerbRequestJson(args: {
     quoteConfirmationToken: flags.values.get('quote-confirmation-token'),
     skillName: flags.values.get('skill') ?? resolved.skill,
     context,
+    wait: resolveHostedSubmitWaitOption(flags),
   });
 }
 
@@ -455,14 +497,10 @@ function requireResolvedEndpoint(
   return resolved.endpoint;
 }
 
-// video-analysis verb (request-json surface). The agent authors an opaque Gemini
-// request object (contents + generationConfig) in `--request <file>`; capability,
-// operation, and modelKey come from the verb + positional, so the body posts
-// EXACTLY the locked Web contract. There is no field classification; the payload
-// is forwarded verbatim as the Gemini request. The optional `--video-seconds`
-// flag is the one runner-supplied hint: when provided it is sent as
-// `estimatedUsage.videoSeconds` so the Web boundary can route eligible short
-// videos through its preflight/routing path (omit it to use the default route).
+// video-analysis verb (normalized flags surface). The agent supplies only the
+// video role and analysis prompt; local media is durably staged by the same
+// Manifest-driven transport as generation. Provider payload construction is a
+// Web concern and never appears in CLI or Skill input.
 async function runVideoAnalysisVerb(args: {
   args: string[];
   modelKey: string;
@@ -471,15 +509,22 @@ async function runVideoAnalysisVerb(args: {
   context: HostedRequestContext | undefined;
 }): Promise<number | unknown> {
   const { modelKey, resolved, verb, context } = args;
+  const model = resolved.model;
+  if (!model) {
+    throw new Error(
+      `media ${verb} ${modelKey} resolved without a model contract.`,
+    );
+  }
   const flags = parseFlags(args.args, new Set(['json']));
   const allowedKeys = new Set([
     'hosted-operation-id',
     'json',
     'output',
     'quote-confirmation-token',
-    'request',
+    'prompt',
     'skill',
     'video-seconds',
+    'video',
   ]);
   for (const key of [...flags.values.keys(), ...flags.booleans]) {
     if (!allowedKeys.has(key)) {
@@ -488,16 +533,25 @@ async function runVideoAnalysisVerb(args: {
   }
 
   const outputPath = flags.values.get('output') ?? null;
-  const { body: raw, errorInputLabel } = await resolveRequestBody(
-    context,
-    flags,
-  );
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(
-      `media ${verb} ${modelKey} --request must be a JSON object of Gemini request payload.`,
-    );
-  }
-  const payload = raw as Record<string, unknown>;
+  const prompt = requireFlag(flags, 'prompt');
+  let normalizedInput: Record<string, unknown> = {
+    prompt,
+    video: requireFlag(flags, 'video'),
+  };
+  normalizedInput = await resolveManifestMediaInputs({
+    endpointKey: modelKey,
+    fields: model.fields,
+    request: normalizedInput,
+    stage: context
+      ? null
+      : ({ file, operationId }) =>
+          stageHostedMediaFile({
+            file,
+            operationId,
+            skillName: flags.values.get('skill') ?? resolved.skill,
+          }),
+  });
+  assertMediaUrlFieldSchemes(modelKey, model.fields, normalizedInput);
 
   // Optional runner-supplied hint: the source video duration. When provided it is
   // forwarded as estimatedUsage.videoSeconds so the Web boundary's video-analysis
@@ -520,7 +574,7 @@ async function runVideoAnalysisVerb(args: {
     capability: 'video-analysis',
     operation: 'analyze',
     modelKey,
-    payload,
+    input: normalizedInput,
     ...(estimatedUsage ? { estimatedUsage } : {}),
     operationId:
       flags.values.get('hosted-operation-id') ??
@@ -538,7 +592,7 @@ async function runVideoAnalysisVerb(args: {
           skillName: flags.values.get('skill') ?? resolved.skill,
           context,
         }),
-      errorInputLabel,
+      errorInputLabel: `media-${verb}-${modelKey}`,
       json: flags.booleans.has('json'),
       outputPath,
     },
@@ -546,32 +600,12 @@ async function runVideoAnalysisVerb(args: {
   );
 }
 
-// `media-file upload`: the generic local-file -> hosted media verb. Released
-// skills ship no scripts, so a skill that must place a local file behind hosted
-// media first drives it through this verb. It is capability-generic: it knows no
-// skill request payload. The runner asks the Web boundary for a signed upload
-// target, PUTs bytes outside the JSON envelope, then asks the hosted provider
-// upload operation for the reusable provider-facing result.
-const MEDIA_FILE_MIME_BY_EXTENSION: Record<string, string> = {
-  '.gif': 'image/gif',
-  '.jpeg': 'image/jpeg',
-  '.jpg': 'image/jpeg',
-  '.m4a': 'audio/mp4',
-  '.m4v': 'video/mp4',
-  '.mov': 'video/quicktime',
-  '.mp3': 'audio/mpeg',
-  '.mp4': 'video/mp4',
-  '.png': 'image/png',
-  '.wav': 'audio/wav',
-  '.webm': 'video/webm',
-  '.webp': 'image/webp',
-};
-
+// `media-file upload`: an advanced durable pre-staging verb. Normal media
+// commands accept local paths directly; this command exists only when a caller
+// intentionally wants a reusable PostPlus media identity. It never chooses or
+// calls a provider transport.
 function inferUploadMimeType(filePath: string): string {
-  return (
-    MEDIA_FILE_MIME_BY_EXTENSION[path.extname(filePath).toLowerCase()] ??
-    'application/octet-stream'
-  );
+  return inferMediaMimeType(filePath) ?? 'application/octet-stream';
 }
 
 export async function runMediaFileCommand(
@@ -631,7 +665,7 @@ async function runMediaFileUpload(
   args: string[],
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
-  const flags = parseFlags(args, new Set(['json', 'storage-only']));
+  const flags = parseFlags(args, new Set(['json']));
   const allowedKeys = new Set([
     'hosted-operation-id',
     'input-file',
@@ -640,7 +674,6 @@ async function runMediaFileUpload(
     'output',
     'quote-confirmation-token',
     'skill',
-    'storage-only',
   ]);
   for (const key of [...flags.values.keys(), ...flags.booleans]) {
     if (!allowedKeys.has(key)) {
@@ -685,57 +718,10 @@ async function runMediaFileUpload(
         });
         const output = readHostedUploadOutput(payload);
         const signedUpload = readSignedUpload(output);
-        const storageReference = readStorageReferenceValue(output);
         const mediaReference = readMediaReferenceValue(output);
         await putHostedMediaBytes(signedUpload, absolutePath);
 
-        // `--storage-only` has no provider semantics: it stops after minting the
-        // durable PostPlus identity. A later capability request chooses its own
-        // provider transport (for example, the Moyu Seedance adapter registers
-        // referenced media in Moyu's token-scoped asset library). Avoid sending
-        // these bytes through the generic WaveSpeed upload hop here.
-        if (flags.booleans.has('storage-only')) {
-          return buildStorageOnlyUploadResult(payload, {
-            mediaReference,
-            storageReference,
-          });
-        }
-
-        const uploadResult = await postHostedJson({
-          body: {
-            capability: 'media-file',
-            operation: 'upload',
-            file: {
-              mimeType,
-              name: path.basename(absolutePath),
-              storageReference,
-            },
-            operationId: hostedOperationId
-              ? `${hostedOperationId}:upload`
-              : `postplus-cli:media-file:upload:${randomUUID()}`,
-            quoteConfirmationToken:
-              flags.values.get('quote-confirmation-token') ?? undefined,
-          },
-          pathName: '/api/postplus-cli/hosted/capability',
-          skillName: flags.values.get('skill') ?? null,
-          context,
-        });
-
-        // Surface the storage handoff this two-step upload already minted.
-        // The provider upload response only carries the provider fetch URL
-        // (output.data.download_url, a signed URL that EXPIRES); the
-        // create-upload-url response also minted (a) the Supabase
-        // storageReference — the only shape hosted verbs re-materializing bytes
-        // from storage accept (`media analyze` file_reference) — and (b) the
-        // persistent `postplus-media://` mediaReference, which never expires and
-        // is accepted by media-generation media fields and `media-file download
-        // --reference`. Compose both back in as siblings of
-        // output.data.download_url so the upload has durable handoffs instead of
-        // a dead end once the signed URL lapses.
-        return attachStorageHandoffToUploadResult(uploadResult, {
-          mediaReference,
-          storageReference,
-        });
+        return buildDurableUploadResult(payload, mediaReference);
       },
       errorInputLabel: inputFile,
       json: flags.booleans.has('json'),
@@ -1032,20 +1018,6 @@ function readSignedUpload(output: Record<string, unknown>): SignedUpload {
   return { method: record.method, requiredHeaders, url: record.url.trim() };
 }
 
-function readStorageReferenceValue(output: Record<string, unknown>): unknown {
-  const storageReference = output.storageReference;
-  if (
-    !storageReference ||
-    typeof storageReference !== 'object' ||
-    Array.isArray(storageReference)
-  ) {
-    throw new Error(
-      'Hosted media upload response is missing storageReference.',
-    );
-  }
-  return storageReference;
-}
-
 function readMediaReferenceValue(output: Record<string, unknown>): string {
   const mediaReference = output.mediaReference;
   if (
@@ -1059,46 +1031,37 @@ function readMediaReferenceValue(output: Record<string, unknown>): string {
   return mediaReference;
 }
 
-// Compose the create-upload-url storage handoff (storageReference +
-// mediaReference) into the final `media-file upload` result. The provider
-// upload response only exposes the provider fetch URL (output.data.download_url);
-// both durable identities minted at create-upload-url are otherwise lost after
-// the two-step flow. Fail loud if the envelope shape is unexpected rather than
-// silently dropping the handoff.
-function attachStorageHandoffToUploadResult(
-  payload: unknown,
-  handoff: { mediaReference: string; storageReference: unknown },
-): unknown {
-  if (
-    !payload ||
-    typeof payload !== 'object' ||
-    Array.isArray(payload) ||
-    !('output' in payload)
-  ) {
-    throw new Error(
-      'Hosted media upload response is missing output; cannot attach the storage handoff.',
-    );
-  }
-  const record = payload as Record<string, unknown>;
-  const output = record.output;
-  if (!output || typeof output !== 'object' || Array.isArray(output)) {
-    throw new Error(
-      'Hosted media upload output is not an object; cannot attach the storage handoff.',
-    );
-  }
-  return {
-    ...record,
-    output: {
-      ...(output as Record<string, unknown>),
-      mediaReference: handoff.mediaReference,
-      storageReference: handoff.storageReference,
+// Internal transport for a Manifest-declared local media input. It intentionally
+// stops at the durable PostPlus reference: endpoint-owned provider
+// materialization happens later at the Web boundary, after every local file has
+// staged successfully and before the single provider submit.
+async function stageHostedMediaFile(input: {
+  file: LocalMediaFile;
+  operationId: string;
+  skillName: string;
+}): Promise<string> {
+  const payload = await postHostedJson({
+    body: {
+      capability: 'media-file',
+      operation: 'create-upload-url',
+      file: {
+        mimeType: input.file.mimeType,
+        name: input.file.name,
+        sizeBytes: input.file.sizeBytes,
+      },
+      operationId: input.operationId,
     },
-  };
+    pathName: '/api/postplus-cli/hosted/capability',
+    skillName: input.skillName,
+  });
+  const output = readHostedUploadOutput(payload);
+  await putHostedMediaBytes(readSignedUpload(output), input.file.absolutePath);
+  return readMediaReferenceValue(output);
 }
 
-function buildStorageOnlyUploadResult(
+function buildDurableUploadResult(
   payload: unknown,
-  handoff: { mediaReference: string; storageReference: unknown },
+  mediaReference: string,
 ): unknown {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error(
@@ -1108,8 +1071,7 @@ function buildStorageOnlyUploadResult(
   return {
     ...(payload as Record<string, unknown>),
     output: {
-      mediaReference: handoff.mediaReference,
-      storageReference: handoff.storageReference,
+      mediaReference,
     },
   };
 }
@@ -1135,20 +1097,17 @@ async function putHostedMediaBytes(
 function printMediaFileHelp(): void {
   process.stdout.write(`PostPlus CLI - media-file commands
 
+Most media commands accept local paths directly through role flags such as
+--reference-image, --reference-video, --audio, or --video. Use media-file only
+when you intentionally want to pre-stage one file for reuse or download a
+completed artifact.
+
 Usage:
-  postplus media-file upload --input-file <path> [--mime <type>] [--storage-only] [--skill <skill-id>] [--json] [--output <result.json>]
+  postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
   postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
 
-The upload result carries output.mediaReference (persistent postplus-media://
-reference, never expires): reuse it in media-generation media fields and in
-media-file download --reference. output.data.download_url is a signed URL that
-expires.
-
-Use --storage-only to stop after PostPlus Storage and return only the durable
-PostPlus handoff. This flag does not select or contact a provider. If the returned
-reference is later used in a Moyu Seedance video request, the Web Moyu adapter
-registers that request's media in Moyu's asset library. Other capabilities (for
-example Video Analysis) keep their own provider-specific upload and execution flow.
+Upload returns a reusable PostPlus media reference. Normal generation commands
+prepare local role files automatically.
 `);
 }
 
@@ -1171,6 +1130,7 @@ function submitMediaGenerationRequest(params: {
   quoteConfirmationToken: string | undefined;
   skillName: string;
   context: HostedRequestContext | undefined;
+  wait: { pollIntervalMs: number; waitBudgetMs: number } | null;
 }): Promise<number | unknown> {
   // Billing dimensions are derived solely at the Web boundary from
   // (endpointKey, input); the CLI sends only the payload. The Web request schema
@@ -1186,14 +1146,44 @@ function submitMediaGenerationRequest(params: {
 
   return dispatchHostedCommand(
     {
-      request: () =>
-        postHostedJson({
+      request: async () => {
+        const submitted = await postHostedJson({
           body,
           pathName: '/api/postplus-cli/hosted/capability',
           skillName: params.skillName,
           context: params.context,
           timeoutMs: HOSTED_MEDIA_CREATE_REQUEST_TIMEOUT_MS,
-        }),
+        });
+        if (!params.wait) {
+          return submitted;
+        }
+        const run = readMediaPollRun(submitted);
+        if (!run.status || isTerminalRunStatus(run.status)) {
+          return submitted;
+        }
+        if (!run.id) {
+          throw new Error(
+            `Media submit returned non-terminal status ${run.status} without a resumable run handle.`,
+          );
+        }
+        return pollHostedRunUntilSettled({
+          pollIntervalMs: params.wait.pollIntervalMs,
+          pollOnce: () =>
+            postHostedJson({
+              body: {
+                capability: 'media-generation',
+                handle: run.id,
+                operation: 'status',
+                operationId: `postplus-cli:media:media-generation:status:${randomUUID()}`,
+              },
+              pathName: '/api/postplus-cli/hosted/capability',
+              skillName: null,
+              context: params.context,
+            }),
+          readStatus: (payload) => readMediaPollRun(payload).status,
+          waitBudgetMs: params.wait.waitBudgetMs,
+        });
+      },
       errorInputLabel: params.errorInputLabel,
       json: params.json,
       outputPath: params.outputPath,
@@ -1227,6 +1217,7 @@ function submitMediaGenerationRequest(params: {
 // readable run status returns immediately rather than looping blind.
 // `--wait-seconds 0` restores the legacy single status check.
 const HOSTED_RUN_DEFAULT_WAIT_SECONDS = 45;
+const HOSTED_SUBMIT_DEFAULT_WAIT_SECONDS = 600;
 const HOSTED_RUN_MAX_WAIT_SECONDS = 600;
 const HOSTED_RUN_DEFAULT_INTERVAL_SECONDS = 8;
 const HOSTED_RUN_MAX_INTERVAL_SECONDS = 60;
@@ -1298,19 +1289,24 @@ async function pollHostedRunUntilSettled(input: {
   }
 }
 
-type ResearchVerb = 'collect' | 'scrape';
+type ResearchVerb = 'run';
 
 type ResearchRunProjection = {
+  routeKey: string | null;
   runHandle: string | null;
   status: string | null;
 };
 
 function readResearchRunRecord(value: unknown): ResearchRunProjection {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { runHandle: null, status: null };
+    return { routeKey: null, runHandle: null, status: null };
   }
   const record = value as Record<string, unknown>;
   return {
+    routeKey:
+      typeof record.routeKey === 'string' && record.routeKey.trim()
+        ? record.routeKey
+        : null,
     // Validate non-blank but return the original bytes. A signed opaque handle
     // must never be normalized, trimmed, or reconstructed by this boundary.
     runHandle:
@@ -1357,19 +1353,6 @@ function assertResearchResumePayload(
     return;
   }
 
-  // Public-content scrape completion is the delivered record array. Pending
-  // responses are objects with output.runHandle/output.status and were handled
-  // above. No other shape is accepted as an implicit terminal result.
-  if (
-    verb === 'scrape' &&
-    payload &&
-    typeof payload === 'object' &&
-    !Array.isArray(payload) &&
-    Array.isArray((payload as Record<string, unknown>).output)
-  ) {
-    return;
-  }
-
   throw new Error(
     `Research ${verb} returned an unrecognized resume response without status.`,
   );
@@ -1379,9 +1362,11 @@ async function resolveResearchResumeInput(input: {
   context: HostedRequestContext | undefined;
   flags: ParsedFlags;
   verb: ResearchVerb;
+  routeKey?: string | null;
 }): Promise<{
   outputPath: string | null;
   preserveCheckpointOnError: boolean;
+  routeKey: string;
   runHandle: string;
 }> {
   const allowedKeys = new Set([
@@ -1409,9 +1394,15 @@ async function resolveResearchResumeInput(input: {
         `research ${input.verb} --resume-from is only available in the local CLI; the hosted runtime must pass its structured run handle.`,
       );
     }
+    if (!input.routeKey) {
+      throw new Error(
+        'research run resume requires the route key before --run-handle.',
+      );
+    }
     return {
       outputPath: input.flags.values.get('output') ?? null,
       preserveCheckpointOnError: false,
+      routeKey: input.routeKey,
       runHandle: requireFlag(input.flags, 'run-handle'),
     };
   }
@@ -1429,7 +1420,7 @@ async function resolveResearchResumeInput(input: {
 
   const checkpointPath = path.resolve(requireFlag(input.flags, 'resume-from'));
   const checkpoint = await readJsonFile(checkpointPath);
-  const { runHandle, status } = readResearchRun(checkpoint);
+  const { routeKey, runHandle, status } = readResearchRun(checkpoint);
   if (status && isTerminalRunStatus(status)) {
     throw new Error(
       `Research ${input.verb} checkpoint is already terminal (${status}).`,
@@ -1440,10 +1431,16 @@ async function resolveResearchResumeInput(input: {
       `Research ${input.verb} checkpoint contains no resumable run handle: ${checkpointPath}`,
     );
   }
+  if (!routeKey) {
+    throw new Error(
+      `Research ${input.verb} checkpoint contains no route key: ${checkpointPath}`,
+    );
+  }
 
   return {
     outputPath: checkpointPath,
     preserveCheckpointOnError: true,
+    routeKey,
     runHandle,
   };
 }
@@ -1466,6 +1463,40 @@ function resolveHostedRunWaitFlags(flags: ParsedFlags): {
       maxSeconds: HOSTED_RUN_MAX_WAIT_SECONDS,
     }),
   };
+}
+
+function resolveHostedSubmitWaitFlags(flags: ParsedFlags): {
+  pollIntervalMs: number;
+  waitBudgetMs: number;
+} {
+  return {
+    pollIntervalMs: resolvePositiveSecondsFlag(flags, 'poll-interval-seconds', {
+      allowZero: false,
+      defaultSeconds: HOSTED_RUN_DEFAULT_INTERVAL_SECONDS,
+      maxSeconds: HOSTED_RUN_MAX_INTERVAL_SECONDS,
+    }),
+    waitBudgetMs: resolvePositiveSecondsFlag(flags, 'wait-seconds', {
+      allowZero: true,
+      defaultSeconds: HOSTED_SUBMIT_DEFAULT_WAIT_SECONDS,
+      maxSeconds: HOSTED_RUN_MAX_WAIT_SECONDS,
+    }),
+  };
+}
+
+function resolveHostedSubmitWaitOption(
+  flags: ParsedFlags,
+): { pollIntervalMs: number; waitBudgetMs: number } | null {
+  const wait = flags.booleans.has('wait');
+  if (
+    !wait &&
+    (flags.values.has('wait-seconds') ||
+      flags.values.has('poll-interval-seconds'))
+  ) {
+    throw new Error(
+      '--wait-seconds and --poll-interval-seconds require --wait on a media submit.',
+    );
+  }
+  return wait ? resolveHostedSubmitWaitFlags(flags) : null;
 }
 
 // Parse a `--<key> <seconds>` duration flag (decimals allowed) into
@@ -1541,14 +1572,14 @@ async function runMediaEstimate(
 
   if (rest.some(isHelp)) {
     process.stdout.write(
-      `PostPlus CLI - media estimate ${endpointKey}\n\n  Quote-only dry run (no reserve, no ledger write). Takes the same flags/--request as the matching media submit command for ${endpointKey}.\n  Usage:\n    postplus media estimate ${endpointKey} ${resolved.surface === 'flags' ? '--<intent/default flags>' : '--request <input.json>'} [--json] [--output <result.json>]\n`,
+      `PostPlus CLI - media estimate ${endpointKey}\n\n  Read-only PostPlus credit estimate. Takes the same public inputs as the matching media submit command for ${endpointKey}.\n  Usage:\n    postplus media estimate ${endpointKey} ${resolved.surface === 'flags' ? '--<role-or-intent flags>' : '--request <input.json>'} [--json] [--output <result.json>]\n`,
     );
     return 0;
   }
 
   const endpoint = requireResolvedEndpoint(resolved, 'estimate', endpointKey);
 
-  const { input, json, outputPath, errorInputLabel, skillName } =
+  const built =
     resolved.surface === 'flags'
       ? buildEstimateFlagsInput(endpoint, endpointKey, rest)
       : await buildEstimateRequestJsonInput(
@@ -1557,13 +1588,28 @@ async function runMediaEstimate(
           rest,
           context,
         );
+  let input = built.input;
 
   // Same schema-driven early validation the submit path runs, so an out-of-enum
   // value fast-fails locally before the estimate call — and the estimate prices
   // exactly the request a subsequent submit would send.
   assertModelledFieldValuesInRange(endpointKey, endpoint.fields, input);
-  // media-url fields fast-fail here on a local path / bare string; the Web
-  // boundary enforces the same scheme set at submit time.
+  // An exact quote uses the same canonical media request as submit. Local files
+  // are durably staged here (uncharged and cacheable), so the later approved
+  // submit reuses the same reference instead of introducing a second input path.
+  input = await resolveManifestMediaInputs({
+    endpointKey,
+    fields: endpoint.fields,
+    request: input,
+    stage: context
+      ? null
+      : ({ file, operationId }) =>
+          stageHostedMediaFile({
+            file,
+            operationId,
+            skillName: built.skillName ?? resolved.skill,
+          }),
+  });
   assertMediaUrlFieldSchemes(endpointKey, endpoint.fields, input);
 
   return dispatchHostedCommand(
@@ -1576,12 +1622,12 @@ async function runMediaEstimate(
             input,
           },
           pathName: '/api/postplus-cli/hosted/estimate',
-          skillName: skillName ?? resolved.skill,
+          skillName: built.skillName ?? resolved.skill,
           context,
         }),
-      errorInputLabel,
-      json,
-      outputPath,
+      errorInputLabel: built.errorInputLabel,
+      json: built.json,
+      outputPath: built.outputPath,
     },
     context,
   );
@@ -1773,28 +1819,37 @@ function buildMediaVerbInput(input: {
   return record;
 }
 
-// Manifest-driven hosted-collection verb (request-json surface). The polling path
-// (`--run-handle`) resumes a pending run unchanged. The launch path resolves the
-// positional `<collectionKey>` against the research verb index for verb `collect`,
-// reads the collection input object directly from `--request <file>` (NOT a
-// schemaVersion envelope), and posts to /hosted/collection. The resolved entry
-// gives the default skillName (overridable by `--skill`); the actorId stays
-// internal and is never placed on the public body.
-async function runResearchCollect(
+// Manifest-driven semantic Research surface. The route contract supplies every
+// accepted flag and default; the CLI sends only canonical product intent. The Web
+// privately compiles that intent to the execution request.
+async function runResearchRun(
   args: string[],
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
   const [first, ...rest] = args;
+  const verb = 'run';
+  const targets = RESEARCH_VERB_TARGETS.get(verb);
+  const hasRoute = Boolean(first && !first.startsWith('--'));
+  const routeKey = hasRoute ? first : null;
+  const resumeArgs = hasRoute ? rest : args;
+  const isResume = resumeArgs.some(
+    (arg) => arg === '--resume-from' || arg === '--run-handle',
+  );
 
-  // Resume path: local CLI reads --resume-from; hosted-lib receives the
-  // structured handle directly. Neither form has a positional collectionKey.
-  // Same bounded in-command wait as `media poll` (see pollHostedRunUntilSettled):
-  // apify collections run 15s-2min, and an agent caller with no sleep primitive
-  // would otherwise hammer this verb in a tight model loop.
-  if (!first || first.startsWith('--')) {
-    const flags = parseFlags(args, new Set(['json']));
-    const { outputPath, preserveCheckpointOnError, runHandle } =
-      await resolveResearchResumeInput({ context, flags, verb: 'collect' });
+  if (!hasRoute || isResume) {
+    const flags = parseFlags(resumeArgs, new Set(['json']));
+    const {
+      outputPath,
+      preserveCheckpointOnError,
+      routeKey: resumeRouteKey,
+      runHandle,
+    } = await resolveResearchResumeInput({
+      context,
+      flags,
+      verb,
+      routeKey,
+    });
+    assertKnownResearchRoute(targets, resumeRouteKey);
     const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
 
     return dispatchHostedCommand(
@@ -1804,18 +1859,18 @@ async function runResearchCollect(
             pollIntervalMs,
             pollOnce: async () => {
               const payload = await postHostedJson({
-                body: { runHandle, runHandleType: 'hosted-collection' },
-                pathName: '/api/postplus-cli/hosted/collection',
+                body: { routeKey: resumeRouteKey, runHandle },
+                pathName: '/api/postplus-cli/hosted/research',
                 skillName: null,
                 context,
               });
-              assertResearchResumePayload(payload, 'collect');
+              assertResearchResumePayload(payload, verb);
               return payload;
             },
             readStatus: readResearchRunStatus,
             waitBudgetMs,
           }),
-        errorInputLabel: 'research-collect-run-handle',
+        errorInputLabel: 'research-run-handle',
         json: flags.booleans.has('json'),
         outputPath,
         preserveOutputOnProductError: preserveCheckpointOnError,
@@ -1824,240 +1879,262 @@ async function runResearchCollect(
     );
   }
 
-  const verb = 'collect';
-  const collectionKey = first;
-  const targets = RESEARCH_VERB_TARGETS.get(verb);
-  const resolved = targets?.get(collectionKey);
+  const resolved = targets?.get(routeKey!);
   if (!resolved) {
     const valid = targets ? [...targets.keys()].join(', ') : '';
-    throw new Error(
-      `Unknown research collect collection ${collectionKey}. Valid: ${valid}.`,
-    );
+    throw new Error(`Unknown research route ${routeKey}. Valid: ${valid}.`);
   }
 
-  // `postplus research collect <collection-key> --help`: opaque-input contract.
   if (rest.some(isHelp)) {
-    printOpaqueTargetHelp('research', verb, collectionKey, resolved);
+    printResearchRouteHelp(routeKey!, resolved);
     return 0;
   }
 
-  const flags = parseFlags(rest, new Set(['json']));
-  const allowedKeys = new Set([
+  const contract = readResolvedResearchContract(routeKey!, resolved);
+  const flagToField = new Map<string, ManifestField>();
+  const booleanKeys = new Set<string>(['json', 'wait']);
+  const arrayKeys = new Set<string>();
+  for (const field of contract.fields) {
+    const key = field.flag!.replace(/^--/u, '');
+    flagToField.set(key, field);
+    if (field.type === 'boolean') {
+      booleanKeys.add(key);
+    }
+    if (field.repeatable) {
+      arrayKeys.add(key);
+    }
+  }
+
+  const flags = parseFlags(rest, booleanKeys, arrayKeys);
+  const controlKeys = new Set([
     'hosted-operation-id',
     'json',
-    'max-charge-usd',
     'output',
+    'poll-interval-seconds',
     'quote-confirmation-token',
-    'request',
     'skill',
+    'wait',
+    'wait-seconds',
   ]);
-  for (const key of [...flags.values.keys(), ...flags.booleans]) {
-    if (!allowedKeys.has(key)) {
-      throw new Error(`Unknown option for research ${verb}: --${key}.`);
+  for (const key of [
+    ...flags.values.keys(),
+    ...flags.booleans,
+    ...flags.arrays.keys(),
+  ]) {
+    if (!flagToField.has(key) && !controlKeys.has(key)) {
+      throw new Error(`Unknown option for research run: --${key}.`);
     }
   }
 
   const outputPath = flags.values.get('output') ?? null;
   if (!context && !outputPath) {
     throw new Error(
-      'Local research collect requires --output <result.json> so an asynchronous run has a durable checkpoint.',
+      'Local research run requires --output <result.json> so an asynchronous run has a durable checkpoint.',
     );
   }
-  const { body: raw, errorInputLabel } = await resolveRequestBody(
-    context,
-    flags,
-  );
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(
-      `research ${verb} ${collectionKey} --request must be a JSON object of collection input.`,
-    );
-  }
-  const input = raw as Record<string, unknown>;
-
+  const input = buildResearchIntent(routeKey!, contract, flags);
   const skillName = flags.values.get('skill') ?? resolved.skill;
   const operationId =
     flags.values.get('hosted-operation-id') ??
-    `postplus-cli:research:collect:${collectionKey}:${randomUUID()}`;
+    `postplus-cli:research:run:${routeKey}:${randomUUID()}`;
   const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
-
-  // Optional per-request cost ceiling (USD) overriding the hosted default.
-  const maxChargeFlag = flags.values.get('max-charge-usd');
-  let maxTotalChargeUsd: number | undefined;
-  if (maxChargeFlag !== undefined) {
-    const parsed = Number(maxChargeFlag);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      throw new Error('--max-charge-usd must be a positive number of USD.');
-    }
-    maxTotalChargeUsd = parsed;
-  }
+  const wait = resolveHostedSubmitWaitOption(flags);
+  let checkpointWritten = false;
 
   return dispatchHostedCommand(
     {
-      request: () =>
-        postHostedJson({
+      request: async () => {
+        const submitted = await postHostedJson({
           body: {
-            collectionKey,
+            routeKey,
             input,
             operationId,
             quoteConfirmationToken: quoteConfirmationToken ?? undefined,
-            skillName,
-            maxTotalChargeUsd,
           },
-          pathName: '/api/postplus-cli/hosted/collection',
+          pathName: '/api/postplus-cli/hosted/research',
           skillName,
           context,
-        }),
-      errorInputLabel,
+        });
+        assertResearchResumePayload(submitted, verb);
+        if (!wait) {
+          return submitted;
+        }
+        const run = readResearchRun(submitted);
+        if (!run.status || isTerminalRunStatus(run.status)) {
+          return submitted;
+        }
+        if (!run.runHandle) {
+          throw new Error(
+            `Research run returned non-terminal status ${run.status} without a resumable run handle.`,
+          );
+        }
+        if (!context && outputPath) {
+          await writeResult(submitted, outputPath, false);
+          checkpointWritten = true;
+        }
+        return pollHostedRunUntilSettled({
+          pollIntervalMs: wait.pollIntervalMs,
+          pollOnce: () =>
+            postHostedJson({
+              body: { routeKey, runHandle: run.runHandle },
+              pathName: '/api/postplus-cli/hosted/research',
+              skillName: null,
+              context,
+            }),
+          readStatus: readResearchRunStatus,
+          waitBudgetMs: wait.waitBudgetMs,
+        });
+      },
+      errorInputLabel: `research-run-${routeKey}`,
       json: flags.booleans.has('json'),
       outputPath,
+      preserveOutputOnProductError: () => checkpointWritten,
+      preservedOutputRecovery: () =>
+        checkpointWritten && outputPath
+          ? [
+              'Research run was submitted, but status polling failed.',
+              `Checkpoint preserved at ${path.resolve(outputPath)}.`,
+              `Resume: postplus research ${verb} --resume-from ${shellQuoteArg(
+                path.resolve(outputPath),
+              )}`,
+            ].join(' ')
+          : null,
       asyncResume: (payload) =>
-        extractResearchResume(payload, 'collect', outputPath),
+        extractResearchResume(payload, verb, outputPath),
     },
     context,
   );
 }
 
-// Manifest-driven public-content-collection verb (request-json surface). Resolves
-// the positional `<sourceKey>` against the research verb index for verb `scrape`,
-// reads the scrape input directly from `--request <file>` as a JSON ARRAY of input
-// records (one per public URL/query), and posts to /hosted/capability with
-// capability `public-content-collection` / operation `scrape`. The resolved entry
-// gives the default skillName (overridable by `--skill`); the datasetId stays
-// internal and is never placed on the public body.
-async function runResearchScrape(
-  args: string[],
-  context: HostedRequestContext | undefined,
-): Promise<number | unknown> {
-  const [first, ...rest] = args;
-
-  const verb = 'scrape';
-  const targets = RESEARCH_VERB_TARGETS.get(verb);
-
-  if (!first || first.startsWith('--')) {
-    const flags = parseFlags(args, new Set(['json']));
-    const { outputPath, preserveCheckpointOnError, runHandle } =
-      await resolveResearchResumeInput({ context, flags, verb: 'scrape' });
-    const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
-
-    return dispatchHostedCommand(
-      {
-        request: () =>
-          pollHostedRunUntilSettled({
-            pollIntervalMs,
-            pollOnce: async () => {
-              const payload = await postHostedJson({
-                body: { runHandle, runHandleType: 'public-content-collection' },
-                pathName: '/api/postplus-cli/hosted/collection',
-                skillName: null,
-                context,
-              });
-              assertResearchResumePayload(payload, 'scrape');
-              return payload;
-            },
-            readStatus: readResearchRunStatus,
-            waitBudgetMs,
-          }),
-        errorInputLabel: 'research-scrape-run-handle',
-        json: flags.booleans.has('json'),
-        outputPath,
-        preserveOutputOnProductError: preserveCheckpointOnError,
-      },
-      context,
-    );
-  }
-
-  const sourceKey = first;
-  const resolved = targets?.get(sourceKey);
-  if (!resolved) {
-    const valid = targets ? [...targets.keys()].join(', ') : '';
+function assertKnownResearchRoute(
+  targets: Map<string, ResolvedVerbTarget> | undefined,
+  routeKey: string,
+): void {
+  if (!targets?.has(routeKey)) {
     throw new Error(
-      `Unknown research scrape source ${sourceKey}. Valid: ${valid}.`,
+      `Unknown research route ${routeKey}. Valid: ${targets ? [...targets.keys()].join(', ') : ''}.`,
     );
   }
+}
 
-  // `postplus research scrape <source-key> --help`: opaque-array-input contract.
-  if (rest.some(isHelp)) {
-    printOpaqueTargetHelp('research', verb, sourceKey, resolved);
-    return 0;
-  }
-
-  const flags = parseFlags(rest, new Set(['json']));
-  const allowedKeys = new Set([
-    'hosted-operation-id',
-    'json',
-    'max-charge-usd',
-    'output',
-    'quote-confirmation-token',
-    'request',
-    'skill',
-  ]);
-  for (const key of [...flags.values.keys(), ...flags.booleans]) {
-    if (!allowedKeys.has(key)) {
-      throw new Error(`Unknown option for research ${verb}: --${key}.`);
-    }
-  }
-
-  const outputPath = flags.values.get('output') ?? null;
-  if (!context && !outputPath) {
+function readResolvedResearchContract(
+  routeKey: string,
+  resolved: ResolvedVerbTarget,
+): { fields: readonly ManifestField[]; requiredAnyOf?: readonly string[] } {
+  const contract = resolved.collection ?? resolved.source;
+  if (!contract || contract.routeKey !== routeKey) {
     throw new Error(
-      'Local research scrape requires --output <result.json> so an asynchronous run has a durable checkpoint.',
+      `Research route ${routeKey} has no semantic field contract.`,
     );
   }
-  const { body: raw, errorInputLabel } = await resolveRequestBody(
-    context,
-    flags,
+  return contract;
+}
+
+function buildResearchIntent(
+  routeKey: string,
+  contract: {
+    fields: readonly ManifestField[];
+    requiredAnyOf?: readonly string[];
+  },
+  flags: ParsedFlags,
+): Record<string, unknown> {
+  const input: Record<string, unknown> = {};
+  const fieldByName = new Map(
+    contract.fields.map((field) => [field.name, field]),
   );
-  if (!Array.isArray(raw) || raw.length === 0) {
+  for (const field of contract.fields) {
+    const key = field.flag!.replace(/^--/u, '');
+    if (field.repeatable) {
+      const list = flags.arrays.get(key) ?? [];
+      if (list.length === 0) {
+        if (field.required) {
+          throw new Error(
+            `Missing required option --${key} for research run ${routeKey}.`,
+          );
+        }
+        continue;
+      }
+      if (field.format === 'url') {
+        list.forEach((value) => assertCliPublicHttpsUrl(key, value));
+      }
+      input[field.name] = list;
+      continue;
+    }
+
+    if (field.type === 'boolean') {
+      const explicit = flags.booleanValues.get(key);
+      if (explicit !== undefined) {
+        input[field.name] = explicit;
+      } else if (typeof field.default === 'boolean') {
+        input[field.name] = field.default;
+      }
+      continue;
+    }
+
+    const raw = flags.values.get(key);
+    if (raw === undefined) {
+      if (field.default !== undefined) {
+        input[field.name] = field.default;
+      } else if (field.required) {
+        throw new Error(
+          `Missing required option --${key} for research run ${routeKey}.`,
+        );
+      }
+      continue;
+    }
+
+    if (field.type === 'number') {
+      const parsed = Number(raw);
+      if (
+        !Number.isFinite(parsed) ||
+        (field.integer === true && !Number.isInteger(parsed)) ||
+        (field.min !== undefined && parsed < field.min) ||
+        (field.max !== undefined && parsed > field.max)
+      ) {
+        throw new Error(`--${key} is outside the supported numeric range.`);
+      }
+      input[field.name] = parsed;
+      continue;
+    }
+
+    if (field.enumValues && !field.enumValues.includes(raw)) {
+      throw new Error(
+        `--${key} must be one of: ${field.enumValues.join(', ')}.`,
+      );
+    }
+    if (field.format === 'url') {
+      assertCliPublicHttpsUrl(key, raw);
+    }
+    input[field.name] = raw;
+  }
+
+  if (
+    contract.requiredAnyOf &&
+    !contract.requiredAnyOf.some((name) => {
+      const value = input[name];
+      return Array.isArray(value) ? value.length > 0 : value !== undefined;
+    })
+  ) {
+    const accepted = contract.requiredAnyOf.map(
+      (name) => fieldByName.get(name)?.flag ?? name,
+    );
     throw new Error(
-      `research ${verb} ${sourceKey} --request must be a non-empty JSON array of scrape input records.`,
+      `research run ${routeKey} requires at least one of: ${accepted.join(', ')}.`,
     );
   }
-  const input = raw as unknown[];
 
-  const skillName = flags.values.get('skill') ?? resolved.skill;
-  const operationId =
-    flags.values.get('hosted-operation-id') ??
-    `postplus-cli:research:scrape:${sourceKey}:${randomUUID()}`;
-  const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
+  return input;
+}
 
-  // Optional per-request cost ceiling (USD) overriding the hosted default.
-  const maxChargeFlag = flags.values.get('max-charge-usd');
-  let maxTotalChargeUsd: number | undefined;
-  if (maxChargeFlag !== undefined) {
-    const parsed = Number(maxChargeFlag);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      throw new Error('--max-charge-usd must be a positive number of USD.');
+function assertCliPublicHttpsUrl(key: string, value: string): void {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'https:') {
+      throw new Error('protocol');
     }
-    maxTotalChargeUsd = parsed;
+  } catch {
+    throw new Error(`--${key} must be a valid public HTTPS URL.`);
   }
-
-  // The Web /hosted/capability scrape contract is a strict object: skillName is
-  // carried as the compatibility header (postHostedJson), never on the public body.
-  return dispatchHostedCommand(
-    {
-      request: () =>
-        postHostedJson({
-          body: {
-            capability: 'public-content-collection',
-            operation: 'scrape',
-            sourceKey,
-            input,
-            operationId,
-            quoteConfirmationToken: quoteConfirmationToken ?? undefined,
-            maxTotalChargeUsd,
-          },
-          pathName: '/api/postplus-cli/hosted/capability',
-          skillName,
-          context,
-        }),
-      errorInputLabel,
-      json: flags.booleans.has('json'),
-      outputPath,
-      asyncResume: (payload) =>
-        extractResearchResume(payload, 'scrape', outputPath),
-    },
-    context,
-  );
 }
 
 // Manifest-driven publish operation (request-json surface). The OPERATION is the
@@ -2081,7 +2158,7 @@ async function runPublishOperation(
 
   // `postplus publish <operation> --help`: opaque-input contract.
   if (args.some(isHelp)) {
-    printOpaqueTargetHelp('publish', operation, operation, resolved);
+    printOpaquePublishHelp(operation);
     return 0;
   }
 
@@ -2193,6 +2270,23 @@ function parsePositiveInt(raw: string, label: string): number {
     throw new Error(`--${label} must be a positive integer.`);
   }
   return parsed;
+}
+
+function parsePositiveCreditsAsMillicredits(
+  raw: string,
+  label: string,
+): number {
+  const credits = Number(raw);
+  const millicredits = Math.round(credits * 1_000);
+  if (
+    !Number.isFinite(credits) ||
+    credits <= 0 ||
+    !Number.isSafeInteger(millicredits) ||
+    millicredits <= 0
+  ) {
+    throw new Error(`--${label} must be a positive PostPlus credit amount.`);
+  }
+  return millicredits;
 }
 
 // Split a required leading `<id>` positional off a workflow subcommand's args.
@@ -2408,8 +2502,8 @@ async function runWorkflowQuote(rest: string[]): Promise<number> {
 // workspace assistant's human approval card: launching is refused unless the
 // operator has quoted the cost first and confirms explicitly. `--confirm` is
 // mandatory (its presence in the command is the visible spend acknowledgement an
-// agent host surfaces to the human), and `--max-reserved-millicredits` is the
-// acknowledged ceiling — the server re-quotes atomically and aborts if the fresh
+// agent host surfaces to the human), and `--max-reserved-credits` is the
+// acknowledged product-unit ceiling — the server re-quotes atomically and aborts if the fresh
 // reservation exceeds it, so the confirmed bound stays binding.
 async function runWorkflowLaunch(rest: string[]): Promise<number> {
   const { id: workflowId, flagArgs } = takeWorkflowId(rest, 'launch');
@@ -2422,7 +2516,7 @@ async function runWorkflowLaunch(rest: string[]): Promise<number> {
       'confirm',
       'title',
       'instances',
-      'max-reserved-millicredits',
+      'max-reserved-credits',
     ]),
     'launch',
   );
@@ -2433,9 +2527,9 @@ async function runWorkflowLaunch(rest: string[]): Promise<number> {
     1,
     5,
   );
-  const maxTotalReservedMillicredits = parsePositiveInt(
-    requireFlag(flags, 'max-reserved-millicredits'),
-    'max-reserved-millicredits',
+  const maxTotalReservedMillicredits = parsePositiveCreditsAsMillicredits(
+    requireFlag(flags, 'max-reserved-credits'),
+    'max-reserved-credits',
   );
 
   if (!flags.booleans.has('confirm')) {
@@ -2443,8 +2537,8 @@ async function runWorkflowLaunch(rest: string[]): Promise<number> {
       [
         'Refusing to launch: launching spends real credits and needs explicit confirmation.',
         `First quote the cost:  postplus workflow quote ${workflowId} --instances ${instanceCount}`,
-        'Then re-run launch with that quote’s reservedMillicredits as the ceiling and --confirm:',
-        `  postplus workflow launch ${workflowId} --title "${workflowTitle}" --instances ${instanceCount} --max-reserved-millicredits <reservedMillicredits> --confirm`,
+        'Then re-run launch with that quote’s reservedCredits as the ceiling and --confirm:',
+        `  postplus workflow launch ${workflowId} --title "${workflowTitle}" --instances ${instanceCount} --max-reserved-credits <reservedCredits> --confirm`,
       ].join('\n'),
     );
   }
@@ -2476,14 +2570,14 @@ Usage:
   postplus workflow propose <workflow-id> --operations <ops.json> [--base-version <n>] [--output <result.json>]
   postplus workflow save <workflow-id> --operations <ops.json> [--base-version <n>] [--output <result.json>]
   postplus workflow quote <workflow-id> --instances <n> [--json] [--output <result.json>]
-  postplus workflow launch <workflow-id> --title <exact-name> --instances <n> --max-reserved-millicredits <n> --confirm [--json] [--output <result.json>]
+  postplus workflow launch <workflow-id> --title <exact-name> --instances <n> --max-reserved-credits <credits> --confirm [--json] [--output <result.json>]
   postplus workflow runs [<workflow-id>] [--limit <n>] [--json] [--output <result.json>]
   postplus workflow run-show <run-id> [--json] [--output <result.json>]
 
 --operations is a JSON array of edit ops (add_node / update_node / remove_node /
 connect_nodes); the server validates and never silently repairs. launch is
-refused without --confirm: quote first, then pass the quote's reservedMillicredits
-as --max-reserved-millicredits and --confirm to acknowledge the spend.
+refused without --confirm: quote first, then pass the quote's reservedCredits
+as --max-reserved-credits and --confirm to acknowledge the spend.
 `);
 }
 
@@ -2524,7 +2618,7 @@ async function runHostedSchema(
     domain === 'media'
       ? new Set(['endpoint'])
       : domain === 'research'
-        ? new Set(['collection-key'])
+        ? new Set(['route'])
         : new Set<string>();
 
   for (const key of flags.values.keys()) {
@@ -2534,9 +2628,9 @@ async function runHostedSchema(
   }
 
   const report = buildHostedRequestSchemaReport({
-    collectionKey: flags.values.get('collection-key') ?? null,
     domain,
     endpointKey: flags.values.get('endpoint') ?? null,
+    routeKey: flags.values.get('route') ?? null,
   });
 
   // In-process / context path: RETURN the structured catalog so the model
@@ -2598,6 +2692,7 @@ async function postHostedJson(input: {
 
     const compatibilityError = formatPostPlusCompatibilityError(payload);
     if (compatibilityError) {
+      await clearUpdateCheckCache();
       throw new Error(compatibilityError);
     }
     throw new HostedProductRequestError(productError);
@@ -2619,7 +2714,8 @@ async function runHostedCommand(input: {
   // fails, keep the last valid handle on disk so the caller can retry after the
   // underlying problem is fixed. --json still receives the structured error on
   // stdout; human mode keeps the existing actionable stderr message.
-  preserveOutputOnProductError?: boolean;
+  preserveOutputOnProductError?: boolean | (() => boolean);
+  preservedOutputRecovery?: () => string | null;
   // When an async submit remains pending, render its next safe action. Media
   // keeps its short literal id; research emits only --resume-from <checkpoint>
   // so an agent never rewrites a signed opaque handle. stderr is used in both
@@ -2652,10 +2748,11 @@ async function runHostedCommand(input: {
     }
 
     if (error instanceof HostedProductRequestError) {
-      if (input.preserveOutputOnProductError) {
+      if (shouldPreserveHostedOutput(input.preserveOutputOnProductError)) {
         if (input.json) {
           await writeResult({ error: error.productError }, null, true);
         }
+        writePreservedOutputRecovery(input.preservedOutputRecovery);
       } else {
         await writeResult(
           { error: error.productError },
@@ -2665,6 +2762,10 @@ async function runHostedCommand(input: {
       }
       process.stderr.write(`${error.message}\n`);
       return 1;
+    }
+
+    if (shouldPreserveHostedOutput(input.preserveOutputOnProductError)) {
+      writePreservedOutputRecovery(input.preservedOutputRecovery);
     }
 
     throw error;
@@ -2694,7 +2795,8 @@ async function dispatchHostedCommand(
     errorInputLabel: string;
     json: boolean;
     outputPath: string | null;
-    preserveOutputOnProductError?: boolean;
+    preserveOutputOnProductError?: boolean | (() => boolean);
+    preservedOutputRecovery?: () => string | null;
     asyncResume?: (payload: unknown) => string | null;
   },
   context: HostedRequestContext | undefined,
@@ -2703,6 +2805,21 @@ async function dispatchHostedCommand(
     return runHostedCommand(input);
   }
   return input.request();
+}
+
+function shouldPreserveHostedOutput(
+  value: boolean | (() => boolean) | undefined,
+): boolean {
+  return typeof value === 'function' ? value() : value === true;
+}
+
+function writePreservedOutputRecovery(
+  buildRecovery: (() => string | null) | undefined,
+): void {
+  const recovery = buildRecovery?.() ?? null;
+  if (recovery) {
+    process.stderr.write(`${recovery}\n`);
+  }
 }
 
 // Resume-command extractors (plan E). A media-generation submit returns the run
@@ -2974,11 +3091,11 @@ function printResearchHelp(): void {
   process.stdout.write(`PostPlus CLI - research commands
 
 Usage:
-  postplus research schema [--collection-key <key>] [--json]
-  postplus research collect <collection-key> --request <input.json> --output <result.json> [--skill <skill-id>] [--max-charge-usd <usd>]
-  postplus research collect --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
-  postplus research scrape <source-key> --request <input-array.json> --output <result.json> [--skill <skill-id>] [--max-charge-usd <usd>]
-  postplus research scrape --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
+  postplus research run <route> --<semantic flags> --wait --output <result.json>
+  postplus research run --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
+  postplus research schema [--route <route>] [--json]
+
+Run \`postplus research run <route> --help\` for route-specific flags.
 `);
 }
 
@@ -2988,7 +3105,7 @@ function printDomainVerbHelp(domain: Exclude<HostedDomain, 'research'>): void {
       ? [...MEDIA_VERB_ENDPOINTS.keys()]
           .map(
             (verb) =>
-              `  postplus media ${verb} <endpoint-key> --<intent/default flags> [--json] [--output <result.json>]\n`,
+              `  postplus media ${verb} <endpoint-key> --<intent/default flags> [--wait] [--json] [--output <result.json>]\n`,
           )
           .join('') +
         '  postplus media estimate <endpoint-key> --<same flags/--request as matching submit verb> [--json]\n' +
@@ -3014,19 +3131,21 @@ function printMediaEndpointHelp(
   targetKey: string,
   resolved: ResolvedVerbTarget,
 ): void {
-  // video-analysis: opaque Gemini payload, no field classification to render.
+  // video-analysis uses normalized role flags; execution details stay server-side.
   if (resolved.capability === 'video-analysis') {
+    const fields = resolved.model?.fields ?? [];
     process.stdout.write(`PostPlus CLI - ${domain} ${verb} ${targetKey}
 
-  Surface: request-json (opaque Gemini request payload)
+  Surface: flags (normalized media intent)
   Usage:
-    postplus ${domain} ${verb} ${targetKey} --request <input.json> [--video-seconds <n>] [--json] [--output <result.json>]
+    postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} [--video-seconds <n>] [--json] [--output <result.json>]
 
-  --request <file>  A JSON object authored verbatim as the Gemini request
-                    (contents + optional generationConfig) under "payload".
+  --video <video>    Local path, PostPlus media reference, or video data URI.
+                    The CLI stages local bytes before the analysis submit.
+  --prompt <text>    The analysis question or requested evidence structure.
   --video-seconds <n>  Optional source video duration in seconds. Supplying it
-                    lets the hosted boundary route eligible short videos through
-                    its preflight path; omit it to use the default route.
+                    helps PostPlus validate and route the request; omit it when
+                    the duration is unknown.
   Runner-managed (minted by the CLI; never in the body): operationId, quoteConfirmationToken
 `);
     return;
@@ -3050,8 +3169,8 @@ function printMediaEndpointHelp(
     `  Surface: ${resolved.surface}`,
     '  Usage:',
     isFlagsSurface
-      ? `    postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} [--json] [--output <result.json>]`
-      : `    postplus ${domain} ${verb} ${targetKey} --request <input.json> [--json] [--output <result.json>]`,
+      ? `    postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} [--wait] [--json] [--output <result.json>]`
+      : `    postplus ${domain} ${verb} ${targetKey} --request <input.json> [--wait] [--json] [--output <result.json>]`,
     '',
   ];
 
@@ -3120,7 +3239,11 @@ function appendFieldGroup(
 // repeatable arity — all read from the manifest contract.
 function formatFieldDetail(field: ManifestField): string {
   const detail: string[] = [
-    field.repeatable ? `${field.type}[]` : field.type,
+    field.type === 'media-url'
+      ? `${field.mediaKind ?? 'media'} input${field.repeatable ? '[]' : ''}: local path | HTTPS | PostPlus media reference | data URI`
+      : field.repeatable
+        ? `${field.type}[]`
+        : field.type,
     field.required ? 'required' : 'optional',
   ];
   if (field.enumValues && field.enumValues.length > 0) {
@@ -3146,34 +3269,50 @@ function formatFieldDetail(field: ManifestField): string {
   return `  [${detail.join('; ')}]`;
 }
 
-// Per-target `--help` for capabilities whose request body is an opaque JSON object
-// (research collect/scrape, publish): there is no field classification to render,
-// so the help states the input shape and the runner-managed protocol fields.
-function printOpaqueTargetHelp(
-  domain: 'research' | 'publish',
-  verb: string,
-  targetKey: string,
+function printResearchRouteHelp(
+  routeKey: string,
   resolved: ResolvedVerbTarget,
 ): void {
-  const inputShape =
-    resolved.capability === 'public-content-collection'
-      ? 'a non-empty JSON array of provider-shaped scrape records'
-      : 'a provider-shaped JSON object of input';
-  // publish's operation is both the verb and the target, so the header/usage show
-  // it once; research shows `<verb> <target>`.
-  const header =
-    domain === 'publish'
-      ? `publish ${targetKey}`
-      : `research ${verb} ${targetKey}`;
-  const usage =
-    domain === 'publish'
-      ? `    postplus publish ${targetKey} --request <input.json> [--json] [--output <result.json>]`
-      : `    postplus research ${verb} ${targetKey} --request <input.json> [--skill <skill-id>] [--max-charge-usd <usd>] [--json] [--output <result.json>]`;
+  const contract = readResolvedResearchContract(routeKey, resolved);
+  const lines = [
+    `PostPlus CLI - research run ${routeKey}`,
+    '',
+    '  Usage:',
+    `    postplus research run ${routeKey} ${formatFlagsUsage(contract.fields)} --wait --output <result.json>`,
+    '',
+    '  Research intent:',
+  ];
+  for (const field of contract.fields) {
+    lines.push(
+      `    ${field.flag}${formatFieldDetail(field)}${field.description ? `  ${field.description}` : ''}`,
+    );
+  }
+  if (contract.requiredAnyOf) {
+    const names = new Map(
+      contract.fields.map((field) => [field.name, field.flag]),
+    );
+    lines.push(
+      '',
+      `  At least one required: ${contract.requiredAnyOf.map((name) => names.get(name) ?? name).join(', ')}`,
+    );
+  }
+  lines.push(
+    '',
+    '  Request translation, credit safeguards, and polling internals are handled by PostPlus.',
+  );
+  process.stdout.write(`${lines.join('\n')}\n`);
+}
+
+// Per-target help for the remaining opaque publishing JSON surface.
+function printOpaquePublishHelp(targetKey: string): void {
+  const inputShape = 'a product request JSON object';
+  const header = `publish ${targetKey}`;
+  const usage = `    postplus publish ${targetKey} --request <input.json> [--json] [--output <result.json>]`;
 
   process.stdout.write(`PostPlus CLI - ${header}
 
   Surface: request-json (opaque input authored by the agent)
-  Capability: ${resolved.capability}
+  Capability: social-publishing
   Usage:
 ${usage}
 

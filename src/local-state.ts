@@ -29,6 +29,10 @@ export type PostPlusLocalConfig = {
   };
   refreshToken?: string;
   sessionExpiresAt?: number | null;
+  // Origin against which the current CLI session was minted. Kept separate from
+  // apiBaseUrl so an environment override can remain process-local without
+  // making a staging token silently usable against production on the next run.
+  sessionApiBaseUrl?: string;
   updatedAt?: string;
   userEmail?: string | null;
   userId?: string;
@@ -187,6 +191,7 @@ export async function clearLocalAuthState(): Promise<PostPlusLocalConfig> {
     delete next.cliSessionToken;
     delete next.machineId;
     delete next.refreshToken;
+    delete next.sessionApiBaseUrl;
     delete next.sessionExpiresAt;
     delete next.userEmail;
     delete next.userId;
@@ -269,6 +274,7 @@ export async function setLocalSession(input: {
   sessionExpiresAt: number | null;
   userEmail: string | null;
   userId: string;
+  persistApiBaseUrl?: boolean;
 }): Promise<PostPlusLocalConfig> {
   const cliSessionToken = input.cliSessionToken.trim();
   const apiBaseUrl = input.apiBaseUrl.trim().replace(/\/+$/, '');
@@ -281,18 +287,24 @@ export async function setLocalSession(input: {
     throw new Error('POSTPLUS_API_BASE_URL cannot be empty.');
   }
 
-  return updateLocalConfig((current) => ({
-    ...omitLegacyAuthFields(current),
-    accountId: input.accountId,
-    accountName: input.accountName ?? null,
-    accountSlug: input.accountSlug ?? null,
-    accountType: input.accountType ?? null,
-    apiBaseUrl,
-    cliSessionToken,
-    sessionExpiresAt: input.sessionExpiresAt,
-    userEmail: input.userEmail,
-    userId: input.userId,
-  }));
+  return updateLocalConfig((current) => {
+    const next: PostPlusLocalConfig = {
+      ...omitLegacyAuthFields(current),
+      accountId: input.accountId,
+      accountName: input.accountName ?? null,
+      accountSlug: input.accountSlug ?? null,
+      accountType: input.accountType ?? null,
+      cliSessionToken,
+      sessionApiBaseUrl: apiBaseUrl,
+      sessionExpiresAt: input.sessionExpiresAt,
+      userEmail: input.userEmail,
+      userId: input.userId,
+    };
+    if (input.persistApiBaseUrl !== false) {
+      next.apiBaseUrl = apiBaseUrl;
+    }
+    return next;
+  });
 }
 
 export async function hasLocalConfigFile(): Promise<boolean> {

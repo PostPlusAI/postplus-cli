@@ -82,8 +82,7 @@ export type HostedBalanceReport = {
   accountType: 'personal' | 'team' | null;
   accountName: string | null;
   availableCredits: number;
-  availableMillicredits: number;
-  reservedMillicredits: number;
+  reservedCredits: number;
   subscriptionStatus: string | null;
 };
 
@@ -102,8 +101,7 @@ function normalizeBalanceReport(payload: unknown): HostedBalanceReport {
     accountType: readAccountType(record.accountType),
     accountName: readString(record.accountName),
     availableCredits: readNumber(record.availableCredits) ?? 0,
-    availableMillicredits: readNumber(record.availableMillicredits) ?? 0,
-    reservedMillicredits: readNumber(record.reservedMillicredits) ?? 0,
+    reservedCredits: readNumber(record.reservedCredits) ?? 0,
     subscriptionStatus: readString(record.subscriptionStatus),
   };
 }
@@ -118,7 +116,7 @@ export function formatHostedBalanceReport(report: HostedBalanceReport): string {
     '',
     `Account: ${accountLabel}`,
     `Available credits: ${report.availableCredits}`,
-    `Reserved (in-flight): ${report.reservedMillicredits} millicredits`,
+    `Reserved (in-flight): ${report.reservedCredits} credits`,
     `Subscription: ${report.subscriptionStatus ?? 'none'}`,
   ].join('\n');
 }
@@ -147,9 +145,8 @@ export type HostedRunSummary = {
   target: string | null;
   createdAt: string;
   updatedAt: string;
-  finalizedMillicredits: number;
-  reservedMillicredits: number;
-  providerStatus: string | null;
+  finalizedCredits: number;
+  reservedCredits: number;
   hasError: boolean;
 };
 
@@ -163,18 +160,12 @@ export type HostedRunsListReport = {
   };
 };
 
-// Full single-run projection with settled actual cost — the reconciliation
-// WaveSpeed's history/show cannot do (its records carry no per-run cost).
+// Full single-run product projection. Provider identity, task ids, URLs,
+// request dimensions and raw settlement evidence stay server-side.
 export type HostedRunDetail = HostedRunSummary & {
   operationId: string;
-  providerFamily: string | null;
-  providerModelPath: string | null;
-  providerTaskId: string | null;
-  providerUrls: unknown;
   outputs: unknown;
   error: unknown;
-  requestDimensions: unknown;
-  settlementEvidence: unknown;
   completedAt: string | null;
   failedAt: string | null;
   expiresAt: string | null;
@@ -285,14 +276,8 @@ export async function fetchHostedRunDetail(
   return {
     ...summary,
     operationId: readString(record.operationId) ?? '',
-    providerFamily: readString(record.providerFamily),
-    providerModelPath: readString(record.providerModelPath),
-    providerTaskId: readString(record.providerTaskId),
-    providerUrls: record.providerUrls ?? null,
     outputs: record.outputs ?? null,
     error: record.error ?? null,
-    requestDimensions: record.requestDimensions ?? null,
-    settlementEvidence: record.settlementEvidence ?? null,
     completedAt: readString(record.completedAt),
     failedAt: readString(record.failedAt),
     expiresAt: readString(record.expiresAt),
@@ -311,9 +296,8 @@ function normalizeRunSummary(value: unknown): HostedRunSummary {
     target: readString(record.target),
     createdAt: readString(record.createdAt) ?? '',
     updatedAt: readString(record.updatedAt) ?? '',
-    finalizedMillicredits: readNumber(record.finalizedMillicredits) ?? 0,
-    reservedMillicredits: readNumber(record.reservedMillicredits) ?? 0,
-    providerStatus: readString(record.providerStatus),
+    finalizedCredits: readNumber(record.finalizedCredits) ?? 0,
+    reservedCredits: readNumber(record.reservedCredits) ?? 0,
     hasError: record.hasError === true,
   };
 }
@@ -337,9 +321,9 @@ export function formatHostedRunsListReport(
 
   for (const run of report.runs) {
     const cost =
-      run.status === 'completed' || run.finalizedMillicredits > 0
-        ? `${run.finalizedMillicredits}mc`
-        : `~${run.reservedMillicredits}mc reserved`;
+      run.status === 'completed' || run.finalizedCredits > 0
+        ? `${run.finalizedCredits} credits`
+        : `~${run.reservedCredits} credits reserved`;
     lines.push(
       `- ${run.id}  [${run.status}]  ${run.capability}${run.target ? ` ${run.target}` : ''}  ${cost}  ${run.updatedAt}`,
     );
@@ -350,24 +334,22 @@ export function formatHostedRunsListReport(
 }
 
 export function formatHostedRunDetailReport(report: HostedRunDetail): string {
-  const settled =
-    report.status === 'completed' || report.finalizedMillicredits > 0;
+  const settled = report.status === 'completed' || report.finalizedCredits > 0;
   return [
     `PostPlus run ${report.id}`,
     '',
-    `Status: ${report.status}${report.providerStatus ? ` (provider: ${report.providerStatus})` : ''}`,
+    `Status: ${report.status}`,
     `Capability: ${report.capability}${report.target ? ` ${report.target}` : ''}`,
-    `Provider: ${report.providerFamily ?? 'unknown'}${report.providerModelPath ? ` ${report.providerModelPath}` : ''}`,
     settled
-      ? `Settled cost: ${report.finalizedMillicredits} millicredits (actual)`
-      : `Reserved: ${report.reservedMillicredits} millicredits (not yet settled)`,
+      ? `Finalized: ${report.finalizedCredits} PostPlus credits`
+      : `Reserved: ${report.reservedCredits} PostPlus credits`,
     `Created: ${report.createdAt}`,
     `Updated: ${report.updatedAt}`,
     report.hasError ? 'Error: see error field (postplus runs show --json)' : '',
     '',
     report.status === 'completed' || report.status === 'failed'
       ? 'This run is terminal.'
-      : `Still running. Resume: postplus media poll --handle ${report.providerTaskId ?? report.id}`,
+      : `Still running. Refresh: postplus runs show ${report.id}`,
   ]
     .filter((line) => line !== '')
     .join('\n');

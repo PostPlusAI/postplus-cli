@@ -430,7 +430,7 @@ async function checkHostedCapabilities(
         'hosted_capabilities',
         skillId ? `Hosted capabilities for ${skillId}` : 'Hosted capabilities',
         `Not ready: ${failedLabels.join(', ') || 'unknown capability failure'}`,
-        'Check PostPlus Cloud provider configuration and subscription state.',
+        'Check PostPlus Cloud service configuration and subscription state.',
         {
           severity: skillId ? 'required' : 'task_specific',
         },
@@ -625,53 +625,44 @@ function capabilityMatchesRequirements(
   requirements: PublicSkillRequirements,
 ): boolean {
   const identifiers = collectCapabilityIdentifiers(capability);
-  const hostedCapabilities = new Set(requirements.hostedCapabilities);
+  const publicCapabilities = new Set(requirements.capabilities);
   const requirementKeys = collectHostedRequirementKeys(requirements);
+  const matchesPublicCapability =
+    publicCapabilities.size === 0 ||
+    identifiers.some((identifier) =>
+      [...publicCapabilities].some((capability) =>
+        publicCapabilityMatchesIdentifier(capability, identifier),
+      ),
+    );
+  const matchesConcreteRequirement =
+    requirementKeys.size === 0 ||
+    identifiers.some((identifier) =>
+      [...requirementKeys].some((key) => identifierMatchesKey(identifier, key)),
+    );
 
-  return identifiers.some((identifier) => {
-    if (
-      identifier === 'media-file:upload' &&
-      hostedCapabilities.has('media-file') &&
-      !requiresHostedMediaFileUpload(requirements)
-    ) {
-      return false;
-    }
-
-    const [prefix, suffix] = splitCapabilityIdentifier(identifier);
-
-    if (
-      prefix === 'media-file' &&
-      suffix &&
-      suffix !== 'upload' &&
-      hostedCapabilities.has('media-file')
-    ) {
-      return true;
-    }
-
-    if (hostedCapabilities.has(identifier)) {
-      return true;
-    }
-
-    if (
-      prefix &&
-      suffix &&
-      hostedCapabilities.has(prefix) &&
-      (isWholeFamilyHostedCapability(prefix) || requirementKeys.has(suffix))
-    ) {
-      return true;
-    }
-
-    return requirementKeys.has(identifier) || requirementKeys.has(suffix);
-  });
+  return matchesPublicCapability && matchesConcreteRequirement;
 }
 
-function requiresHostedMediaFileUpload(
-  requirements: PublicSkillRequirements,
+function publicCapabilityMatchesIdentifier(
+  capability: string,
+  identifier: string,
 ): boolean {
-  return (
-    requirements.hostedCapabilities.includes('media-generation') ||
-    requirements.endpointKeys.length > 0
-  );
+  const [prefix] = splitCapabilityIdentifier(identifier);
+  const family = prefix ?? identifier;
+  if (capability === 'research') {
+    return [
+      'hosted-collection',
+      'public-content-collection',
+      'public-content-discovery',
+    ].includes(family);
+  }
+  if (capability === 'media') {
+    return ['media-file', 'media-generation', 'video-analysis'].includes(family);
+  }
+  if (capability === 'publishing') {
+    return family === 'social-publishing';
+  }
+  return false;
 }
 
 function collectCapabilityIdentifiers(
@@ -718,38 +709,25 @@ function collectHostedRequirementKeys(
 ): Set<string> {
   return new Set([
     ...requirements.accountConnections,
-    ...requirements.collectionKeys,
     ...requirements.endpointKeys,
     ...requirements.modelKeys,
-    ...requirements.sourceKeys,
+    ...requirements.routeKeys,
   ]);
-}
-
-// Capability families whose sub-keys are intentionally NOT expressible as catalog
-// requirement keys: a skill requires the bare family capability, and any released
-// sub-key readiness row satisfies it. social-publishing operations and
-// public-content-discovery tools (e.g. web-search) both have no requirement-key
-// binding, so requiring the family must match the whole family. Without this,
-// `public-content-discovery:web-search` readiness is filtered out for skills that
-// require `public-content-discovery`, producing a false "readiness check missing".
-function isWholeFamilyHostedCapability(prefix: string): boolean {
-  return prefix === 'public-content-discovery' || prefix === 'social-publishing';
 }
 
 function requiresSocialPublishingPlan(
   requirements: PublicSkillRequirements,
 ): boolean {
-  return requirements.hostedCapabilities.includes('social-publishing');
+  return requirements.capabilities.includes('publishing');
 }
 
 function hasHostedRequirements(requirements: PublicSkillRequirements): boolean {
   return (
     requirements.accountConnections.length > 0 ||
-    requirements.collectionKeys.length > 0 ||
+    requirements.capabilities.length > 0 ||
     requirements.endpointKeys.length > 0 ||
-    requirements.hostedCapabilities.length > 0 ||
     requirements.modelKeys.length > 0 ||
-    requirements.sourceKeys.length > 0
+    requirements.routeKeys.length > 0
   );
 }
 
@@ -762,10 +740,10 @@ function collectMissingHostedRequirementLabels(
   );
   const missing: string[] = [];
 
-  for (const capability of requirements.hostedCapabilities) {
+  for (const capability of requirements.capabilities) {
     if (
       ![...availableIdentifiers].some((identifier) =>
-        identifierMatchesCapability(identifier, capability),
+        publicCapabilityMatchesIdentifier(capability, identifier),
       )
     ) {
       missing.push(capability);

@@ -11,7 +11,7 @@ export type AuthValidateReport = {
   accountType: 'personal' | 'team';
   apiBaseUrl: string;
   ok: boolean;
-  source: 'config';
+  source: 'env' | 'config' | 'default';
   subscriptionStatus?: unknown;
   userEmail: string | null;
   userId: string;

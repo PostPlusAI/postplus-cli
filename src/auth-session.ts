@@ -4,13 +4,19 @@ import {
   writeCurrentCliVersionToLocalConfig,
 } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
-import { resolveCliSessionTokenState, setLocalSession } from './local-state.js';
+import {
+  readLocalConfig,
+  resolveApiBaseUrlState,
+  resolveCliSessionTokenState,
+  setLocalSession,
+} from './local-state.js';
+import { clearUpdateCheckCache } from './update-check.js';
 
 export type FreshRemoteAuth = {
   apiBaseUrl: string;
   cliSessionToken: string;
   refreshed: boolean;
-  source: 'config';
+  source: 'env' | 'config' | 'default';
 };
 
 export type RemoteAuthRefreshResult = {
@@ -49,26 +55,40 @@ export async function resolveFreshRemoteAuth(
     forceRefresh?: boolean;
   } = {},
 ): Promise<FreshRemoteAuth> {
-  const [apiBaseUrl, cliSessionTokenState] = await Promise.all([
-    requireHostedBaseUrl(),
-    resolveCliSessionTokenState(),
-  ]);
+  const [apiBaseUrl, apiBaseUrlState, cliSessionTokenState, config] =
+    await Promise.all([
+      requireHostedBaseUrl(),
+      resolveApiBaseUrlState(),
+      resolveCliSessionTokenState(),
+      readLocalConfig(),
+    ]);
 
   if (!cliSessionTokenState.present || !cliSessionTokenState.value) {
     throw new Error('Run `postplus auth login` before using PostPlus auth.');
+  }
+
+  const sessionApiBaseUrl = config?.sessionApiBaseUrl ?? config?.apiBaseUrl;
+  if (
+    sessionApiBaseUrl &&
+    normalizeApiBaseUrl(sessionApiBaseUrl) !== normalizeApiBaseUrl(apiBaseUrl)
+  ) {
+    throw new Error(
+      `The current PostPlus session belongs to ${normalizeApiBaseUrl(sessionApiBaseUrl)}, but this process targets ${normalizeApiBaseUrl(apiBaseUrl)}. Use an isolated POSTPLUS_CONFIG_DIR and log in to the target environment.`,
+    );
   }
 
   if (options.forceRefresh === true) {
     const refreshed = await refreshRemoteAuthSession({
       apiBaseUrl,
       cliSessionToken: cliSessionTokenState.value,
+      persistApiBaseUrl: apiBaseUrlState.source !== 'env',
     });
 
     return {
       apiBaseUrl,
       cliSessionToken: refreshed.cliSessionToken,
       refreshed: true,
-      source: 'config',
+      source: apiBaseUrlState.source,
     };
   }
 
@@ -76,18 +96,24 @@ export async function resolveFreshRemoteAuth(
     apiBaseUrl,
     cliSessionToken: cliSessionTokenState.value,
     refreshed: false,
-    source: 'config',
+    source: apiBaseUrlState.source,
   };
 }
 
 export async function refreshRemoteAuthSession(input?: {
   apiBaseUrl?: string;
   cliSessionToken?: string;
+  persistApiBaseUrl?: boolean;
 }): Promise<RemoteAuthRefreshResult> {
-  const [apiBaseUrl, cliSessionTokenState] = await Promise.all([
-    input?.apiBaseUrl ?? requireHostedBaseUrl(),
-    input?.cliSessionToken === undefined ? resolveCliSessionTokenState() : null,
-  ]);
+  const [apiBaseUrl, apiBaseUrlState, cliSessionTokenState] = await Promise.all(
+    [
+      input?.apiBaseUrl ?? requireHostedBaseUrl(),
+      resolveApiBaseUrlState(),
+      input?.cliSessionToken === undefined
+        ? resolveCliSessionTokenState()
+        : null,
+    ],
+  );
   const cliSessionToken =
     input?.cliSessionToken === undefined
       ? cliSessionTokenState?.value
@@ -111,6 +137,7 @@ export async function refreshRemoteAuthSession(input?: {
     const compatibilityError = formatPostPlusCompatibilityError(payload);
 
     if (compatibilityError) {
+      await clearUpdateCheckCache();
       throw new Error(compatibilityError);
     }
 
@@ -135,6 +162,8 @@ export async function refreshRemoteAuthSession(input?: {
     sessionExpiresAt: payload.sessionExpiresAt,
     userEmail: payload.userEmail,
     userId: payload.userId,
+    persistApiBaseUrl:
+      input?.persistApiBaseUrl ?? apiBaseUrlState.source !== 'env',
   });
   await writeCurrentCliVersionToLocalConfig();
 
@@ -142,6 +171,10 @@ export async function refreshRemoteAuthSession(input?: {
     ...payload,
     apiBaseUrl,
   };
+}
+
+function normalizeApiBaseUrl(value: string): string {
+  return new URL(value.trim()).toString().replace(/\/+$/u, '');
 }
 
 function isRemoteAuthRefreshSuccessPayload(

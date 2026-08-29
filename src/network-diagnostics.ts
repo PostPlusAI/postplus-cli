@@ -41,6 +41,7 @@ export async function fetchWithNetworkDiagnostics(
   options: NetworkRequestOptions,
 ): Promise<Response> {
   let currentUrl = new URL(inputUrl);
+  assertEnvironmentProxyReady(currentUrl);
   let method = (init.method ?? 'GET').toUpperCase();
   let body = init.body;
   const headers = Object.fromEntries(new Headers(init.headers).entries());
@@ -139,6 +140,64 @@ export async function fetchWithNetworkDiagnostics(
     }
     currentUrl = nextUrl;
   }
+}
+
+/**
+ * Node only honors HTTP(S)_PROXY for built-in fetch when environment proxy
+ * support is enabled before process startup. Failing here turns an otherwise
+ * repeated 15-second timeout into one actionable configuration error. NO_PROXY
+ * targets remain direct and are not blocked.
+ */
+export function assertEnvironmentProxyReady(target: URL): void {
+  const proxy =
+    readEnv('HTTPS_PROXY') ??
+    readEnv('https_proxy') ??
+    readEnv('ALL_PROXY') ??
+    readEnv('all_proxy') ??
+    readEnv('HTTP_PROXY') ??
+    readEnv('http_proxy');
+  if (!proxy || targetIsExcludedFromProxy(target)) {
+    return;
+  }
+  const enabled = readEnv('NODE_USE_ENV_PROXY')?.toLowerCase();
+  if (enabled === '1' || enabled === 'true') {
+    return;
+  }
+  throw new PostPlusNetworkRequestError({
+    detail:
+      'Proxy environment variables are configured, but Node fetch environment-proxy support is disabled. Restart the command with NODE_USE_ENV_PROXY=1.',
+    method: 'PREFLIGHT',
+    targetUrl: target.toString(),
+  });
+}
+
+function targetIsExcludedFromProxy(target: URL): boolean {
+  const raw = readEnv('NO_PROXY') ?? readEnv('no_proxy');
+  if (!raw) {
+    return false;
+  }
+  const host = target.hostname.toLowerCase();
+  const hostWithPort = target.host.toLowerCase();
+  return raw.split(',').some((entry) => {
+    const token = entry.trim().toLowerCase();
+    if (!token) {
+      return false;
+    }
+    if (token === '*') {
+      return true;
+    }
+    const normalized = token.replace(/^https?:\/\//u, '');
+    if (normalized.includes(':')) {
+      return hostWithPort === normalized;
+    }
+    const suffix = normalized.replace(/^\./u, '');
+    return host === suffix || host.endsWith(`.${suffix}`);
+  });
+}
+
+function readEnv(name: string): string | null {
+  const value = process.env[name]?.trim();
+  return value ? value : null;
 }
 
 export function isNetworkFailure(error: unknown): boolean {

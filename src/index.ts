@@ -89,22 +89,20 @@ Usage:
   postplus balance [--json]
   postplus runs list [--status <status>] [--since <iso>] [--limit <n>] [--json]
   postplus runs show <run-id> [--json]
-  postplus research schema [--collection-key <key>] [--json]
-  postplus research collect <collection-key> --request <input.json> --output <result.json> [--skill <skill-id>]
-  postplus research collect --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
-  postplus research scrape <source-key> --request <input-array.json> --output <result.json> [--skill <skill-id>]
-  postplus research scrape --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
+  postplus research schema [--route <route>] [--json]
+  postplus research run <route> --<semantic flags> --wait --output <result.json>
+  postplus research run --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
   postplus media schema [--endpoint <endpoint-key>] [--json]
-  postplus media <verb> <endpoint-key> --request <input.json> | --<flags> [--output <result.json>]
-  postplus media estimate <endpoint-key> --request <input.json> | --<flags> [--json]
+  postplus media <verb> <endpoint-key> --<role/intent flags> [--wait] [--output <result.json>]
+  postplus media estimate <endpoint-key> --<same flags> [--json]
   postplus media poll --handle <run-id> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--debug] [--json] [--output <result.json>]
-  postplus media-file upload --input-file <path> [--mime <type>] [--storage-only] [--skill <skill-id>] [--json] [--output <result.json>]
+  postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
   postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
   postplus publish schema [--json]
   postplus publish <operation> --request <input.json> [--output <result.json>]
   postplus workflow list|show|runs|run-show|create|propose|save|quote|launch ... [--json]
   postplus workflow help
-  postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <millicredits>]
+  postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <credits>]
   postplus skills verify [--json]
   postplus studio init|open|status   Open bundled Local Studio
   postplus update [--current-directory]
@@ -339,16 +337,16 @@ async function runQuoteCommand(rest: string[]): Promise<number> {
 }
 
 /**
- * Resolves the bounded auto-confirm ceiling in millicredits. Precedence:
+ * Resolves the public credit ceiling into internal ledger units. Precedence:
  * explicit --auto-confirm-under flag, then the
- * POSTPLUS_QUOTE_AUTO_CONFIRM_UNDER_MILLICREDITS env var. Returns null when
+ * POSTPLUS_QUOTE_AUTO_CONFIRM_UNDER_CREDITS env var. Returns null when
  * neither is set, leaving today's interactive behavior unchanged.
  */
 function resolveQuoteAutoConfirmCeiling(
   flagValue: number | null,
 ): number | null {
   if (flagValue !== null) {
-    return flagValue;
+    return Math.round(flagValue * 1_000);
   }
 
   const envValue = process.env[QUOTE_AUTO_CONFIRM_UNDER_ENV];
@@ -359,11 +357,11 @@ function resolveQuoteAutoConfirmCeiling(
   const parsed = Number(envValue);
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new Error(
-      `Invalid ${QUOTE_AUTO_CONFIRM_UNDER_ENV}: expected a non-negative number of millicredits.`,
+      `Invalid ${QUOTE_AUTO_CONFIRM_UNDER_ENV}: expected a non-negative number of PostPlus credits.`,
     );
   }
 
-  return parsed;
+  return Math.round(parsed * 1_000);
 }
 
 function parseQuoteConfirmOptions(args: string[]): {
@@ -407,7 +405,7 @@ function parseQuoteConfirmOptions(args: string[]): {
       const value = Number(rawValue);
       if (!Number.isFinite(value) || value < 0) {
         throw new Error(
-          'Invalid value for --auto-confirm-under: expected a non-negative number of millicredits.',
+          'Invalid value for --auto-confirm-under: expected a non-negative number of PostPlus credits.',
         );
       }
 

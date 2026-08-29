@@ -8,7 +8,7 @@ export const QUOTE_AUTO_CONFIRM_CEILING_EXCEEDED_CODE =
   'postplus_cli_quote_auto_confirm_ceiling_exceeded';
 
 export const QUOTE_AUTO_CONFIRM_UNDER_ENV =
-  'POSTPLUS_QUOTE_AUTO_CONFIRM_UNDER_MILLICREDITS';
+  'POSTPLUS_QUOTE_AUTO_CONFIRM_UNDER_CREDITS';
 
 /**
  * Thrown when a bounded auto-confirm ceiling is configured but the challenge
@@ -18,24 +18,26 @@ export const QUOTE_AUTO_CONFIRM_UNDER_ENV =
 export class QuoteAutoConfirmCeilingExceededError extends Error {
   readonly code = QUOTE_AUTO_CONFIRM_CEILING_EXCEEDED_CODE;
   readonly challenge: LargeCreditQuoteConfirmationChallenge;
-  readonly ceilingMillicredits: number;
-  readonly costMillicredits: number;
+  readonly ceilingCredits: number;
+  readonly costCredits: number;
 
   constructor(input: {
     challenge: LargeCreditQuoteConfirmationChallenge;
     ceilingMillicredits: number;
     costMillicredits: number;
   }) {
+    const ceilingCredits = toCredits(input.ceilingMillicredits);
+    const costCredits = toCredits(input.costMillicredits);
     super(
-      `Quote cost ${input.costMillicredits} millicredits exceeds the ` +
-        `auto-confirm ceiling of ${input.ceilingMillicredits} millicredits. ` +
+      `Quote cost ${formatCreditAmount(costCredits)} credits exceeds the ` +
+        `auto-confirm ceiling of ${formatCreditAmount(ceilingCredits)} credits. ` +
         'Confirm explicitly or raise --auto-confirm-under / ' +
         `${QUOTE_AUTO_CONFIRM_UNDER_ENV}.`,
     );
     this.name = 'QuoteAutoConfirmCeilingExceededError';
     this.challenge = input.challenge;
-    this.ceilingMillicredits = input.ceilingMillicredits;
-    this.costMillicredits = input.costMillicredits;
+    this.ceilingCredits = ceilingCredits;
+    this.costCredits = costCredits;
   }
 }
 
@@ -51,7 +53,7 @@ export class QuoteConfirmationNonInteractiveError extends Error {
   constructor(challenge: LargeCreditQuoteConfirmationChallenge) {
     super(
       'Quote confirmation required but stdin is not a TTY and no auto-confirm ' +
-        'ceiling is configured. Pass --auto-confirm-under <millicredits>, set ' +
+        'ceiling is configured. Pass --auto-confirm-under <credits>, set ' +
         `${QUOTE_AUTO_CONFIRM_UNDER_ENV}, or run interactively.`,
     );
     this.name = 'QuoteConfirmationNonInteractiveError';
@@ -68,14 +70,14 @@ export type LargeCreditQuoteConfirmationChallenge = {
     label: string;
     value: unknown;
   }>;
-  estimatedCredits?: number;
+  estimatedCredits: number;
   estimatedMillicredits: number;
   estimatedOnly?: boolean;
   featureLabel: string;
   operationId: string;
-  requiredTierCredits?: number;
+  requiredTierCredits: number;
   requiredTierMillicredits: number;
-  reservedCredits?: number;
+  reservedCredits: number;
   reservedMillicredits: number;
   serviceLabel: string;
   token: string;
@@ -134,11 +136,11 @@ export function readLargeCreditQuoteConfirmationChallenge(
   if (
     typeof parsed.accountId !== 'string' ||
     typeof parsed.action !== 'string' ||
-    typeof parsed.estimatedMillicredits !== 'number' ||
+    typeof parsed.estimatedCredits !== 'number' ||
     typeof parsed.featureLabel !== 'string' ||
     typeof parsed.operationId !== 'string' ||
-    typeof parsed.requiredTierMillicredits !== 'number' ||
-    typeof parsed.reservedMillicredits !== 'number' ||
+    typeof parsed.requiredTierCredits !== 'number' ||
+    typeof parsed.reservedCredits !== 'number' ||
     typeof parsed.serviceLabel !== 'string' ||
     typeof parsed.token !== 'string'
   ) {
@@ -151,24 +153,15 @@ export function readLargeCreditQuoteConfirmationChallenge(
     billingUnit:
       typeof parsed.billingUnit === 'string' ? parsed.billingUnit : undefined,
     drivers: parseDrivers(parsed.drivers),
-    estimatedCredits:
-      typeof parsed.estimatedCredits === 'number'
-        ? parsed.estimatedCredits
-        : undefined,
-    estimatedMillicredits: parsed.estimatedMillicredits,
+    estimatedCredits: parsed.estimatedCredits,
+    estimatedMillicredits: toMillicredits(parsed.estimatedCredits),
     estimatedOnly: parsed.estimatedOnly === true,
     featureLabel: parsed.featureLabel,
     operationId: parsed.operationId,
-    requiredTierCredits:
-      typeof parsed.requiredTierCredits === 'number'
-        ? parsed.requiredTierCredits
-        : undefined,
-    requiredTierMillicredits: parsed.requiredTierMillicredits,
-    reservedCredits:
-      typeof parsed.reservedCredits === 'number'
-        ? parsed.reservedCredits
-        : undefined,
-    reservedMillicredits: parsed.reservedMillicredits,
+    requiredTierCredits: parsed.requiredTierCredits,
+    requiredTierMillicredits: toMillicredits(parsed.requiredTierCredits),
+    reservedCredits: parsed.reservedCredits,
+    reservedMillicredits: toMillicredits(parsed.reservedCredits),
     serviceLabel: parsed.serviceLabel,
     token: parsed.token,
   };
@@ -219,9 +212,9 @@ async function runQuoteConfirmation(
         timestamp: now.toISOString(),
         accountId: challenge.accountId,
         operationId: challenge.operationId,
-        costMillicredits: cost,
-        ceilingMillicredits: ceiling,
-        requiredTierMillicredits: challenge.requiredTierMillicredits,
+        costCredits: toCredits(cost),
+        ceilingCredits: toCredits(ceiling),
+        requiredTierCredits: challenge.requiredTierCredits,
       }),
     );
     return;
@@ -266,15 +259,9 @@ export function buildLargeCreditConfirmationPrompt(
   const lines = [
     '',
     'PostPlus large credit warning',
-    `This request crosses the ${formatCredits(
-      challenge.requiredTierMillicredits,
-    )}-credit warning tier.`,
-    `Estimated charge: ${formatCredits(
-      challenge.estimatedMillicredits,
-    )} credits${challenge.estimatedOnly ? ' (estimate)' : ''}.`,
-    `Reserved before execution: ${formatCredits(
-      challenge.reservedMillicredits,
-    )} credits.`,
+    `This request crosses the ${formatCreditAmount(challenge.requiredTierCredits)}-credit warning tier.`,
+    `Estimated charge: ${formatCreditAmount(challenge.estimatedCredits)} credits${challenge.estimatedOnly ? ' (estimate)' : ''}.`,
+    `Reserved before execution: ${formatCreditAmount(challenge.reservedCredits)} credits.`,
     `Capability: ${formatText(challenge.featureLabel)} / ${formatText(
       challenge.action,
     )}.`,
@@ -351,7 +338,9 @@ async function writeAcknowledgedTierMillicredits(
   });
 }
 
-function parseDrivers(value: unknown): LargeCreditQuoteConfirmationChallenge['drivers'] {
+function parseDrivers(
+  value: unknown,
+): LargeCreditQuoteConfirmationChallenge['drivers'] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -372,9 +361,7 @@ function formatText(value: string): string {
   return value.trim() ? value : 'unknown';
 }
 
-function formatCredits(millicredits: number): string {
-  const credits = millicredits / 1_000;
-
+function formatCreditAmount(credits: number): string {
   if (!Number.isFinite(credits)) {
     return 'unknown';
   }
@@ -382,4 +369,12 @@ function formatCredits(millicredits: number): string {
   return Number.isInteger(credits)
     ? String(credits)
     : credits.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function toCredits(millicredits: number): number {
+  return millicredits / 1_000;
+}
+
+function toMillicredits(credits: number): number {
+  return Math.round(credits * 1_000);
 }
