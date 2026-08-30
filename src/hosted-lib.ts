@@ -16,12 +16,12 @@
 // (the structured HostedProductRequestError / quote-confirmation error are thrown
 // verbatim) instead of being written to stdout/file with an exit code.
 //
-// Scope: only the hosted spend/write surfaces go through here —
-// media / research / publish / media-file. Read-only diagnostics (status / doctor
-// / skills / whoami / quote / list / --version / --help) are NOT hosted-domain
-// commands and are out of scope for this entry.
-
+// Scope: hosted execution surfaces go through here — Ads read, media, research,
+// publish, and media-file. Local diagnostics (status / doctor / skills / whoami /
+// quote / list / --version / --help) are NOT hosted-domain commands and remain
+// out of scope for this entry.
 import type { AuthedCloudRequestAuth } from './authed-cloud-request.js';
+import { runHostedAdsCommand } from './hosted-ads-commands.js';
 import {
   type HostedRequestContext,
   postHostedCapabilityEnvelope,
@@ -29,7 +29,12 @@ import {
   runMediaFileCommand,
 } from './hosted-domain-commands.js';
 
-export type HostedLibDomain = 'media' | 'research' | 'publish' | 'media-file';
+export type HostedLibDomain =
+  | 'ads'
+  | 'media'
+  | 'research'
+  | 'publish'
+  | 'media-file';
 
 export type RunHostedRequestInput = {
   /** Which hosted verb family `args` belongs to (the first CLI token). */
@@ -57,7 +62,7 @@ export type RunHostedRequestInput = {
 };
 
 /**
- * Runs a hosted media / research / publish / media-file request in-process and
+ * Runs a hosted Ads / media / research / publish / media-file request in-process and
  * returns the parsed hosted payload. Throws the structured
  * HostedProductRequestError / quote-confirmation error VERBATIM on failure — no
  * stdout, no file writes, no exit code. The wire request is identical to the bin
@@ -78,6 +83,10 @@ export async function runHostedRequest(
 
   if (input.domain === 'media-file') {
     return runMediaFileCommand(input.args, context);
+  }
+
+  if (input.domain === 'ads') {
+    return runHostedAdsCommand(input.args, context);
   }
 
   return runHostedDomainCommand(input.domain, input.args, context);

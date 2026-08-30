@@ -47,6 +47,7 @@ import {
   runBalanceCommand,
   runRunsCommand,
 } from './hosted-account-commands.js';
+import { runHostedAdsCommand } from './hosted-ads-commands.js';
 import {
   runHostedDomainCommand,
   runMediaFileCommand,
@@ -9983,7 +9984,7 @@ describe('hosted lib / bin request parity', () => {
 
   type ParityCase = {
     name: string;
-    domain: 'media' | 'research' | 'publish' | 'media-file';
+    domain: 'ads' | 'media' | 'research' | 'publish' | 'media-file';
     // Tokens AFTER the domain, shared by both paths EXCEPT the request source.
     baseArgs: string[];
     // request-json surfaces: the injected object (lib) / written file (bin).
@@ -9991,6 +9992,18 @@ describe('hosted lib / bin request parity', () => {
   };
 
   const CASES: ParityCase[] = [
+    {
+      name: 'Ads performance (semantic flags) Meta current scope',
+      domain: 'ads',
+      baseArgs: [
+        'performance',
+        '--provider',
+        'meta_ads',
+        '--scope',
+        'current',
+        '--json',
+      ],
+    },
     {
       name: 'media create (flags surface) image-gpt-image-2-text',
       domain: 'media',
@@ -10078,7 +10091,9 @@ describe('hosted lib / bin request parity', () => {
       const binRequest = await captureSingleHostedRequest(() =>
         parityCase.domain === 'media-file'
           ? runMediaFileCommand(binArgs)
-          : runHostedDomainCommand(parityCase.domain, binArgs),
+          : parityCase.domain === 'ads'
+            ? runHostedAdsCommand(binArgs)
+            : runHostedDomainCommand(parityCase.domain, binArgs),
       );
 
       // LIB path: same args (minus the --request file), inject requestJson +
@@ -10133,11 +10148,14 @@ describe('hosted lib / bin request parity', () => {
         libRequest.headers.authorization,
         `Bearer ${PARITY_AUTH.cliSessionToken}`,
       );
-      // operationId pinned identically on both bodies.
-      assert.equal(
-        (libRequest.body as Record<string, unknown>).operationId,
-        PARITY_OP_ID,
-      );
+      if (parityCase.domain !== 'ads') {
+        // Spend/write bodies carry a pinned operation id. Ads performance is a
+        // read-only query and intentionally has no mutation operation id.
+        assert.equal(
+          (libRequest.body as Record<string, unknown>).operationId,
+          PARITY_OP_ID,
+        );
+      }
     });
   }
 
