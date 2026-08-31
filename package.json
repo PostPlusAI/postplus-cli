@@ -36,6 +36,7 @@
     "build/local-dependencies.js",
     "build/local-state.js",
     "build/network-diagnostics.js",
+    "build/network-proxy-policy.js",
     "build/quote-confirmation.js",
     "build/skill-catalog.js",
     "build/skill-management.js",
@@ -65,13 +66,16 @@
     },
     "./package.json": "./package.json"
   },
+  "dependencies": {
+    "undici-runtime": "npm:undici@6.21.3"
+  },
   "scripts": {
     "build": "node ./scripts/clean-build.mjs && tsc && node ./scripts/finalize-build.mjs",
     "clean": "rm -rf .turbo node_modules build",
     "release:package": "node ./scripts/package-release.mjs",
     "start": "tsx src/index.ts",
     "test:acceptance": "node ./scripts/acceptance.mjs",
-    "test": "tsx --test src/postplus-cli.test.ts src/hosted-ads-commands.test.ts",
+    "test": "tsx --test src/postplus-cli.test.ts src/hosted-ads-commands.test.ts src/network-proxy-policy.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

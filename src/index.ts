@@ -30,6 +30,7 @@ import {
   runWorkflowCommand,
 } from './hosted-domain-commands.js';
 import { assertConfigFilePermissions } from './local-state.js';
+import { ensureEnvironmentProxyDispatcher } from './network-proxy-policy.js';
 import {
   QUOTE_AUTO_CONFIRM_UNDER_ENV,
   QuoteAutoConfirmCeilingExceededError,
@@ -535,6 +536,7 @@ async function runAuthValidate(json: boolean): Promise<number> {
 }
 
 async function main(): Promise<void> {
+  ensureEnvironmentProxyDispatcher();
   const [command, ...rest] = process.argv.slice(2);
   await assertConfigFilePermissions();
   const json = rest.includes('--json');

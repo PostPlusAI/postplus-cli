@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      undici-runtime:
+        specifier: npm:undici@6.21.3
+        version: undici@6.21.3
     devDependencies:
       '@types/node':
         specifier: ^24.6.2
@@ -208,6 +212,10 @@ packages:
   undici-types@7.16.0:
     resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
 
+  undici@6.21.3:
+    resolution: {integrity: sha512-gBLkYIlEnSp8pFbT64yFgGE6UIB9tAkhukC23PmMDCe5Nd+cRqKxSjw5y54MK2AZMgZfJWMaNE4nYUHgi1XEOw==}
+    engines: {node: '>=18.17'}
+
 snapshots:
 
   '@esbuild/aix-ppc64@0.27.7':
@@ -340,3 +348,5 @@ snapshots:
   typescript@5.9.3: {}
 
   undici-types@7.16.0: {}
+
+  undici@6.21.3: {}

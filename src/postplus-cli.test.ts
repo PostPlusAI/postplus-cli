@@ -547,10 +547,6 @@ beforeEach(async () => {
   tempDirs.push(configDir);
   tempDirs.push(stateDir);
   process.env.POSTPLUS_CONFIG_DIR = configDir;
-  // The test host declares proxy variables; production Node requires this at
-  // process start. Unit requests are mocked, and this keeps them aligned with
-  // the explicit transport preflight contract.
-  process.env.NODE_USE_ENV_PROXY = '1';
   process.env.XDG_STATE_HOME = stateDir;
 });
 
@@ -2033,7 +2029,7 @@ process.exit(1);
     );
   });
 
-  it('fails immediately when proxy variables exist but Node environment proxy support is disabled', async () => {
+  it('does not require callers to know NODE_USE_ENV_PROXY', async () => {
     await setLocalSession({
       accountId: 'account-1',
       accountName: 'Account',
@@ -2056,15 +2052,20 @@ process.exit(1);
     delete process.env.NO_PROXY;
     delete process.env.no_proxy;
     delete process.env.NODE_USE_ENV_PROXY;
-    let fetchCalls = 0;
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => {
-      fetchCalls += 1;
-      return new Response(null, { status: 200 });
+      return Response.json({
+        accountId: 'account-1',
+        accountName: 'Account',
+        accountSlug: null,
+        accountType: 'personal',
+        userEmail: 'user@example.com',
+        userId: 'user-1',
+      });
     };
     try {
-      await assert.rejects(() => validateRemoteAuth(), /NODE_USE_ENV_PROXY=1/u);
-      assert.equal(fetchCalls, 0);
+      const report = await validateRemoteAuth();
+      assert.equal(report.ok, true);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -5696,8 +5697,11 @@ describe('hosted domain commands', () => {
       });
       assert.equal(requests[0]?.headers['x-postplus-skill-name'], undefined);
       assert.equal(
-        (JSON.parse(await readFile(checkpointPath, 'utf8')) as { status: string })
-          .status,
+        (
+          JSON.parse(await readFile(checkpointPath, 'utf8')) as {
+            status: string;
+          }
+        ).status,
         'completed',
       );
     } finally {
