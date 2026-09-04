@@ -18,6 +18,7 @@ import { promisify } from 'node:util';
 
 import {
   CLI_AUTH_LOGIN_POLL_BUDGET_MS,
+  formatCloudAuthLoginPrompt,
   openCloudAuthVerificationUrlIfConfigured,
   pollCloudAuthLogin,
   startCloudAuthLogin,
@@ -30,9 +31,9 @@ import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import {
   POSTPLUS_CLIENT_COMPATIBILITY_HEADERS,
   POSTPLUS_CLIENT_CONTRACT_VERSION,
-  PostPlusClientUpgradeRequiredError,
   POSTPLUS_CLI_UPDATE_COMMAND,
   POSTPLUS_UPDATE_COMMAND,
+  PostPlusClientUpgradeRequiredError,
   formatPostPlusClientUpgradeError,
 } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
@@ -2384,6 +2385,27 @@ describe('cloud auth handoff', () => {
     }
   });
 
+  it('renders the real cloud sign-in URL and code before polling', () => {
+    assert.equal(
+      formatCloudAuthLoginPrompt({
+        userCode: '123456',
+        verificationUrl:
+          'https://postplus.example.com/auth/cli-login?requestId=request-1&userCode=123456',
+      }),
+      [
+        'PostPlus CLI login',
+        '',
+        'Open this URL in your browser to continue:',
+        'https://postplus.example.com/auth/cli-login?requestId=request-1&userCode=123456',
+        '',
+        'Code: 123456',
+        '',
+        'Waiting for browser sign-in...',
+        '',
+      ].join('\n'),
+    );
+  });
+
   it('opens the cloud sign-in URL only when an opener command is configured', () => {
     const originalCommand = process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND;
 
@@ -2976,10 +2998,7 @@ describe('update checks', () => {
   });
 
   it('recovers an update lock left by a process that no longer exists', async () => {
-    const lockPath = resolve(
-      process.env.POSTPLUS_CONFIG_DIR!,
-      'update.lock',
-    );
+    const lockPath = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'update.lock');
     await mkdir(lockPath, { recursive: true });
     await writeFile(
       resolve(lockPath, 'owner.json'),
@@ -3054,7 +3073,10 @@ describe('update checks', () => {
       { command: 'postplus', args: ['update'], env: recoveryEnv },
       { command: 'postplus', args: originalArgs, env: recoveryEnv },
     ]);
-    assert.match(output.join(''), /updating and will continue the current task/u);
+    assert.match(
+      output.join(''),
+      /updating and will continue the current task/u,
+    );
     assert.doesNotMatch(output.join(''), /Retrying the original command/u);
   });
 
@@ -6243,8 +6265,11 @@ describe('hosted domain commands', () => {
       });
       assert.equal(requests[0]?.headers['x-postplus-skill-name'], undefined);
       assert.equal(
-        (JSON.parse(await readFile(checkpointPath, 'utf8')) as { status: string })
-          .status,
+        (
+          JSON.parse(await readFile(checkpointPath, 'utf8')) as {
+            status: string;
+          }
+        ).status,
         'completed',
       );
     } finally {
@@ -9513,6 +9538,123 @@ describe('hosted domain commands', () => {
         operationId: 'op-from-web-123',
         userMessageRule: 'retry_later',
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('preserves and prints the official account action for insufficient credits', async () => {
+    const requestDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-cli-balance-'),
+    );
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'result.json');
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const originalWrite = process.stderr.write.bind(process.stderr);
+    let stderr = '';
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          code: 'postplus_cli_balance_required',
+          error:
+            'This account does not have enough PostPlus credits. Add credits, then retry the same request.',
+          layer: 'balance',
+          operationId: 'op-balance-123',
+          status: 402,
+          userAction: {
+            label: 'Add PostPlus credits',
+            type: 'open_url',
+            url: 'https://postplus.test/home/workspace/billing',
+          },
+          userMessageRule: 'account_action',
+        }),
+        { status: 402, headers: { 'content-type': 'application/json' } },
+      );
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderr += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'transcribe',
+        'transcription',
+        '--audio',
+        'https://example.com/a.mp3',
+        '--duration-seconds',
+        '30',
+        '--output',
+        outputPath,
+      ]);
+      assert.equal(result, 1);
+      const written = JSON.parse(await readFile(outputPath, 'utf8')) as {
+        error: Record<string, unknown>;
+      };
+      assert.deepEqual(written.error.userAction, {
+        label: 'Add PostPlus credits',
+        type: 'open_url',
+        url: 'https://postplus.test/home/workspace/billing',
+      });
+      assert.match(
+        stderr,
+        /Add PostPlus credits: https:\/\/postplus\.test\/home\/workspace\/billing/u,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalWrite;
+    }
+  });
+
+  it('does not print unsafe hosted account-action URLs', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          code: 'postplus_cli_balance_required',
+          error: 'Insufficient credits.',
+          userAction: {
+            label: 'Add PostPlus credits',
+            type: 'open_url',
+            url: 'javascript:alert(1)',
+          },
+        }),
+        { status: 402, headers: { 'content-type': 'application/json' } },
+      );
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedRequest({
+            domain: 'media',
+            args: [
+              'create',
+              'video-seedance-2-text',
+              '--prompt',
+              'unsafe action',
+              '--hosted-operation-id',
+              'op-unsafe-action',
+            ],
+            auth: {
+              apiBaseUrl: 'https://postplus.test',
+              cliSessionToken: 'cli-session-token',
+            },
+            skillsReleaseId: 'release-unsafe-action',
+          }),
+        (error: unknown) =>
+          error instanceof Error &&
+          /Insufficient credits/u.test(error.message) &&
+          !/javascript:/u.test(error.message),
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }

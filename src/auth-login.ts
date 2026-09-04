@@ -83,19 +83,7 @@ export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
   ]);
   const started = await startCloudAuthLogin(baseUrl);
 
-  process.stdout.write(
-    [
-      'PostPlus CLI login',
-      '',
-      'Open this URL in your browser to continue:',
-      started.verificationUrl,
-      '',
-      `Code: ${started.userCode}`,
-      '',
-      'Waiting for browser sign-in...',
-      '',
-    ].join('\n'),
-  );
+  process.stdout.write(formatCloudAuthLoginPrompt(started));
   const didOpen = openCloudAuthVerificationUrlIfConfigured(
     started.verificationUrl,
   );
@@ -141,6 +129,23 @@ export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
     userEmail: validated.userEmail,
     userId: validated.userId,
   };
+}
+
+export function formatCloudAuthLoginPrompt(input: {
+  userCode: string;
+  verificationUrl: string;
+}): string {
+  return [
+    'PostPlus CLI login',
+    '',
+    'Open this URL in your browser to continue:',
+    input.verificationUrl,
+    '',
+    `Code: ${input.userCode}`,
+    '',
+    'Waiting for browser sign-in...',
+    '',
+  ].join('\n');
 }
 
 export async function startCloudAuthLogin(apiBaseUrl: string) {

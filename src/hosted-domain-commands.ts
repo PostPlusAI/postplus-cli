@@ -138,7 +138,14 @@ type HostedProductError = {
   code: string | null;
   layer: string | null;
   operationId: string | null;
+  userAction?: HostedProductErrorUserAction;
   userMessageRule: string | null;
+};
+
+type HostedProductErrorUserAction = {
+  label: string;
+  type: 'open_url';
+  url: string;
 };
 
 class HostedProductRequestError extends Error {
@@ -2964,6 +2971,8 @@ function readHostedProductError(payload: unknown): HostedProductError {
       ? (payload as Record<string, unknown>)
       : {};
 
+  const userAction = readHostedProductErrorUserAction(record.userAction);
+
   return {
     message:
       normalizeString(record.error) ??
@@ -2973,8 +2982,36 @@ function readHostedProductError(payload: unknown): HostedProductError {
       normalizeString(record.code) ?? normalizeString(record.productErrorCode),
     layer: normalizeString(record.layer),
     operationId: normalizeString(record.operationId),
+    ...(userAction ? { userAction } : {}),
     userMessageRule: normalizeString(record.userMessageRule),
   };
+}
+
+function readHostedProductErrorUserAction(
+  value: unknown,
+): HostedProductErrorUserAction | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const label = normalizeString(record.label);
+  const type = normalizeString(record.type);
+  const url = normalizeString(record.url);
+  if (!label || type !== 'open_url' || !url) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return { label, type: 'open_url', url };
 }
 
 // Terminal message that keeps the stable code, owning layer, and operation id
@@ -2988,9 +3025,13 @@ function formatHostedProductErrorMessage(
     productError.operationId ? `operationId=${productError.operationId}` : null,
   ].filter((part): part is string => part !== null);
 
-  return locator.length > 0
-    ? `${productError.message} (${locator.join(' ')})`
-    : productError.message;
+  const message =
+    locator.length > 0
+      ? `${productError.message} (${locator.join(' ')})`
+      : productError.message;
+  return productError.userAction
+    ? `${message}\n${productError.userAction.label}: ${productError.userAction.url}`
+    : message;
 }
 
 async function readJsonFile(filePath: string): Promise<unknown> {
