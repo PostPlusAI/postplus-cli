@@ -7406,6 +7406,8 @@ fs.writeFileSync(args[outputIndex + 1].replace('%(ext)s', 'mp4'), 'resolved-tikt
       assert.ok(downloaderArgs.includes('--no-playlist'));
       assert.ok(downloaderArgs.includes('--max-filesize'));
       assert.ok(downloaderArgs.includes('200M'));
+      assert.ok(downloaderArgs.includes('--format-sort'));
+      assert.ok(downloaderArgs.includes('vcodec:h264'));
       assert.equal(downloaderArgs.at(-1), pageUrl);
       assert.deepEqual(hostedBodies[1]?.input, {
         prompt: 'Analyze this TikTok video.',

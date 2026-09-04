@@ -228,6 +228,8 @@ async function downloadTikTokPageVideo(
         '--no-playlist',
         '--no-progress',
         '--no-warnings',
+        '--format-sort',
+        'vcodec:h264',
         '--restrict-filenames',
         '--merge-output-format',
         'mp4',
