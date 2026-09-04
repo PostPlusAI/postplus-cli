@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import {
   POSTPLUS_CLI_UPDATE_COMMAND,
   POSTPLUS_UPDATE_COMMAND,
+  type PostPlusClientUpgradePayload,
   readCurrentCliVersion,
 } from './client-compatibility.js';
 import {
@@ -12,6 +13,7 @@ import {
 import {
   getPostPlusConfigDir,
   readManagedSkillBaseline,
+  withPostPlusUpdateLock,
 } from './local-state.js';
 import {
   POSTPLUS_SKILLS_REPO,
@@ -29,6 +31,14 @@ const POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION =
   'POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION';
 export const POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV =
   'POSTPLUS_CLIENT_RECOVERY_ATTEMPT';
+export const POSTPLUS_CLIENT_RECOVERY_COMPONENTS_ENV =
+  'POSTPLUS_CLIENT_RECOVERY_COMPONENTS';
+
+export type PostPlusUpdatePlan = {
+  cli: boolean;
+  implicitRecovery: boolean;
+  skills: boolean;
+};
 
 export type UpdateStatusReport = {
   checkedAt: string | null;
@@ -75,8 +85,24 @@ export type CliSelfUpdateResult = {
 export type ClientUpgradeRecoveryResult = {
   attempted: boolean;
   exitCode: number;
+  restartAgentSessionRequired: boolean;
   updateExitCode: number | null;
 };
+
+export function resolvePostPlusUpdatePlan(
+  environment: NodeJS.ProcessEnv = process.env,
+): PostPlusUpdatePlan {
+  const components = environment[
+    POSTPLUS_CLIENT_RECOVERY_COMPONENTS_ENV
+  ]?.trim();
+
+  return {
+    cli: components !== 'skills',
+    implicitRecovery:
+      environment[POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV] === '1',
+    skills: components !== 'cli',
+  };
+}
 
 /**
  * Recovers one hosted command rejected by the server-side compatibility gate.
@@ -87,6 +113,7 @@ export type ClientUpgradeRecoveryResult = {
 export async function runPostPlusClientUpgradeRecovery(
   input: {
     originalArgs: string[];
+    payload: PostPlusClientUpgradePayload;
   },
   dependencies: {
     environment?: NodeJS.ProcessEnv;
@@ -110,16 +137,20 @@ export async function runPostPlusClientUpgradeRecovery(
     return {
       attempted: false,
       exitCode: 1,
+      restartAgentSessionRequired: false,
       updateExitCode: null,
     };
   }
 
+  const components = resolveRequiredUpdateComponents(input.payload);
+
   const recoveryEnvironment = {
     ...environment,
     [POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV]: '1',
+    [POSTPLUS_CLIENT_RECOVERY_COMPONENTS_ENV]: components,
   };
   writeOutput(
-    'PostPlus needs a newer CLI or skill release. Updating before continuing the current task.\n',
+    'PostPlus is updating and will continue the current task.\n',
   );
 
   const updateExitCode = await runInteractiveCommand(
@@ -134,11 +165,25 @@ export async function runPostPlusClientUpgradeRecovery(
     return {
       attempted: true,
       exitCode: updateExitCode,
+      restartAgentSessionRequired: false,
       updateExitCode,
     };
   }
 
-  writeOutput('PostPlus update completed. Retrying the original command once.\n');
+  if (
+    input.payload.compatibility?.upgrade?.restartAgentSession === true
+  ) {
+    writeError(
+      'PostPlus updated successfully, but the refreshed skills require a new agent session. The original command was not retried.\n',
+    );
+    return {
+      attempted: true,
+      exitCode: 1,
+      restartAgentSessionRequired: true,
+      updateExitCode,
+    };
+  }
+
   const retryExitCode = await runInteractiveCommand(
     'postplus',
     input.originalArgs,
@@ -148,8 +193,25 @@ export async function runPostPlusClientUpgradeRecovery(
   return {
     attempted: true,
     exitCode: retryExitCode,
+    restartAgentSessionRequired: false,
     updateExitCode,
   };
+}
+
+function resolveRequiredUpdateComponents(
+  payload: PostPlusClientUpgradePayload,
+): 'all' | 'cli' | 'skills' {
+  const cliRequired = payload.compatibility?.upgrade?.cli?.required === true;
+  const skillsRequired =
+    payload.compatibility?.upgrade?.skills?.required === true;
+
+  if (cliRequired && !skillsRequired) {
+    return 'cli';
+  }
+  if (skillsRequired && !cliRequired) {
+    return 'skills';
+  }
+  return 'all';
 }
 
 export async function generateUpdateStatusReport(
@@ -256,6 +318,7 @@ export async function runCliSelfUpdateIfOutdated(
     currentCliEntryPath?: string;
     environment?: NodeJS.ProcessEnv;
     fetchFn?: typeof fetch;
+    quiet?: boolean;
     runInteractiveCommand?: typeof runDefaultInteractiveCommand;
     writeOutput?: (message: string) => void;
   } = {},
@@ -266,6 +329,7 @@ export async function runCliSelfUpdateIfOutdated(
   const writeOutput =
     dependencies.writeOutput ?? ((message) => process.stdout.write(message));
   const environment = dependencies.environment ?? process.env;
+  const quiet = dependencies.quiet === true;
   const currentVersion = await readCurrentCliVersion();
   const continuationVersion =
     environment[POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION]?.trim();
@@ -298,15 +362,19 @@ export async function runCliSelfUpdateIfOutdated(
     };
   }
 
-  writeOutput(
-    [
-      `PostPlus CLI ${currentVersion} is older than latest ${latestVersion}.`,
-      `Updating CLI: ${POSTPLUS_CLI_UPDATE_COMMAND}`,
-      '',
-    ].join('\n'),
-  );
+  if (!quiet) {
+    writeOutput(
+      [
+        `PostPlus CLI ${currentVersion} is older than latest ${latestVersion}.`,
+        `Updating CLI: ${POSTPLUS_CLI_UPDATE_COMMAND}`,
+        '',
+      ].join('\n'),
+    );
+  }
 
-  const exitCode = await runInteractiveCommand('npm', POSTPLUS_CLI_UPDATE_ARGS);
+  const exitCode = await withPostPlusUpdateLock(() =>
+    runInteractiveCommand('npm', POSTPLUS_CLI_UPDATE_ARGS),
+  );
 
   if (exitCode === 0) {
     const currentCliEntryPath =
@@ -319,11 +387,13 @@ export async function runCliSelfUpdateIfOutdated(
     }
 
     writeOutput(
-      [
-        `PostPlus CLI updated to ${latestVersion}.`,
-        'Continuing with the updated CLI to update skills.',
-        '',
-      ].join('\n'),
+      quiet
+        ? `PostPlus CLI updated to ${latestVersion}.\n`
+        : [
+            `PostPlus CLI updated to ${latestVersion}.`,
+            'Continuing with the updated CLI to update skills.',
+            '',
+          ].join('\n'),
     );
 
     const continuationExitCode = await runInteractiveCommand(

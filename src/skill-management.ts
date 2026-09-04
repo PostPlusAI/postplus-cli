@@ -20,6 +20,7 @@ import {
   clearManagedSkillBaseline,
   getPostPlusConfigDir,
   readManagedSkillBaseline,
+  withPostPlusUpdateLock,
   writeManagedSkillBaseline,
 } from './local-state.js';
 import {
@@ -83,6 +84,7 @@ type SkillMutationDependencies = {
 };
 
 type SkillMutationOptions = {
+  messageMode?: 'explicit' | 'implicit';
   scope: PostPlusSkillsInstallScope;
 };
 
@@ -120,6 +122,15 @@ export async function runPostPlusSkillUpdate(
   },
   options: SkillMutationOptions = DEFAULT_SKILL_MUTATION_OPTIONS,
 ): Promise<number> {
+  return withPostPlusUpdateLock(() =>
+    reconcilePostPlusSkills(dependencies, options),
+  );
+}
+
+async function reconcilePostPlusSkills(
+  dependencies: SkillMutationDependencies,
+  options: SkillMutationOptions,
+): Promise<number> {
   const catalog = await loadPublicSkillCatalog();
   const skillNames = catalog.skills.map((skill) => skill.skillId);
   const releasedSkills = new Set(skillNames);
@@ -141,6 +152,35 @@ export async function runPostPlusSkillUpdate(
     dependencies,
     scope: options.scope,
   });
+
+  const baselineIsCurrent = !shouldRepairManagedBaseline({
+    baseline,
+    releaseId: catalog.releaseId,
+    skillNames,
+  });
+  if (baselineIsCurrent && retiredSkillNames.length === 0) {
+    try {
+      await verifyPostPlusSkillUpdate({
+        dependencies,
+        releasedSkillNames: skillNames,
+        retiredSkillNames,
+        scope: options.scope,
+      });
+      reportPostPlusSkillReconcileSuccess({
+        catalog,
+        dependencies,
+        outcome: 'current',
+        options,
+        retiredSkillCount: 0,
+        skillCount: skillNames.length,
+      });
+      return 0;
+    } catch (error) {
+      if (!isSkillReconciliationError(error)) {
+        throw error;
+      }
+    }
+  }
 
   for (const agentTarget of POSTPLUS_SKILLS_AGENT_TARGETS) {
     const updateExitCode = await dependencies.runInteractiveCommand(
@@ -177,22 +217,89 @@ export async function runPostPlusSkillUpdate(
   });
   await writeCurrentCliVersionToLocalConfig();
   await clearUpdateCheckCache();
-  dependencies.reportSuccess?.(
-    `PostPlus skills synchronized: ${skillNames.length} current, ${retiredSkillNames.length} retired removed (${options.scope}). Restart active agent sessions to refresh skill discovery.`,
+  reportPostPlusSkillReconcileSuccess({
+    catalog,
+    dependencies,
+    outcome:
+      baseline.releaseId === null
+        ? 'ready'
+        : baseline.releaseId === catalog.releaseId
+          ? 'repaired'
+          : 'updated',
+    options,
+    retiredSkillCount: retiredSkillNames.length,
+    skillCount: skillNames.length,
+  });
+
+  return 0;
+}
+
+function reportPostPlusSkillReconcileSuccess(input: {
+  catalog: Awaited<ReturnType<typeof loadPublicSkillCatalog>>;
+  dependencies: SkillMutationDependencies;
+  options: SkillMutationOptions;
+  outcome: 'current' | 'ready' | 'repaired' | 'updated';
+  retiredSkillCount: number;
+  skillCount: number;
+}): void {
+  const reportSuccess = input.dependencies.reportSuccess;
+  if (!reportSuccess) {
+    return;
+  }
+
+  if (input.options.messageMode === 'implicit') {
+    if (input.outcome === 'updated' && input.catalog.releaseNotes) {
+      reportSuccess(
+        `PostPlus Skills updated: ${input.catalog.releaseNotes.title}. ${input.catalog.releaseNotes.summary}`,
+      );
+    } else if (input.outcome === 'ready') {
+      reportSuccess(
+        `PostPlus is ready with ${input.skillCount} verified official Skills.`,
+      );
+    } else if (input.outcome === 'repaired') {
+      reportSuccess('PostPlus Skills repaired and verified.');
+    }
+    return;
+  }
+
+  if (input.outcome === 'current') {
+    reportSuccess(
+      `PostPlus is already current: ${input.skillCount} official Skills verified (${input.options.scope}).`,
+    );
+    return;
+  }
+
+  if (input.outcome === 'ready') {
+    reportSuccess(
+      `PostPlus is ready: ${input.skillCount} official Skills installed and verified (${input.options.scope}). Start a new agent session to use them; run \`postplus list\` to browse available capabilities.`,
+    );
+    return;
+  }
+
+  reportSuccess(
+    input.outcome === 'repaired'
+      ? `PostPlus Skills repaired and verified: ${input.skillCount} current, ${input.retiredSkillCount} retired removed (${input.options.scope}).`
+      : `PostPlus Skills updated: ${input.skillCount} current, ${input.retiredSkillCount} retired removed (${input.options.scope}).`,
   );
-  if (catalog.releaseNotes) {
-    dependencies.reportSuccess?.(
+
+  if (input.outcome === 'updated' && input.catalog.releaseNotes) {
+    reportSuccess(
       [
-        `PostPlus update ${catalog.releaseNotes.releaseId}: ${catalog.releaseNotes.title}`,
-        catalog.releaseNotes.summary,
-        ...catalog.releaseNotes.highlights.map(
+        `PostPlus update ${input.catalog.releaseNotes.releaseId}: ${input.catalog.releaseNotes.title}`,
+        input.catalog.releaseNotes.summary,
+        ...input.catalog.releaseNotes.highlights.map(
           (highlight) => `- ${highlight}`,
         ),
       ].join('\n'),
     );
   }
+}
 
-  return 0;
+function isSkillReconciliationError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /^PostPlus skills update did not converge /u.test(error.message)
+  );
 }
 
 export async function runPostPlusSkillUninstall(

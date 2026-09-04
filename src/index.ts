@@ -20,6 +20,7 @@ import {
 import {
   PostPlusClientUpgradeRequiredError,
   readCurrentCliVersion,
+  writeCurrentCliVersionToLocalConfig,
 } from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import {
@@ -41,8 +42,6 @@ import {
   resolveLargeCreditQuoteConfirmation,
 } from './quote-confirmation.js';
 import {
-  POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND,
-  POSTPLUS_SKILLS_INSTALL_COMMAND,
   type PostPlusSkillsInstallScope,
   formatPostPlusSkillsInstallCommand,
   loadPublicSkillCatalog,
@@ -56,7 +55,8 @@ import {
 import { formatStatusReport, generateStatusReport } from './status.js';
 import { runStudioCommand } from './studio.js';
 import {
-  refreshUpdateCheckCache,
+  clearUpdateCheckCache,
+  resolvePostPlusUpdatePlan,
   runCliSelfUpdateIfOutdated,
   runPostPlusClientUpgradeRecovery,
 } from './update-check.js';
@@ -109,6 +109,7 @@ Usage:
   postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <credits>]
   postplus skills verify [--json]
   postplus studio init|open|status   Open bundled Local Studio
+  postplus install [--current-directory]
   postplus update [--current-directory]
   postplus uninstall [--current-directory]
   postplus list [--json]
@@ -116,14 +117,12 @@ Usage:
   postplus version
   postplus help
 
-Skills:
-  Global:
-    ${POSTPLUS_SKILLS_INSTALL_COMMAND}
-  Current directory:
-    ${POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND}
+First-time setup:
+  postplus install
+  postplus auth login
 
-After first install, run:
-  postplus skills verify
+To keep Skills inside the current project:
+  postplus install --current-directory
 `);
 }
 
@@ -202,23 +201,38 @@ async function runVersion(): Promise<number> {
 
 async function runSkillUpdateCommand(rest: string[]): Promise<number> {
   const options = parseSkillMutationOptions(rest, 'update');
-  const cliSelfUpdate = await runCliSelfUpdateIfOutdated({
-    continuationArgs: rest,
-  });
+  const updatePlan = resolvePostPlusUpdatePlan();
 
-  if (cliSelfUpdate.updateAvailable) {
-    return cliSelfUpdate.exitCode ?? 1;
+  if (updatePlan.cli) {
+    const cliSelfUpdate = await runCliSelfUpdateIfOutdated({
+      continuationArgs: rest,
+      quiet: updatePlan.implicitRecovery,
+    });
+
+    if (cliSelfUpdate.updateAvailable) {
+      return cliSelfUpdate.exitCode ?? 1;
+    }
   }
 
-  const exitCode = await runPostPlusSkillUpdate(undefined, {
+  if (!updatePlan.skills) {
+    await writeCurrentCliVersionToLocalConfig();
+    await clearUpdateCheckCache();
+    return 0;
+  }
+
+  return runPostPlusSkillUpdate(undefined, {
+    messageMode: updatePlan.implicitRecovery ? 'implicit' : 'explicit',
     scope: options.scope,
   });
+}
 
-  if (exitCode === 0) {
-    await refreshUpdateCheckCache().catch(() => {});
-  }
+async function runSkillInstallCommand(rest: string[]): Promise<number> {
+  const options = parseSkillMutationOptions(rest, 'install');
 
-  return exitCode;
+  return runPostPlusSkillUpdate(undefined, {
+    messageMode: 'explicit',
+    scope: options.scope,
+  });
 }
 
 async function runSkillUninstallCommand(rest: string[]): Promise<number> {
@@ -465,7 +479,7 @@ function parseDiagnosticOptions(args: string[]): DiagnosticCommandOptions {
 
 function parseSkillMutationOptions(
   args: string[],
-  commandName: 'update' | 'uninstall',
+  commandName: 'install' | 'update' | 'uninstall',
 ): { scope: PostPlusSkillsInstallScope } {
   let scope: PostPlusSkillsInstallScope = 'global';
 
@@ -614,10 +628,7 @@ async function main(): Promise<void> {
       process.exitCode = await runStudioCommand(rest);
       return;
     case 'install':
-      process.stderr.write(
-        `PostPlus CLI does not install skills directly. Run \`${POSTPLUS_SKILLS_INSTALL_COMMAND}\`.\n`,
-      );
-      process.exitCode = 1;
+      process.exitCode = await runSkillInstallCommand(rest);
       return;
     case 'update':
       process.exitCode = await runSkillUpdateCommand(rest);
@@ -693,6 +704,7 @@ async function runMainWithRecovery(): Promise<void> {
     if (error instanceof PostPlusClientUpgradeRequiredError) {
       const recovery = await runPostPlusClientUpgradeRecovery({
         originalArgs: process.argv.slice(2),
+        payload: error.payload,
       });
       process.exitCode = recovery.exitCode;
       return;

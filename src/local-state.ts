@@ -4,6 +4,7 @@ import {
   chmod,
   mkdir,
   readFile,
+  rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
@@ -104,6 +105,104 @@ export function getPostPlusConfigDir(): string {
 
 export function getPostPlusConfigPath(): string {
   return join(getPostPlusConfigDir(), 'config.json');
+}
+
+const UPDATE_LOCK_DIRECTORY = 'update.lock';
+const UPDATE_LOCK_POLL_MS = 250;
+const UPDATE_LOCK_TIMEOUT_MS = 5 * 60 * 1000;
+
+export async function withPostPlusUpdateLock<T>(
+  operation: () => Promise<T>,
+  options: {
+    pollMs?: number;
+    timeoutMs?: number;
+  } = {},
+): Promise<T> {
+  const configDir = getPostPlusConfigDir();
+  const lockPath = join(configDir, UPDATE_LOCK_DIRECTORY);
+  const ownerPath = join(lockPath, 'owner.json');
+  const pollMs = options.pollMs ?? UPDATE_LOCK_POLL_MS;
+  const timeoutMs = options.timeoutMs ?? UPDATE_LOCK_TIMEOUT_MS;
+  const startedAt = Date.now();
+
+  await mkdir(configDir, { recursive: true });
+
+  while (true) {
+    try {
+      await mkdir(lockPath);
+      try {
+        await writeFile(
+          ownerPath,
+          `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`,
+          { encoding: 'utf8', mode: CONFIG_FILE_MODE },
+        );
+      } catch (error) {
+        await rm(lockPath, { force: true, recursive: true });
+        throw error;
+      }
+      break;
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code !== 'EEXIST') {
+        throw error;
+      }
+
+      if (!(await isPostPlusUpdateLockOwnerAlive(lockPath, ownerPath))) {
+        await rm(lockPath, { force: true, recursive: true });
+        continue;
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error(
+          'Another PostPlus update is still running. Wait for it to finish, then retry.',
+        );
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
+
+  try {
+    return await operation();
+  } finally {
+    await rm(lockPath, { force: true, recursive: true });
+  }
+}
+
+async function isPostPlusUpdateLockOwnerAlive(
+  lockPath: string,
+  ownerPath: string,
+): Promise<boolean> {
+  try {
+    const owner = JSON.parse(await readFile(ownerPath, 'utf8')) as {
+      pid?: unknown;
+    };
+    if (!Number.isInteger(owner.pid) || (owner.pid as number) <= 0) {
+      return false;
+    }
+
+    try {
+      process.kill(owner.pid as number, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+    }
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code !== 'ENOENT' && nodeError.name !== 'SyntaxError') {
+      throw error;
+    }
+
+    try {
+      const lock = await stat(lockPath);
+      return Date.now() - lock.mtimeMs < 5_000;
+    } catch (statError) {
+      if ((statError as NodeJS.ErrnoException).code === 'ENOENT') {
+        return false;
+      }
+      throw statError;
+    }
+  }
 }
 
 export async function readLocalConfig(): Promise<PostPlusLocalConfig | null> {

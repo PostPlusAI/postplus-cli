@@ -32,22 +32,15 @@ Requires Node.js and npm.
 
 ```bash
 npm install -g @postplus/cli@latest
+postplus install
 postplus auth login
-POSTPLUS_AGENT_TARGETS="claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent"
-for agent in $POSTPLUS_AGENT_TARGETS; do
-  npx -y skills add PostPlusAI/postplus-skills --global --full-depth --skill '*' --agent "$agent" --yes
-done
-postplus skills verify
 ```
 
 If you explicitly do not want global skills, run the install from the target
-project directory and omit `--global`:
+project directory:
 
 ```bash
-POSTPLUS_AGENT_TARGETS="claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent"
-for agent in $POSTPLUS_AGENT_TARGETS; do
-  npx -y skills add PostPlusAI/postplus-skills --full-depth --skill '*' --agent "$agent" --yes
-done
+postplus install --current-directory
 ```
 
 Useful checks:

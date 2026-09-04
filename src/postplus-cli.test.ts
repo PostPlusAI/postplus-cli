@@ -59,6 +59,7 @@ import { generateLocalDependencyReport } from './local-dependencies.js';
 import {
   readLocalConfig,
   setLocalSession,
+  withPostPlusUpdateLock,
   writeLocalConfig,
   writeManagedSkillBaseline,
 } from './local-state.js';
@@ -95,7 +96,9 @@ import {
 import { resolveStudioRoot } from './studio.js';
 import {
   POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV,
+  POSTPLUS_CLIENT_RECOVERY_COMPONENTS_ENV,
   generateUpdateStatusReport,
+  resolvePostPlusUpdatePlan,
   runCliSelfUpdateIfOutdated,
   runPostPlusClientUpgradeRecovery,
 } from './update-check.js';
@@ -2880,6 +2883,76 @@ describe('update checks', () => {
     assert.doesNotMatch(formatted, /npm install -g/);
   });
 
+  it('defaults explicit updates to both components and honors a CLI-only recovery', () => {
+    assert.deepEqual(resolvePostPlusUpdatePlan({}), {
+      cli: true,
+      implicitRecovery: false,
+      skills: true,
+    });
+    assert.deepEqual(
+      resolvePostPlusUpdatePlan({
+        [POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV]: '1',
+        [POSTPLUS_CLIENT_RECOVERY_COMPONENTS_ENV]: 'cli',
+      }),
+      {
+        cli: true,
+        implicitRecovery: true,
+        skills: false,
+      },
+    );
+  });
+
+  it('serializes concurrent update mutations with one local lock', async () => {
+    let active = 0;
+    let maximumActive = 0;
+    const order: string[] = [];
+    const run = (name: string) =>
+      withPostPlusUpdateLock(
+        async () => {
+          order.push(`${name}:start`);
+          active += 1;
+          maximumActive = Math.max(maximumActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          active -= 1;
+          order.push(`${name}:end`);
+        },
+        { pollMs: 2, timeoutMs: 1_000 },
+      );
+
+    await Promise.all([run('first'), run('second')]);
+
+    assert.equal(maximumActive, 1);
+    assert.equal(order.length, 4);
+    const firstOwner = order[0]?.split(':')[0];
+    const secondOwner = order[2]?.split(':')[0];
+    assert.equal(order[1], `${firstOwner}:end`);
+    assert.equal(order[3], `${secondOwner}:end`);
+    assert.notEqual(firstOwner, secondOwner);
+  });
+
+  it('recovers an update lock left by a process that no longer exists', async () => {
+    const lockPath = resolve(
+      process.env.POSTPLUS_CONFIG_DIR!,
+      'update.lock',
+    );
+    await mkdir(lockPath, { recursive: true });
+    await writeFile(
+      resolve(lockPath, 'owner.json'),
+      `${JSON.stringify({ pid: 2_147_483_647 })}\n`,
+    );
+    let called = false;
+
+    await withPostPlusUpdateLock(
+      async () => {
+        called = true;
+      },
+      { pollMs: 1, timeoutMs: 100 },
+    );
+
+    assert.equal(called, true);
+    await assert.rejects(() => readFile(lockPath, 'utf8'), { code: 'ENOENT' });
+  });
+
   it('updates and retries the rejected command once without asking the user', async () => {
     const calls: Array<{
       args: string[];
@@ -2898,7 +2971,18 @@ describe('update checks', () => {
     ];
 
     const result = await runPostPlusClientUpgradeRecovery(
-      { originalArgs },
+      {
+        originalArgs,
+        payload: {
+          code: 'postplus_client_upgrade_required',
+          compatibility: {
+            upgrade: {
+              cli: { required: true },
+              skills: { required: true },
+            },
+          },
+        },
+      },
       {
         environment: { PATH: '/tmp/postplus-bin' },
         runInteractiveCommand: async (command, args, options = {}) => {
@@ -2913,17 +2997,94 @@ describe('update checks', () => {
     const recoveryEnv = {
       PATH: '/tmp/postplus-bin',
       [POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV]: '1',
+      [POSTPLUS_CLIENT_RECOVERY_COMPONENTS_ENV]: 'all',
     };
     assert.deepEqual(result, {
       attempted: true,
       exitCode: 0,
+      restartAgentSessionRequired: false,
       updateExitCode: 0,
     });
     assert.deepEqual(calls, [
       { command: 'postplus', args: ['update'], env: recoveryEnv },
       { command: 'postplus', args: originalArgs, env: recoveryEnv },
     ]);
-    assert.match(output.join(''), /Retrying the original command once/u);
+    assert.match(output.join(''), /updating and will continue the current task/u);
+    assert.doesNotMatch(output.join(''), /Retrying the original command/u);
+  });
+
+  it('carries a component-scoped recovery plan into the update process', async () => {
+    const calls: Array<{ args: string[]; env?: NodeJS.ProcessEnv }> = [];
+    const result = await runPostPlusClientUpgradeRecovery(
+      {
+        originalArgs: ['media', 'schema', '--json'],
+        payload: {
+          code: 'postplus_client_upgrade_required',
+          compatibility: {
+            upgrade: {
+              skills: { required: true },
+            },
+          },
+        },
+      },
+      {
+        environment: {},
+        runInteractiveCommand: async (_command, args, options = {}) => {
+          calls.push({ args, env: options.env });
+          return 0;
+        },
+        writeError: () => {},
+        writeOutput: () => {},
+      },
+    );
+
+    assert.equal(
+      calls[0]?.env?.[POSTPLUS_CLIENT_RECOVERY_COMPONENTS_ENV],
+      'skills',
+    );
+    assert.deepEqual(resolvePostPlusUpdatePlan(calls[0]?.env), {
+      cli: false,
+      implicitRecovery: true,
+      skills: true,
+    });
+    assert.equal(calls.length, 2);
+    assert.equal(result.exitCode, 0);
+  });
+
+  it('updates but does not replay when refreshed skills require a new agent session', async () => {
+    const calls: string[][] = [];
+    const errors: string[] = [];
+    const result = await runPostPlusClientUpgradeRecovery(
+      {
+        originalArgs: ['media', 'schema', '--json'],
+        payload: {
+          code: 'postplus_client_upgrade_required',
+          compatibility: {
+            upgrade: {
+              restartAgentSession: true,
+              skills: { required: true },
+            },
+          },
+        },
+      },
+      {
+        runInteractiveCommand: async (command, args) => {
+          calls.push([command, ...args]);
+          return 0;
+        },
+        writeError: (message) => errors.push(message),
+        writeOutput: () => {},
+      },
+    );
+
+    assert.deepEqual(calls, [['postplus', 'update']]);
+    assert.deepEqual(result, {
+      attempted: true,
+      exitCode: 1,
+      restartAgentSessionRequired: true,
+      updateExitCode: 0,
+    });
+    assert.match(errors.join(''), /require a new agent session/u);
   });
 
   it('stops a second compatibility recovery attempt without looping', async () => {
@@ -2931,7 +3092,10 @@ describe('update checks', () => {
     const errors: string[] = [];
 
     const result = await runPostPlusClientUpgradeRecovery(
-      { originalArgs: ['media', 'schema', '--json'] },
+      {
+        originalArgs: ['media', 'schema', '--json'],
+        payload: { code: 'postplus_client_upgrade_required' },
+      },
       {
         environment: { [POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV]: '1' },
         runInteractiveCommand: async () => {
@@ -2946,6 +3110,7 @@ describe('update checks', () => {
     assert.deepEqual(result, {
       attempted: false,
       exitCode: 1,
+      restartAgentSessionRequired: false,
       updateExitCode: null,
     });
     assert.equal(commandCalled, false);
@@ -2955,7 +3120,10 @@ describe('update checks', () => {
   it('does not retry the original command when automatic update fails', async () => {
     const calls: string[][] = [];
     const result = await runPostPlusClientUpgradeRecovery(
-      { originalArgs: ['media', 'schema', '--json'] },
+      {
+        originalArgs: ['media', 'schema', '--json'],
+        payload: { code: 'postplus_client_upgrade_required' },
+      },
       {
         runInteractiveCommand: async (command, args) => {
           calls.push([command, ...args]);
@@ -2970,6 +3138,7 @@ describe('update checks', () => {
     assert.deepEqual(result, {
       attempted: true,
       exitCode: 23,
+      restartAgentSessionRequired: false,
       updateExitCode: 23,
     });
   });
@@ -3889,13 +4058,153 @@ describe('skill management commands', () => {
       assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
       assert.equal(config?.cliVersion, CURRENT_CLI_VERSION);
       assert.deepEqual(successMessages, [
-        'PostPlus skills synchronized: 2 current, 1 retired removed (global). Restart active agent sessions to refresh skill discovery.',
+        'PostPlus Skills updated: 2 current, 1 retired removed (global).',
         [
           'PostPlus update catalog-2: Fewer interruptions',
           'Routine recoverable errors no longer stop the task.',
           '- PostPlus retries once after a compatible update.',
           '- Safe local usage errors can be corrected before submission.',
         ].join('\n'),
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('welcomes a setup without presenting current release notes as an update', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => createPublicCatalogResponse();
+    const successMessages: string[] = [];
+    const installCalls: string[][] = [];
+
+    try {
+      const exitCode = await runPostPlusSkillUpdate({
+        reportSuccess: (message) => successMessages.push(message),
+        runCommand: async () => ({
+          stderr: '',
+          stdout: JSON.stringify([
+            {
+              agents: ['Codex'],
+              name: 'demo-skill',
+              path: '/tmp/demo-skill',
+              scope: 'global',
+            },
+          ]),
+        }),
+        runInteractiveCommand: async (_command, args) => {
+          installCalls.push(args);
+          return 0;
+        },
+      });
+
+      assert.equal(exitCode, 0);
+      assert.equal(installCalls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length);
+      assert.deepEqual(successMessages, [
+        'PostPlus is ready: 1 official Skills installed and verified (global). Start a new agent session to use them; run `postplus list` to browse available capabilities.',
+      ]);
+      assert.doesNotMatch(successMessages.join('\n'), /PostPlus update/u);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('verifies an already-current setup without reinstalling every agent target', async () => {
+    await writeManagedSkillBaseline({
+      releaseId: 'catalog-1',
+      skillNames: ['demo-skill'],
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => createPublicCatalogResponse();
+    const successMessages: string[] = [];
+    let installCalled = false;
+
+    try {
+      const exitCode = await runPostPlusSkillUpdate({
+        reportSuccess: (message) => successMessages.push(message),
+        runCommand: async () => ({
+          stderr: '',
+          stdout: JSON.stringify([
+            {
+              agents: ['Codex'],
+              name: 'demo-skill',
+              path: '/tmp/demo-skill',
+              scope: 'global',
+            },
+          ]),
+        }),
+        runInteractiveCommand: async () => {
+          installCalled = true;
+          return 0;
+        },
+      });
+
+      assert.equal(exitCode, 0);
+      assert.equal(installCalled, false);
+      assert.deepEqual(successMessages, [
+        'PostPlus is already current: 1 official Skills verified (global).',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('keeps implicit recovery output to one official update summary', async () => {
+    await writeManagedSkillBaseline({
+      releaseId: 'catalog-1',
+      skillNames: ['demo-skill'],
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 2,
+          releaseId: 'catalog-2',
+          releaseNotes: {
+            schemaVersion: 1,
+            releaseId: 'catalog-2',
+            title: 'Fewer interruptions',
+            summary: 'Routine recoverable errors no longer stop the task.',
+            highlights: ['PostPlus retries once after a compatible update.'],
+          },
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    const successMessages: string[] = [];
+
+    try {
+      const exitCode = await runPostPlusSkillUpdate(
+        {
+          reportSuccess: (message) => successMessages.push(message),
+          runCommand: async () => ({
+            stderr: '',
+            stdout: JSON.stringify([
+              {
+                agents: ['Codex'],
+                name: 'demo-skill',
+                path: '/tmp/demo-skill',
+                scope: 'global',
+              },
+            ]),
+          }),
+          runInteractiveCommand: async () => 0,
+        },
+        { messageMode: 'implicit', scope: 'global' },
+      );
+
+      assert.equal(exitCode, 0);
+      assert.deepEqual(successMessages, [
+        'PostPlus Skills updated: Fewer interruptions. Routine recoverable errors no longer stop the task.',
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -4979,13 +5288,14 @@ describe('skill management commands', () => {
     }
   });
 
-  it('does not provide postplus install as a functional installer', async () => {
+  it('recognizes postplus install as the managed setup entrypoint', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
         '--import',
         'tsx',
         'src/index.ts',
         'install',
+        '--mystery-scope',
       ]),
       (error) => {
         const execError = error as Error & {
@@ -4994,7 +5304,7 @@ describe('skill management commands', () => {
 
         assert.match(
           execError.stderr ?? '',
-          /for agent in claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent; do npx -y skills add PostPlusAI\/postplus-skills --global --full-depth --skill '\*' --agent "\$agent" --yes; done/,
+          /Unknown option for install: --mystery-scope/,
         );
         return true;
       },
