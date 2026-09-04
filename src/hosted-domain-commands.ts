@@ -11,7 +11,11 @@ import {
   type AuthedCloudRequestAuth,
   sendAuthedCloudRequest,
 } from './authed-cloud-request.js';
-import { formatPostPlusCompatibilityError } from './client-compatibility.js';
+import {
+  PostPlusClientUpgradeRequiredError,
+  formatPostPlusCompatibilityError,
+  isPostPlusClientUpgradePayload,
+} from './client-compatibility.js';
 import { HOSTED_MEDIA_REFERENCE_URI_PREFIX } from './generated/hosted-field-validation-core.generated.js';
 import {
   assertMediaUrlFieldSchemes,
@@ -515,7 +519,11 @@ async function runVideoAnalysisVerb(args: {
       `media ${verb} ${modelKey} resolved without a model contract.`,
     );
   }
-  const flags = parseFlags(args.args, new Set(['json']));
+  // Register the common async `--wait` token as a boolean so an obsolete or
+  // copied example reaches the command-specific allowlist and is reported as
+  // unsupported. Without this, the generic parser mislabels the bare flag as
+  // a value-taking option with a missing value.
+  const flags = parseFlags(args.args, new Set(['json', 'wait']));
   const allowedKeys = new Set([
     'hosted-operation-id',
     'json',
@@ -2688,6 +2696,11 @@ async function postHostedJson(input: {
         productError.message,
         challenge,
       );
+    }
+
+    if (isPostPlusClientUpgradePayload(payload)) {
+      await clearUpdateCheckCache();
+      throw new PostPlusClientUpgradeRequiredError(payload);
     }
 
     const compatibilityError = formatPostPlusCompatibilityError(payload);

@@ -27,6 +27,8 @@ const NPM_LATEST_URL = `https://registry.npmjs.org/${encodeURIComponent(
 const POSTPLUS_CLI_UPDATE_ARGS = ['install', '-g', '@postplus/cli@latest'];
 const POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION =
   'POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION';
+export const POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV =
+  'POSTPLUS_CLIENT_RECOVERY_ATTEMPT';
 
 export type UpdateStatusReport = {
   checkedAt: string | null;
@@ -69,6 +71,86 @@ export type CliSelfUpdateResult = {
   latestVersion: string;
   updateAvailable: boolean;
 };
+
+export type ClientUpgradeRecoveryResult = {
+  attempted: boolean;
+  exitCode: number;
+  updateExitCode: number | null;
+};
+
+/**
+ * Recovers one hosted command rejected by the server-side compatibility gate.
+ * That gate runs before billing/provider execution, so one update followed by
+ * one retry cannot duplicate a hosted side effect. The child retry carries a
+ * process guard: a second compatibility rejection stops instead of looping.
+ */
+export async function runPostPlusClientUpgradeRecovery(
+  input: {
+    originalArgs: string[];
+  },
+  dependencies: {
+    environment?: NodeJS.ProcessEnv;
+    runInteractiveCommand?: typeof runDefaultInteractiveCommand;
+    writeError?: (message: string) => void;
+    writeOutput?: (message: string) => void;
+  } = {},
+): Promise<ClientUpgradeRecoveryResult> {
+  const environment = dependencies.environment ?? process.env;
+  const runInteractiveCommand =
+    dependencies.runInteractiveCommand ?? runDefaultInteractiveCommand;
+  const writeOutput =
+    dependencies.writeOutput ?? ((message) => process.stdout.write(message));
+  const writeError =
+    dependencies.writeError ?? ((message) => process.stderr.write(message));
+
+  if (environment[POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV] === '1') {
+    writeError(
+      'PostPlus is still incompatible after one automatic update and retry. The command was not retried again.\n',
+    );
+    return {
+      attempted: false,
+      exitCode: 1,
+      updateExitCode: null,
+    };
+  }
+
+  const recoveryEnvironment = {
+    ...environment,
+    [POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV]: '1',
+  };
+  writeOutput(
+    'PostPlus needs a newer CLI or skill release. Updating before continuing the current task.\n',
+  );
+
+  const updateExitCode = await runInteractiveCommand(
+    'postplus',
+    ['update'],
+    { env: recoveryEnvironment },
+  );
+  if (updateExitCode !== 0) {
+    writeError(
+      `PostPlus automatic update failed with exit code ${updateExitCode}. The original command was not retried.\n`,
+    );
+    return {
+      attempted: true,
+      exitCode: updateExitCode,
+      updateExitCode,
+    };
+  }
+
+  writeOutput('PostPlus update completed. Retrying the original command once.\n');
+  const retryExitCode = await runInteractiveCommand(
+    'postplus',
+    input.originalArgs,
+    { env: recoveryEnvironment },
+  );
+
+  return {
+    attempted: true,
+    exitCode: retryExitCode,
+    updateExitCode,
+  };
+}
 
 export async function generateUpdateStatusReport(
   input: {

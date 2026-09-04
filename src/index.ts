@@ -17,7 +17,10 @@ import {
   formatAuthStatusReport,
   generateAuthStatusReport,
 } from './auth.js';
-import { readCurrentCliVersion } from './client-compatibility.js';
+import {
+  PostPlusClientUpgradeRequiredError,
+  readCurrentCliVersion,
+} from './client-compatibility.js';
 import { formatDoctorReport, generateDoctorReport } from './doctor.js';
 import {
   runBalanceCommand,
@@ -55,6 +58,7 @@ import { runStudioCommand } from './studio.js';
 import {
   refreshUpdateCheckCache,
   runCliSelfUpdateIfOutdated,
+  runPostPlusClientUpgradeRecovery,
 } from './update-check.js';
 
 function printAuthHelp(): void {
@@ -682,7 +686,23 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
+async function runMainWithRecovery(): Promise<void> {
+  try {
+    await main();
+  } catch (error) {
+    if (error instanceof PostPlusClientUpgradeRequiredError) {
+      const recovery = await runPostPlusClientUpgradeRecovery({
+        originalArgs: process.argv.slice(2),
+      });
+      process.exitCode = recovery.exitCode;
+      return;
+    }
+
+    throw error;
+  }
+}
+
+runMainWithRecovery().catch((error: unknown) => {
   const message =
     error instanceof Error ? error.message : 'Unexpected PostPlus CLI error';
   process.stderr.write(`${message}\n`);

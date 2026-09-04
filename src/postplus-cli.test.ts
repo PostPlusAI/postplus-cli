@@ -30,6 +30,7 @@ import { formatAuthStatusReport, generateAuthStatusReport } from './auth.js';
 import {
   POSTPLUS_CLIENT_COMPATIBILITY_HEADERS,
   POSTPLUS_CLIENT_CONTRACT_VERSION,
+  PostPlusClientUpgradeRequiredError,
   POSTPLUS_CLI_UPDATE_COMMAND,
   POSTPLUS_UPDATE_COMMAND,
   formatPostPlusClientUpgradeError,
@@ -93,8 +94,10 @@ import {
 } from './status.js';
 import { resolveStudioRoot } from './studio.js';
 import {
+  POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV,
   generateUpdateStatusReport,
   runCliSelfUpdateIfOutdated,
+  runPostPlusClientUpgradeRecovery,
 } from './update-check.js';
 
 const tempDirs: string[] = [];
@@ -2469,6 +2472,13 @@ describe('public skill catalog', () => {
         JSON.stringify({
           schemaVersion: 2,
           releaseId: 'catalog-1',
+          releaseNotes: {
+            schemaVersion: 1,
+            releaseId: 'catalog-1',
+            title: 'A smoother PostPlus update',
+            summary: 'Agents can continue routine work after updating.',
+            highlights: ['One bounded retry after a safe update.'],
+          },
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -2501,6 +2511,13 @@ describe('public skill catalog', () => {
 
       assert.equal(catalog.source, 'PostPlusAI/postplus-skills');
       assert.equal(catalog.releaseId, 'catalog-1');
+      assert.deepEqual(catalog.releaseNotes, {
+        schemaVersion: 1,
+        releaseId: 'catalog-1',
+        title: 'A smoother PostPlus update',
+        summary: 'Agents can continue routine work after updating.',
+        highlights: ['One bounded retry after a safe update.'],
+      });
       assert.equal(catalog.installCommand, POSTPLUS_SKILLS_INSTALL_COMMAND);
       assert.deepEqual(catalog.skills, [
         {
@@ -2540,6 +2557,45 @@ describe('public skill catalog', () => {
       await assert.rejects(
         () => loadPublicSkillCatalog(),
         /metadata is invalid/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects release notes that belong to a different skills release', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 2,
+          releaseId: 'catalog-current',
+          releaseNotes: {
+            schemaVersion: 1,
+            releaseId: 'catalog-previous',
+            title: 'Old notes',
+            summary: 'These notes must not describe the current update.',
+            highlights: ['Stale release detail.'],
+          },
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await assert.rejects(
+        () => loadPublicSkillCatalog(),
+        /invalid release notes/u,
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -2822,6 +2878,100 @@ describe('update checks', () => {
 
     assert.equal(formatted.match(/postplus update/g)?.length, 1);
     assert.doesNotMatch(formatted, /npm install -g/);
+  });
+
+  it('updates and retries the rejected command once without asking the user', async () => {
+    const calls: Array<{
+      args: string[];
+      command: string;
+      env: NodeJS.ProcessEnv | undefined;
+    }> = [];
+    const output: string[] = [];
+    const originalArgs = [
+      'media',
+      'analyze',
+      'video-analysis',
+      '--video',
+      './demo.mov',
+      '--prompt',
+      'Analyze it',
+    ];
+
+    const result = await runPostPlusClientUpgradeRecovery(
+      { originalArgs },
+      {
+        environment: { PATH: '/tmp/postplus-bin' },
+        runInteractiveCommand: async (command, args, options = {}) => {
+          calls.push({ command, args, env: options.env });
+          return 0;
+        },
+        writeError: (message) => output.push(message),
+        writeOutput: (message) => output.push(message),
+      },
+    );
+
+    const recoveryEnv = {
+      PATH: '/tmp/postplus-bin',
+      [POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV]: '1',
+    };
+    assert.deepEqual(result, {
+      attempted: true,
+      exitCode: 0,
+      updateExitCode: 0,
+    });
+    assert.deepEqual(calls, [
+      { command: 'postplus', args: ['update'], env: recoveryEnv },
+      { command: 'postplus', args: originalArgs, env: recoveryEnv },
+    ]);
+    assert.match(output.join(''), /Retrying the original command once/u);
+  });
+
+  it('stops a second compatibility recovery attempt without looping', async () => {
+    let commandCalled = false;
+    const errors: string[] = [];
+
+    const result = await runPostPlusClientUpgradeRecovery(
+      { originalArgs: ['media', 'schema', '--json'] },
+      {
+        environment: { [POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV]: '1' },
+        runInteractiveCommand: async () => {
+          commandCalled = true;
+          return 0;
+        },
+        writeError: (message) => errors.push(message),
+        writeOutput: () => {},
+      },
+    );
+
+    assert.deepEqual(result, {
+      attempted: false,
+      exitCode: 1,
+      updateExitCode: null,
+    });
+    assert.equal(commandCalled, false);
+    assert.match(errors.join(''), /after one automatic update and retry/u);
+  });
+
+  it('does not retry the original command when automatic update fails', async () => {
+    const calls: string[][] = [];
+    const result = await runPostPlusClientUpgradeRecovery(
+      { originalArgs: ['media', 'schema', '--json'] },
+      {
+        runInteractiveCommand: async (command, args) => {
+          calls.push([command, ...args]);
+          return 23;
+        },
+        writeError: () => {},
+        writeOutput: () => {},
+      },
+    );
+
+    assert.deepEqual(calls, [['postplus', 'update']]);
+    assert.deepEqual(result, {
+      attempted: true,
+      exitCode: 23,
+      updateExitCode: 23,
+    });
   });
 
   it('propagates the updated CLI continuation exit code', async () => {
@@ -3590,6 +3740,16 @@ describe('skill management commands', () => {
         JSON.stringify({
           schemaVersion: 2,
           releaseId: 'catalog-2',
+          releaseNotes: {
+            schemaVersion: 1,
+            releaseId: 'catalog-2',
+            title: 'Fewer interruptions',
+            summary: 'Routine recoverable errors no longer stop the task.',
+            highlights: [
+              'PostPlus retries once after a compatible update.',
+              'Safe local usage errors can be corrected before submission.',
+            ],
+          },
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -3645,6 +3805,16 @@ describe('skill management commands', () => {
         JSON.stringify({
           schemaVersion: 2,
           releaseId: 'catalog-2',
+          releaseNotes: {
+            schemaVersion: 1,
+            releaseId: 'catalog-2',
+            title: 'Fewer interruptions',
+            summary: 'Routine recoverable errors no longer stop the task.',
+            highlights: [
+              'PostPlus retries once after a compatible update.',
+              'Safe local usage errors can be corrected before submission.',
+            ],
+          },
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -3720,6 +3890,12 @@ describe('skill management commands', () => {
       assert.equal(config?.cliVersion, CURRENT_CLI_VERSION);
       assert.deepEqual(successMessages, [
         'PostPlus skills synchronized: 2 current, 1 retired removed (global). Restart active agent sessions to refresh skill discovery.',
+        [
+          'PostPlus update catalog-2: Fewer interruptions',
+          'Routine recoverable errors no longer stop the task.',
+          '- PostPlus retries once after a compatible update.',
+          '- Safe local usage errors can be corrected before submission.',
+        ].join('\n'),
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -7304,6 +7480,37 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('reports obsolete bare video-analysis flags as unsupported before any hosted call', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'analyze',
+            'video-analysis',
+            '--video',
+            'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
+            '--prompt',
+            'Analyze this clip.',
+            '--wait',
+          ]),
+        /Unknown option for media analyze: --wait\./u,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('media analyze forwards --video-seconds as estimatedUsage.videoSeconds', async () => {
     await setLocalSession({
       accountId: 'account_1',
@@ -8973,7 +9180,9 @@ describe('hosted domain commands', () => {
             '--prompt',
             'test',
           ]),
-        /Run: postplus update/u,
+        (error) =>
+          error instanceof PostPlusClientUpgradeRequiredError &&
+          /Run: postplus update/u.test(error.message),
       );
       await assert.rejects(() => readFile(cachePath, 'utf8'), {
         code: 'ENOENT',

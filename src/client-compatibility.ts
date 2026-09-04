@@ -37,6 +37,15 @@ export type PostPlusClientUpgradePayload = {
   error?: string;
 };
 
+export class PostPlusClientUpgradeRequiredError extends Error {
+  readonly code = 'postplus_client_upgrade_required';
+
+  constructor(readonly payload: PostPlusClientUpgradePayload) {
+    super(formatPostPlusClientUpgradeError(payload));
+    this.name = 'PostPlusClientUpgradeRequiredError';
+  }
+}
+
 export async function buildPostPlusClientCompatibilityHeaders(
   input: {
     skillName?: string | null;
@@ -145,9 +154,13 @@ export function formatPostPlusCompatibilityError(payload: unknown) {
   return null;
 }
 
-export function isPostPlusClientUpgradePayload(payload: unknown) {
+export function isPostPlusClientUpgradePayload(
+  payload: unknown,
+): payload is PostPlusClientUpgradePayload & {
+  code: 'postplus_client_upgrade_required';
+} {
   return (
-    payload &&
+    payload !== null &&
     typeof payload === 'object' &&
     !Array.isArray(payload) &&
     'code' in payload &&

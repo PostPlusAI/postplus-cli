@@ -180,6 +180,17 @@ export async function runPostPlusSkillUpdate(
   dependencies.reportSuccess?.(
     `PostPlus skills synchronized: ${skillNames.length} current, ${retiredSkillNames.length} retired removed (${options.scope}). Restart active agent sessions to refresh skill discovery.`,
   );
+  if (catalog.releaseNotes) {
+    dependencies.reportSuccess?.(
+      [
+        `PostPlus update ${catalog.releaseNotes.releaseId}: ${catalog.releaseNotes.title}`,
+        catalog.releaseNotes.summary,
+        ...catalog.releaseNotes.highlights.map(
+          (highlight) => `- ${highlight}`,
+        ),
+      ].join('\n'),
+    );
+  }
 
   return 0;
 }

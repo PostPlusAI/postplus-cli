@@ -32,6 +32,14 @@ export type PublicSkillCatalogEntry = {
   path: string | null;
 };
 
+export type PublicReleaseNotes = {
+  schemaVersion: 1;
+  releaseId: string;
+  title: string;
+  summary: string;
+  highlights: string[];
+};
+
 export const PUBLIC_SKILL_REQUIREMENT_KEYS = [
   'accountConnections',
   'capabilities',
@@ -58,6 +66,7 @@ export type PublicSkillCatalogReport = {
   catalogUrl: string;
   installCommand: string;
   listCommand: string;
+  releaseNotes?: PublicReleaseNotes;
   skills: PublicSkillCatalogEntry[];
 };
 
@@ -140,7 +149,10 @@ function parseJsonResponse(raw: string, url: string): unknown {
 
 function parsePublicSkillCatalog(
   payload: unknown,
-): Pick<PublicSkillCatalogReport, 'releaseId' | 'skills' | 'source'> {
+): Pick<
+  PublicSkillCatalogReport,
+  'releaseId' | 'releaseNotes' | 'skills' | 'source'
+> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('PostPlus public skill catalog is invalid.');
   }
@@ -154,7 +166,6 @@ function parsePublicSkillCatalog(
     typeof record.source === 'string' && record.source.trim()
       ? record.source.trim()
       : null;
-
   if (
     record.schemaVersion !== 2 ||
     source !== POSTPLUS_SKILLS_REPO ||
@@ -162,6 +173,8 @@ function parsePublicSkillCatalog(
   ) {
     throw new Error('PostPlus public skill catalog metadata is invalid.');
   }
+
+  const releaseNotes = parsePublicReleaseNotes(record.releaseNotes, releaseId);
 
   if (!Array.isArray(record.skills)) {
     throw new Error('PostPlus public skill catalog has no skills array.');
@@ -209,8 +222,48 @@ function parsePublicSkillCatalog(
 
   return {
     releaseId,
+    ...(releaseNotes ? { releaseNotes } : {}),
     skills,
     source,
+  };
+}
+
+function parsePublicReleaseNotes(
+  value: unknown,
+  expectedReleaseId: string,
+): PublicReleaseNotes | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('PostPlus public skill catalog has invalid release notes.');
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    record.schemaVersion !== 1 ||
+    record.releaseId !== expectedReleaseId ||
+    typeof record.title !== 'string' ||
+    !record.title.trim() ||
+    typeof record.summary !== 'string' ||
+    !record.summary.trim() ||
+    !Array.isArray(record.highlights) ||
+    record.highlights.length === 0 ||
+    record.highlights.some(
+      (highlight) => typeof highlight !== 'string' || !highlight.trim(),
+    )
+  ) {
+    throw new Error('PostPlus public skill catalog has invalid release notes.');
+  }
+
+  return {
+    schemaVersion: 1,
+    releaseId: expectedReleaseId,
+    title: record.title.trim(),
+    summary: record.summary.trim(),
+    highlights: record.highlights.map((highlight) =>
+      (highlight as string).trim(),
+    ),
   };
 }
 
