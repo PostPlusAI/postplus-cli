@@ -3140,8 +3140,10 @@ function printMediaEndpointHelp(
   Usage:
     postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} [--video-seconds <n>] [--json] [--output <result.json>]
 
-  --video <video>    Local path, PostPlus media reference, or video data URI.
-                    The CLI stages local bytes before the analysis submit.
+  --video <video>    Local path, direct HTTPS video URL, supported TikTok video
+                    page URL, PostPlus media reference, or video data URI.
+                    The CLI resolves supported pages and stages local bytes
+                    before the analysis submit.
   --prompt <text>    The analysis question or requested evidence structure.
   --video-seconds <n>  Optional source video duration in seconds. Supplying it
                     helps PostPlus validate and route the request; omit it when

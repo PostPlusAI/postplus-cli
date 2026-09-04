@@ -5695,8 +5695,11 @@ describe('hosted domain commands', () => {
       });
       assert.equal(requests[0]?.headers['x-postplus-skill-name'], undefined);
       assert.equal(
-        (JSON.parse(await readFile(checkpointPath, 'utf8')) as { status: string })
-          .status,
+        (
+          JSON.parse(await readFile(checkpointPath, 'utf8')) as {
+            status: string;
+          }
+        ).status,
         'completed',
       );
     } finally {
@@ -7299,6 +7302,116 @@ describe('hosted domain commands', () => {
       assert.equal(Object.hasOwn(body, 'endpointKey'), false);
       assert.equal(Object.hasOwn(body, 'payload'), false);
       assert.equal(Object.hasOwn(body, 'estimatedUsage'), false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('resolves a TikTok video page locally and stages the MP4 before analysis', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const pageUrl = 'https://www.tiktok.com/@creator/video/7675141620601195789';
+    const fakeBinDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-bin-'));
+    const downloaderArgsPath = resolve(fakeBinDir, 'yt-dlp-args.json');
+    tempDirs.push(fakeBinDir);
+    await writeFile(
+      resolve(fakeBinDir, 'python3'),
+      `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.POSTPLUS_TEST_YT_DLP_ARGS, JSON.stringify(args));
+const outputIndex = args.indexOf('-o');
+if (args[0] !== '-m' || args[1] !== 'yt_dlp' || outputIndex < 0) {
+  process.exit(2);
+}
+fs.writeFileSync(args[outputIndex + 1].replace('%(ext)s', 'mp4'), 'resolved-tiktok-video');
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    );
+    process.env.PATH = `${fakeBinDir}:${process.env.PATH ?? ''}`;
+    process.env.POSTPLUS_TEST_YT_DLP_ARGS = downloaderArgsPath;
+
+    const originalFetch = globalThis.fetch;
+    const hostedBodies: Record<string, unknown>[] = [];
+    let signedPutCount = 0;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url === 'https://storage.example.com/tiktok-upload') {
+        signedPutCount += 1;
+        assert.equal(init?.method, 'PUT');
+        return new Response(null, { status: 200 });
+      }
+
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      hostedBodies.push(body);
+      if (body.capability === 'media-file') {
+        assert.equal(body.operation, 'create-upload-url');
+        assert.deepEqual(body.file, {
+          mimeType: 'video/mp4',
+          name: 'source-video.mp4',
+          sizeBytes: Buffer.byteLength('resolved-tiktok-video'),
+        });
+        return new Response(
+          JSON.stringify({
+            output: {
+              mediaReference:
+                'postplus-media://uploads/users/user_1/hosted-media/inputs/tiktok.mp4',
+              signedUpload: {
+                method: 'PUT',
+                requiredHeaders: { 'content-type': 'video/mp4' },
+                url: 'https://storage.example.com/tiktok-upload',
+              },
+              storageReference: {
+                bucket: 'postplus-media',
+                mimeType: 'video/mp4',
+                name: 'source-video.mp4',
+                storagePath: 'uploads/user_1/tiktok.mp4',
+              },
+            },
+          }),
+          { headers: { 'content-type': 'application/json' }, status: 200 },
+        );
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      });
+    };
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'analyze',
+        'video-analysis',
+        '--video',
+        pageUrl,
+        '--prompt',
+        'Analyze this TikTok video.',
+      ]);
+      assert.equal(result, 0);
+      assert.equal(signedPutCount, 1);
+      assert.equal(hostedBodies.length, 2);
+      const downloaderArgs = JSON.parse(
+        await readFile(downloaderArgsPath, 'utf8'),
+      ) as string[];
+      assert.deepEqual(downloaderArgs.slice(0, 2), ['-m', 'yt_dlp']);
+      assert.ok(downloaderArgs.includes('--no-playlist'));
+      assert.ok(downloaderArgs.includes('--max-filesize'));
+      assert.ok(downloaderArgs.includes('200M'));
+      assert.equal(downloaderArgs.at(-1), pageUrl);
+      assert.deepEqual(hostedBodies[1]?.input, {
+        prompt: 'Analyze this TikTok video.',
+        video:
+          'postplus-media://uploads/users/user_1/hosted-media/inputs/tiktok.mp4',
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }

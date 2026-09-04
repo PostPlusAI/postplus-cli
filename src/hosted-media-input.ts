@@ -3,16 +3,20 @@ import { createReadStream } from 'node:fs';
 import {
   chmod,
   mkdir,
+  mkdtemp,
   open,
   readFile,
+  readdir,
   realpath,
   rename,
   rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { runCommand } from './command-runner.js';
 import type { ManifestField } from './hosted-manifest-index.js';
 import {
   getPostPlusConfigDir,
@@ -27,6 +31,8 @@ const MEDIA_REFERENCE_PREFIXES = [
 ] as const;
 const MEDIA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MEDIA_CACHE_FILE_MODE = 0o600;
+const TIKTOK_VIDEO_MAX_BYTES = 200 * 1024 * 1024;
+const TIKTOK_VIDEO_TIMEOUT_MS = 120_000;
 
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   '.bmp': 'image/bmp',
@@ -112,73 +118,167 @@ export async function resolveManifestMediaInputs(input: {
         continue;
       }
       const value = entry.trim();
-      if (hasReferenceScheme(value)) {
+      const temporaryTikTokVideo =
+        input.endpointKey === 'video-analysis' && field.mediaKind === 'video'
+          ? await downloadTikTokPageVideo(value, Boolean(input.stage))
+          : null;
+      if (!temporaryTikTokVideo && hasReferenceScheme(value)) {
         next.push(entry);
         continue;
       }
 
-      const explicitLocal = value.startsWith('@');
-      const candidate = explicitLocal ? value.slice(1) : value;
-      const local = await inspectLocalMediaFile(candidate, {
-        explicitLocal,
-        field,
-      });
-      if (!local) {
-        next.push(entry);
-        continue;
-      }
-      if (!input.stage || !cacheScope) {
-        throw new Error(
-          `${input.endpointKey} ${field.name} received local file ${local.absolutePath}, but this in-process host cannot read or upload caller-local files. Use a PostPlus media reference or HTTPS URL.`,
-        );
-      }
-
-      const cacheKey = hashCacheKey({
-        contentSha256: local.contentSha256,
-        mediaKind: field.mediaKind,
-        mimeType: local.mimeType,
-        scope: cacheScope,
-      });
-      const cached = cache.entries[cacheKey];
-      if (
-        cached &&
-        cached.expiresAt > Date.now() &&
-        cached.mediaReference.startsWith('postplus-media://')
-      ) {
-        next.push(cached.mediaReference);
-        continue;
-      }
-
-      let staged = inCommand.get(cacheKey);
-      if (!staged) {
-        staged = input.stage({
+      try {
+        const explicitLocal =
+          Boolean(temporaryTikTokVideo) || value.startsWith('@');
+        const candidate =
+          temporaryTikTokVideo?.filePath ??
+          (explicitLocal ? value.slice(1) : value);
+        const local = await inspectLocalMediaFile(candidate, {
+          explicitLocal,
           field,
-          file: local,
-          operationId: `postplus-cli:media-file:stage:${cacheKey}`,
         });
-        inCommand.set(cacheKey, staged);
+        if (!local) {
+          next.push(entry);
+          continue;
+        }
+        if (!input.stage || !cacheScope) {
+          throw new Error(
+            `${input.endpointKey} ${field.name} received local file ${local.absolutePath}, but this in-process host cannot read or upload caller-local files. Use a PostPlus media reference or HTTPS URL.`,
+          );
+        }
+
+        const cacheKey = hashCacheKey({
+          contentSha256: local.contentSha256,
+          mediaKind: field.mediaKind,
+          mimeType: local.mimeType,
+          scope: cacheScope,
+        });
+        const cached = cache.entries[cacheKey];
+        if (
+          cached &&
+          cached.expiresAt > Date.now() &&
+          cached.mediaReference.startsWith('postplus-media://')
+        ) {
+          next.push(cached.mediaReference);
+          continue;
+        }
+
+        let staged = inCommand.get(cacheKey);
+        if (!staged) {
+          staged = input.stage({
+            field,
+            file: local,
+            operationId: `postplus-cli:media-file:stage:${cacheKey}`,
+          });
+          inCommand.set(cacheKey, staged);
+        }
+        const mediaReference = await staged;
+        if (!mediaReference.startsWith('postplus-media://')) {
+          throw new Error(
+            `Hosted media staging for ${field.name} did not return a persistent PostPlus media reference.`,
+          );
+        }
+        cache.entries[cacheKey] = {
+          expiresAt: Date.now() + MEDIA_CACHE_TTL_MS,
+          mediaReference,
+        };
+        // Persist each completed staging edge immediately. If a later item in the
+        // same multi-media request fails, a retry reuses every successful object
+        // and resumes at the first missing input without any provider submit.
+        await writeMediaCache(cache);
+        next.push(mediaReference);
+      } finally {
+        if (temporaryTikTokVideo) {
+          await rm(temporaryTikTokVideo.workDir, {
+            force: true,
+            recursive: true,
+          }).catch(() => undefined);
+        }
       }
-      const mediaReference = await staged;
-      if (!mediaReference.startsWith('postplus-media://')) {
-        throw new Error(
-          `Hosted media staging for ${field.name} did not return a persistent PostPlus media reference.`,
-        );
-      }
-      cache.entries[cacheKey] = {
-        expiresAt: Date.now() + MEDIA_CACHE_TTL_MS,
-        mediaReference,
-      };
-      // Persist each completed staging edge immediately. If a later item in the
-      // same multi-media request fails, a retry reuses every successful object
-      // and resumes at the first missing input without any provider submit.
-      await writeMediaCache(cache);
-      next.push(mediaReference);
     }
 
     resolved[field.name] = Array.isArray(raw) ? next : next[0];
   }
 
   return resolved;
+}
+
+async function downloadTikTokPageVideo(
+  value: string,
+  canStageLocalMedia: boolean,
+): Promise<{ filePath: string; workDir: string } | null> {
+  const pageUrl = parseTikTokVideoPageUrl(value);
+  if (!pageUrl) {
+    return null;
+  }
+  if (!canStageLocalMedia) {
+    throw new Error(
+      'TikTok page URLs require the local PostPlus CLI so the source video can be resolved and staged before analysis.',
+    );
+  }
+
+  const workDir = await mkdtemp(path.join(tmpdir(), 'postplus-tiktok-video-'));
+  try {
+    const outputTemplate = path.join(workDir, 'source-video.%(ext)s');
+    await runCommand(
+      'python3',
+      [
+        '-m',
+        'yt_dlp',
+        '--no-playlist',
+        '--no-progress',
+        '--no-warnings',
+        '--restrict-filenames',
+        '--merge-output-format',
+        'mp4',
+        '--max-filesize',
+        '200M',
+        '-o',
+        outputTemplate,
+        pageUrl,
+      ],
+      { timeoutMs: TIKTOK_VIDEO_TIMEOUT_MS },
+    );
+    const fileName = (await readdir(workDir))
+      .filter((entry) => !entry.endsWith('.part'))
+      .sort()
+      .find((entry) => /\.(mp4|m4v|mov|webm)$/iu.test(entry));
+    if (!fileName) {
+      throw new Error('yt_dlp did not produce a supported video file.');
+    }
+    const filePath = path.join(workDir, fileName);
+    const fileStat = await stat(filePath);
+    if (fileStat.size > TIKTOK_VIDEO_MAX_BYTES) {
+      throw new Error('Downloaded TikTok video exceeds the 200MiB limit.');
+    }
+    return { filePath, workDir };
+  } catch (error) {
+    await rm(workDir, { force: true, recursive: true }).catch(() => undefined);
+    throw new Error(
+      `Unable to resolve the TikTok page into a video for analysis: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+}
+
+function parseTikTokVideoPageUrl(value: string): string | null {
+  if (!value.startsWith('https://')) {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    const pathName = url.pathname.replace(/\/+$/, '');
+    const isCanonicalPage =
+      (host === 'tiktok.com' || host === 'www.tiktok.com') &&
+      /^\/@[^/]+\/video\/\d+$/u.test(pathName);
+    const isShortPage =
+      (host === 'vm.tiktok.com' || host === 'vt.tiktok.com') &&
+      pathName.length > 1;
+    return isCanonicalPage || isShortPage ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 export function inferMediaMimeType(filePath: string): string | null {
