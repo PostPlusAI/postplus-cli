@@ -173,6 +173,16 @@ function createPublicCatalogResponse(): Response {
   );
 }
 
+function createPublicProductBrief() {
+  return {
+    schemaVersion: 1,
+    paragraphs: [
+      'Marketing should not begin with a maze of tools. It should begin with an ambition.',
+      'PostPlus gives individuals and lean teams the operating power of a much larger marketing organization.',
+    ],
+  };
+}
+
 function createVideoAnalysisCatalogResponse(): Response {
   return new Response(
     JSON.stringify({
@@ -2482,6 +2492,7 @@ describe('public skill catalog', () => {
             summary: 'Agents can continue routine work after updating.',
             highlights: ['One bounded retry after a safe update.'],
           },
+          productBrief: createPublicProductBrief(),
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -2521,6 +2532,7 @@ describe('public skill catalog', () => {
         summary: 'Agents can continue routine work after updating.',
         highlights: ['One bounded retry after a safe update.'],
       });
+      assert.deepEqual(catalog.productBrief, createPublicProductBrief());
       assert.equal(catalog.installCommand, POSTPLUS_SKILLS_INSTALL_COMMAND);
       assert.deepEqual(catalog.skills, [
         {
@@ -2599,6 +2611,39 @@ describe('public skill catalog', () => {
       await assert.rejects(
         () => loadPublicSkillCatalog(),
         /invalid release notes/u,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects an empty product brief', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schemaVersion: 2,
+          releaseId: 'catalog-current',
+          productBrief: { schemaVersion: 1, paragraphs: [] },
+          source: 'PostPlusAI/postplus-skills',
+          skills: [
+            {
+              name: 'demo-skill',
+              path: 'skills/demo-skill/SKILL.md',
+              status: 'released',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await assert.rejects(
+        () => loadPublicSkillCatalog(),
+        /invalid product brief/u,
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -3984,6 +4029,7 @@ describe('skill management commands', () => {
               'Safe local usage errors can be corrected before submission.',
             ],
           },
+          productBrief: createPublicProductBrief(),
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -4073,7 +4119,15 @@ describe('skill management commands', () => {
 
   it('welcomes a setup without presenting current release notes as an update', async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => createPublicCatalogResponse();
+    globalThis.fetch = async () => {
+      const response = createPublicCatalogResponse();
+      const catalog = (await response.json()) as Record<string, unknown>;
+      catalog.productBrief = createPublicProductBrief();
+      return new Response(JSON.stringify(catalog), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
     const successMessages: string[] = [];
     const installCalls: string[][] = [];
 
@@ -4100,7 +4154,15 @@ describe('skill management commands', () => {
       assert.equal(exitCode, 0);
       assert.equal(installCalls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length);
       assert.deepEqual(successMessages, [
-        'PostPlus is ready: 1 official Skills installed and verified (global). Start a new agent session to use them; run `postplus list` to browse available capabilities.',
+        [
+          'PostPlus is ready: 1 official Skills installed and verified (global).',
+          '',
+          'Marketing should not begin with a maze of tools. It should begin with an ambition.',
+          '',
+          'PostPlus gives individuals and lean teams the operating power of a much larger marketing organization.',
+          '',
+          'Start a new agent session to use them; run `postplus list` to browse available capabilities.',
+        ].join('\n'),
       ]);
       assert.doesNotMatch(successMessages.join('\n'), /PostPlus update/u);
     } finally {

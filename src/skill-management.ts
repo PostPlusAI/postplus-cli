@@ -271,7 +271,14 @@ function reportPostPlusSkillReconcileSuccess(input: {
 
   if (input.outcome === 'ready') {
     reportSuccess(
-      `PostPlus is ready: ${input.skillCount} official Skills installed and verified (${input.options.scope}). Start a new agent session to use them; run \`postplus list\` to browse available capabilities.`,
+      [
+        `PostPlus is ready: ${input.skillCount} official Skills installed and verified (${input.options.scope}).`,
+        ...(input.catalog.productBrief
+          ? ['', input.catalog.productBrief.paragraphs.join('\n\n')]
+          : []),
+        '',
+        'Start a new agent session to use them; run `postplus list` to browse available capabilities.',
+      ].join('\n'),
     );
     return;
   }

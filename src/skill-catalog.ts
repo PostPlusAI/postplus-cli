@@ -40,6 +40,11 @@ export type PublicReleaseNotes = {
   highlights: string[];
 };
 
+export type PublicProductBrief = {
+  schemaVersion: 1;
+  paragraphs: string[];
+};
+
 export const PUBLIC_SKILL_REQUIREMENT_KEYS = [
   'accountConnections',
   'capabilities',
@@ -66,6 +71,7 @@ export type PublicSkillCatalogReport = {
   catalogUrl: string;
   installCommand: string;
   listCommand: string;
+  productBrief?: PublicProductBrief;
   releaseNotes?: PublicReleaseNotes;
   skills: PublicSkillCatalogEntry[];
 };
@@ -151,7 +157,7 @@ function parsePublicSkillCatalog(
   payload: unknown,
 ): Pick<
   PublicSkillCatalogReport,
-  'releaseId' | 'releaseNotes' | 'skills' | 'source'
+  'productBrief' | 'releaseId' | 'releaseNotes' | 'skills' | 'source'
 > {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('PostPlus public skill catalog is invalid.');
@@ -220,11 +226,45 @@ function parsePublicSkillCatalog(
     );
   }
 
+  const productBrief = parsePublicProductBrief(record.productBrief);
+
   return {
+    ...(productBrief ? { productBrief } : {}),
     releaseId,
     ...(releaseNotes ? { releaseNotes } : {}),
     skills,
     source,
+  };
+}
+
+function parsePublicProductBrief(value: unknown): PublicProductBrief | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('PostPlus public skill catalog has invalid product brief.');
+  }
+
+  const record = value as Record<string, unknown>;
+  const paragraphs = record.paragraphs;
+  if (
+    record.schemaVersion !== 1 ||
+    !Array.isArray(paragraphs) ||
+    paragraphs.length === 0 ||
+    paragraphs.length > 12 ||
+    paragraphs.some(
+      (paragraph) =>
+        typeof paragraph !== 'string' ||
+        !paragraph.trim() ||
+        paragraph.length > 2000,
+    )
+  ) {
+    throw new Error('PostPlus public skill catalog has invalid product brief.');
+  }
+
+  return {
+    schemaVersion: 1,
+    paragraphs: paragraphs.map((paragraph) => (paragraph as string).trim()),
   };
 }
 
