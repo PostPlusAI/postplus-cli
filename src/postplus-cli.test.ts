@@ -8,6 +8,7 @@ import {
   readFile,
   readdir,
   rm,
+  stat,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -53,6 +54,11 @@ import {
   runWorkflowCommand,
 } from './hosted-domain-commands.js';
 import { runHostedRequest } from './hosted-lib.js';
+import {
+  HostedMediaTransferError,
+  createMediaFileFingerprint,
+  uploadHostedMediaFile,
+} from './hosted-media-transfer.js';
 import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import { generateLocalDependencyReport } from './local-dependencies.js';
 import {
@@ -4914,6 +4920,199 @@ describe('skill management commands', () => {
   });
 });
 
+describe('hosted media transfer', () => {
+  it('resumes a TUS upload from the server-confirmed offset without retransmitting accepted bytes', async () => {
+    const uploadDir = await mkdtemp(resolve(tmpdir(), 'postplus-tus-resume-'));
+    tempDirs.push(uploadDir);
+    const inputPath = resolve(uploadDir, 'clip.mp4');
+    await writeFile(inputPath, Buffer.from('0123456789'));
+    const fingerprint = await createMediaFileFingerprint(inputPath);
+    let remoteOffset = 0;
+    let sessionCreates = 0;
+    let failFirstPatch = true;
+    const patchOffsets: number[] = [];
+
+    const fetchFn = (async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+      if (url === 'https://storage.test/storage/v1/upload/resumable') {
+        assert.equal(init?.method, 'POST');
+        sessionCreates += 1;
+        return new Response(null, {
+          headers: { location: '/upload/session-1' },
+          status: 201,
+        });
+      }
+      if (url !== 'https://storage.test/upload/session-1') {
+        throw new Error(`Unexpected TUS URL: ${url}`);
+      }
+      if (init?.method === 'HEAD') {
+        return new Response(null, {
+          headers: {
+            'upload-length': String(fingerprint.sizeBytes),
+            'upload-offset': String(remoteOffset),
+          },
+          status: 200,
+        });
+      }
+      assert.equal(init?.method, 'PATCH');
+      const offset = Number(
+        (init?.headers as Record<string, string>)['upload-offset'],
+      );
+      patchOffsets.push(offset);
+      const chunks: Buffer[] = [];
+      for await (const chunk of init?.body as NodeJS.ReadableStream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      remoteOffset = offset + Buffer.concat(chunks).byteLength;
+      if (failFirstPatch) {
+        failFirstPatch = false;
+        throw new TypeError('simulated disconnect after server accepted bytes');
+      }
+      return new Response(null, {
+        headers: { 'upload-offset': String(remoteOffset) },
+        status: 204,
+      });
+    }) as typeof fetch;
+    const signedUpload = {
+      chunkSizeBytes: 4,
+      expiresInSeconds: 3_600,
+      metadata: {
+        bucketName: 'uploads',
+        contentType: 'video/mp4',
+        objectName: 'object.mp4',
+      },
+      method: 'TUS' as const,
+      requiredHeaders: { 'x-signature': 'secret-upload-token' },
+      url: 'https://storage.test/storage/v1/upload/resumable',
+    };
+
+    await assert.rejects(
+      () =>
+        uploadHostedMediaFile({
+          absolutePath: inputPath,
+          fingerprint,
+          operationId: 'operation-1',
+          options: { fetchFn, maxAttempts: 1 },
+          signedUpload,
+        }),
+      (error: unknown) =>
+        error instanceof HostedMediaTransferError &&
+        error.retryable &&
+        error.resumeAvailable &&
+        error.transferredBytes === 0,
+    );
+
+    await uploadHostedMediaFile({
+      absolutePath: inputPath,
+      fingerprint,
+      operationId: 'operation-1',
+      options: { fetchFn },
+      signedUpload,
+    });
+
+    assert.equal(sessionCreates, 1);
+    assert.deepEqual(patchOffsets, [0, 4, 8]);
+    const checkpoint = JSON.parse(
+      await readFile(
+        resolve(
+          process.env.POSTPLUS_CONFIG_DIR!,
+          'media-transfer-checkpoints.json',
+        ),
+        'utf8',
+      ),
+    ) as { entries: Record<string, unknown> };
+    assert.deepEqual(checkpoint.entries, {});
+  });
+
+  it('classifies a stalled TUS chunk without exposing the signed URL or token', async () => {
+    const uploadDir = await mkdtemp(resolve(tmpdir(), 'postplus-tus-stall-'));
+    tempDirs.push(uploadDir);
+    const inputPath = resolve(uploadDir, 'clip.mp4');
+    await writeFile(inputPath, Buffer.from('stall'));
+    const fingerprint = await createMediaFileFingerprint(inputPath);
+    const fetchFn = (async (input: URL | RequestInfo, init?: RequestInit) => {
+      if (String(input).endsWith('/upload/resumable')) {
+        return new Response(null, {
+          headers: { location: 'https://storage.test/upload/stalled' },
+          status: 201,
+        });
+      }
+      if (init?.method === 'PATCH') {
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            reject(new Error('request aborted'));
+          });
+        });
+      }
+      throw new Error(`Unexpected TUS request: ${String(input)}`);
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () =>
+        uploadHostedMediaFile({
+          absolutePath: inputPath,
+          fingerprint,
+          operationId: 'operation-stall',
+          options: { fetchFn, idleTimeoutMs: 10, maxAttempts: 1 },
+          signedUpload: {
+            chunkSizeBytes: 6 * 1024 * 1024,
+            expiresInSeconds: 3_600,
+            metadata: {
+              bucketName: 'uploads',
+              contentType: 'video/mp4',
+              objectName: 'stalled.mp4',
+            },
+            method: 'TUS',
+            requiredHeaders: { 'x-signature': 'secret-upload-token' },
+            url: 'https://storage.test/storage/v1/upload/resumable',
+          },
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof HostedMediaTransferError);
+        assert.equal(error.code, 'idle_timeout');
+        assert.equal(error.stage, 'transferring');
+        assert.equal(error.targetHost, 'storage.test');
+        assert.equal(error.resumeAvailable, true);
+        assert.doesNotMatch(error.message, /secret-upload-token/u);
+        assert.doesNotMatch(error.message, /\/upload\/stalled/u);
+        return true;
+      },
+    );
+  });
+
+  it('rejects resume when the source size or mtime changed', async () => {
+    const uploadDir = await mkdtemp(resolve(tmpdir(), 'postplus-tus-change-'));
+    tempDirs.push(uploadDir);
+    const inputPath = resolve(uploadDir, 'clip.mp4');
+    await writeFile(inputPath, Buffer.from('before'));
+    const fingerprint = await createMediaFileFingerprint(inputPath);
+    await writeFile(inputPath, Buffer.from('after-content'));
+    const current = await stat(inputPath);
+    assert.notEqual(current.size, fingerprint.sizeBytes);
+
+    await assert.rejects(
+      () =>
+        uploadHostedMediaFile({
+          absolutePath: inputPath,
+          fingerprint,
+          operationId: 'operation-changed',
+          signedUpload: {
+            chunkSizeBytes: 6 * 1024 * 1024,
+            expiresInSeconds: 3_600,
+            metadata: {},
+            method: 'TUS',
+            requiredHeaders: {},
+            url: 'https://storage.test/storage/v1/upload/resumable',
+          },
+        }),
+      (error: unknown) =>
+        error instanceof HostedMediaTransferError &&
+        error.code === 'integrity_mismatch' &&
+        !error.resumeAvailable,
+    );
+  });
+});
+
 describe('hosted domain commands', () => {
   it('documents the thin public hosted command contracts', async () => {
     const { stdout: topLevelHelp } = await execFileAsync(process.execPath, [
@@ -5695,8 +5894,11 @@ describe('hosted domain commands', () => {
       });
       assert.equal(requests[0]?.headers['x-postplus-skill-name'], undefined);
       assert.equal(
-        (JSON.parse(await readFile(checkpointPath, 'utf8')) as { status: string })
-          .status,
+        (
+          JSON.parse(await readFile(checkpointPath, 'utf8')) as {
+            status: string;
+          }
+        ).status,
         'completed',
       );
     } finally {
@@ -7475,11 +7677,17 @@ describe('hosted domain commands', () => {
       const body = hostedBodies[0] as Record<string, unknown>;
       assert.equal(body.capability, 'media-file');
       assert.equal(body.operation, 'create-upload-url');
-      assert.deepEqual(body.file, {
-        mimeType: 'video/mp4',
-        name: 'clip.mp4',
-        sizeBytes: fileBytes.length,
-      });
+      const file = body.file as Record<string, unknown>;
+      assert.equal(file.mimeType, 'video/mp4');
+      assert.equal(file.name, 'clip.mp4');
+      assert.equal(file.sizeBytes, fileBytes.length);
+      const fingerprint = file.fingerprint as Record<string, unknown>;
+      assert.equal(
+        fingerprint.contentSha256,
+        createHash('sha256').update(fileBytes).digest('hex'),
+      );
+      assert.equal(fingerprint.sizeBytes, fileBytes.length);
+      assert.equal(typeof fingerprint.mtimeMs, 'number');
       assert.equal(body.operationId, 'upload-test-op');
       // The bytes were streamed to the signed target, not embedded in the JSON body.
       assert.equal(putContentType, 'video/mp4');

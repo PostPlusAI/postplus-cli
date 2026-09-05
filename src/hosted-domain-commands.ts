@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createWriteStream } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -31,6 +31,13 @@ import {
   inferMediaMimeType,
   resolveManifestMediaInputs,
 } from './hosted-media-input.js';
+import {
+  type HostedMediaTransferProgress,
+  type MediaFileFingerprint,
+  type SignedHostedUpload,
+  createMediaFileFingerprint,
+  uploadHostedMediaFile,
+} from './hosted-media-transfer.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import {
@@ -689,6 +696,7 @@ async function runMediaFileUpload(
   }
   const mimeType =
     flags.values.get('mime') ?? inferUploadMimeType(absolutePath);
+  const fingerprint = await createMediaFileFingerprint(absolutePath);
   const outputPath = flags.values.get('output') ?? null;
   const hostedOperationId = flags.values.get('hosted-operation-id') ?? null;
 
@@ -696,6 +704,7 @@ async function runMediaFileUpload(
     capability: 'media-file',
     operation: 'create-upload-url',
     file: {
+      fingerprint,
       mimeType,
       name: path.basename(absolutePath),
       sizeBytes: fileStat.size,
@@ -719,7 +728,13 @@ async function runMediaFileUpload(
         const output = readHostedUploadOutput(payload);
         const signedUpload = readSignedUpload(output);
         const mediaReference = readMediaReferenceValue(output);
-        await putHostedMediaBytes(signedUpload, absolutePath);
+        await uploadHostedMediaFile({
+          absolutePath,
+          fingerprint,
+          operationId: body.operationId,
+          options: { onProgress: createTransferProgressReporter() },
+          signedUpload,
+        });
 
         return buildDurableUploadResult(payload, mediaReference);
       },
@@ -964,12 +979,6 @@ class HostedMediaDownloadError extends Error {
   }
 }
 
-type SignedUpload = {
-  method: string;
-  requiredHeaders: Record<string, string>;
-  url: string;
-};
-
 function readHostedUploadOutput(payload: unknown): Record<string, unknown> {
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
     const output = (payload as Record<string, unknown>).output;
@@ -980,7 +989,7 @@ function readHostedUploadOutput(payload: unknown): Record<string, unknown> {
   throw new Error('Hosted media upload response is missing output.');
 }
 
-function readSignedUpload(output: Record<string, unknown>): SignedUpload {
+function readSignedUpload(output: Record<string, unknown>): SignedHostedUpload {
   const signedUpload = output.signedUpload;
   if (
     !signedUpload ||
@@ -993,7 +1002,7 @@ function readSignedUpload(output: Record<string, unknown>): SignedUpload {
   if (typeof record.url !== 'string' || !record.url.trim()) {
     throw new Error('Hosted media upload signedUpload.url must be a string.');
   }
-  if (record.method !== 'PUT') {
+  if (record.method !== 'PUT' && record.method !== 'TUS') {
     throw new Error(
       `Unsupported hosted media signed upload method: ${String(record.method)}.`,
     );
@@ -1015,7 +1024,46 @@ function readSignedUpload(output: Record<string, unknown>): SignedUpload {
       requiredHeaders[key] = value;
     }
   }
-  return { method: record.method, requiredHeaders, url: record.url.trim() };
+  if (record.method === 'PUT') {
+    return { method: 'PUT', requiredHeaders, url: record.url.trim() };
+  }
+  const chunkSizeBytes = Number(record.chunkSizeBytes);
+  const expiresInSeconds = Number(record.expiresInSeconds);
+  if (!Number.isSafeInteger(chunkSizeBytes) || chunkSizeBytes <= 0) {
+    throw new Error(
+      'Hosted media TUS signed upload chunkSizeBytes must be a positive integer.',
+    );
+  }
+  if (!Number.isSafeInteger(expiresInSeconds) || expiresInSeconds <= 0) {
+    throw new Error(
+      'Hosted media TUS signed upload expiresInSeconds must be a positive integer.',
+    );
+  }
+  const metadata: Record<string, string> = {};
+  if (
+    record.metadata &&
+    typeof record.metadata === 'object' &&
+    !Array.isArray(record.metadata)
+  ) {
+    for (const [key, value] of Object.entries(
+      record.metadata as Record<string, unknown>,
+    )) {
+      if (typeof value !== 'string') {
+        throw new Error(
+          `Hosted media TUS signed upload metadata.${key} must be a string.`,
+        );
+      }
+      metadata[key] = value;
+    }
+  }
+  return {
+    chunkSizeBytes,
+    expiresInSeconds,
+    metadata,
+    method: 'TUS',
+    requiredHeaders,
+    url: record.url.trim(),
+  };
 }
 
 function readMediaReferenceValue(output: Record<string, unknown>): string {
@@ -1045,6 +1093,7 @@ async function stageHostedMediaFile(input: {
       capability: 'media-file',
       operation: 'create-upload-url',
       file: {
+        fingerprint: toMediaFileFingerprint(input.file),
         mimeType: input.file.mimeType,
         name: input.file.name,
         sizeBytes: input.file.sizeBytes,
@@ -1055,7 +1104,13 @@ async function stageHostedMediaFile(input: {
     skillName: input.skillName,
   });
   const output = readHostedUploadOutput(payload);
-  await putHostedMediaBytes(readSignedUpload(output), input.file.absolutePath);
+  await uploadHostedMediaFile({
+    absolutePath: input.file.absolutePath,
+    fingerprint: toMediaFileFingerprint(input.file),
+    operationId: input.operationId,
+    options: { onProgress: createTransferProgressReporter() },
+    signedUpload: readSignedUpload(output),
+  });
   return readMediaReferenceValue(output);
 }
 
@@ -1076,22 +1131,35 @@ function buildDurableUploadResult(
   };
 }
 
-async function putHostedMediaBytes(
-  signedUpload: SignedUpload,
-  absolutePath: string,
-): Promise<void> {
-  const response = await fetch(signedUpload.url, {
-    body: createReadStream(absolutePath),
-    duplex: 'half',
-    headers: signedUpload.requiredHeaders,
-    method: 'PUT',
-    signal: AbortSignal.timeout(120000),
-  } as RequestInit & { duplex: 'half' });
-  if (!response.ok) {
-    throw new Error(
-      `Hosted media signed upload failed with status ${response.status}.`,
+function toMediaFileFingerprint(file: LocalMediaFile): MediaFileFingerprint {
+  return {
+    contentSha256: file.contentSha256,
+    mtimeMs: file.mtimeMs,
+    sizeBytes: file.sizeBytes,
+  };
+}
+
+function createTransferProgressReporter() {
+  let lastReportedAt = 0;
+  let lastReportedBytes = -1;
+  return (progress: HostedMediaTransferProgress) => {
+    const now = Date.now();
+    const isTerminal = progress.transferredBytes >= progress.totalBytes;
+    if (
+      !progress.userAction &&
+      !isTerminal &&
+      now - lastReportedAt < 1_000 &&
+      progress.transferredBytes - lastReportedBytes < 1024 * 1024
+    ) {
+      return;
+    }
+    const suffix = progress.userAction ? `; ${progress.userAction}` : '';
+    process.stderr.write(
+      `PostPlus media transfer: stage=${progress.stage} bytes=${progress.transferredBytes}/${progress.totalBytes} attempt=${progress.attempt}${suffix}\n`,
     );
-  }
+    lastReportedAt = now;
+    lastReportedBytes = progress.transferredBytes;
+  };
 }
 
 function printMediaFileHelp(): void {

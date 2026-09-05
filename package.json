@@ -27,6 +27,7 @@
     "build/hosted-field-validation.js",
     "build/hosted-manifest-index.js",
     "build/hosted-manifest-index.d.ts",
+    "build/hosted-media-transfer.js",
     "build/hosted-media-input.js",
     "build/hosted-release.js",
     "build/hosted-request-schemas.js",
