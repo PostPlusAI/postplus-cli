@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import {
   chmod,
   mkdir,
@@ -10,10 +10,15 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
-import { Transform } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { getPostPlusConfigDir } from './local-state.js';
+import {
+  formatNetworkErrorChain,
+  readTargetHost,
+} from './network-diagnostics.js';
 
 const TUS_VERSION = '1.0.0';
 const DEFAULT_TUS_CHUNK_SIZE_BYTES = 6 * 1024 * 1024;
@@ -21,6 +26,7 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_ATTEMPTS = 5;
 const CHECKPOINT_FILE_MODE = 0o600;
+const DOWNLOAD_LIMIT_BYTES = 200 * 1024 * 1024;
 
 export type MediaFileFingerprint = {
   contentSha256: string;
@@ -32,7 +38,7 @@ export type HostedMediaTransferProgress = {
   attempt: number;
   checkpointId: string;
   stage: 'transferring';
-  totalBytes: number;
+  totalBytes: number | null;
   transferredBytes: number;
   userAction?: string;
 };
@@ -59,6 +65,57 @@ export type HostedMediaTransferErrorCode =
   | 'size_limit'
   | 'source_rejected'
   | 'upload_session_expired';
+
+export type HostedMediaDownloadStage =
+  | 'commit-output'
+  | 'fetch-bytes'
+  | 'receive-response'
+  | 'resolve-read-url'
+  | 'stream-bytes';
+
+export class HostedMediaDownloadError extends Error {
+  readonly checkpointId: string;
+  readonly code: HostedMediaTransferErrorCode;
+  readonly resumeAvailable: boolean;
+  readonly retryable: boolean;
+  readonly stage: HostedMediaDownloadStage;
+  readonly targetHost: string;
+  readonly totalBytes: number | null;
+  readonly transferredBytes: number;
+  readonly userAction: string;
+
+  constructor(input: {
+    cause?: unknown;
+    checkpointId: string;
+    code: HostedMediaTransferErrorCode;
+    detail?: string;
+    resumeAvailable: boolean;
+    retryable: boolean;
+    stage: HostedMediaDownloadStage;
+    targetUrl: string;
+    totalBytes: number | null;
+    transferredBytes: number;
+    userAction: string;
+  }) {
+    const targetHost = readTargetHost(input.targetUrl);
+    const detail =
+      input.detail ?? formatNetworkErrorChain(input.cause ?? 'unknown error');
+    super(
+      `Hosted media download failed (code=${input.code}, stage=${input.stage}, host=${targetHost}, transferredBytes=${input.transferredBytes}, totalBytes=${input.totalBytes ?? 'unknown'}, retryable=${input.retryable}, resumeAvailable=${input.resumeAvailable}, checkpointId=${input.checkpointId}, userAction=${input.userAction}): ${detail}`,
+      input.cause === undefined ? undefined : { cause: input.cause },
+    );
+    this.name = 'HostedMediaDownloadError';
+    this.checkpointId = input.checkpointId;
+    this.code = input.code;
+    this.resumeAvailable = input.resumeAvailable;
+    this.retryable = input.retryable;
+    this.stage = input.stage;
+    this.targetHost = targetHost;
+    this.totalBytes = input.totalBytes;
+    this.transferredBytes = input.transferredBytes;
+    this.userAction = input.userAction;
+  }
+}
 
 export class HostedMediaTransferError extends Error {
   readonly checkpointId: string;
@@ -111,6 +168,15 @@ type UploadCheckpoint = {
 type UploadCheckpointFile = {
   entries: Record<string, UploadCheckpoint>;
   schemaVersion: 'postplus-media-transfer-checkpoints/v1';
+};
+
+type DownloadCheckpoint = {
+  checkpointId: string;
+  etag: string | null;
+  lastModified: string | null;
+  receivedBytes: number;
+  sourceHash: string;
+  totalBytes: number;
 };
 
 type UploadOptions = {
@@ -185,6 +251,314 @@ export async function uploadHostedMediaFile(input: {
     signedUpload: input.signedUpload,
   });
   return { checkpointId, sizeBytes: input.fingerprint.sizeBytes };
+}
+
+export async function downloadHostedMediaFile(input: {
+  absoluteOutput: string;
+  debug: boolean;
+  operationId: string;
+  request: (url: string, init: RequestInit) => Promise<Response>;
+  restart?: boolean;
+  url: string;
+  options?: {
+    connectTimeoutMs?: number;
+    idleTimeoutMs?: number;
+    onProgress?: (progress: HostedMediaTransferProgress) => void;
+  };
+}): Promise<number> {
+  const outputDirectory = path.dirname(input.absoluteOutput);
+  const partialOutput = path.join(
+    outputDirectory,
+    `.${path.basename(input.absoluteOutput)}.postplus-download.part`,
+  );
+  const checkpointPath = `${partialOutput}.json`;
+  const checkpointId = createHash('sha256')
+    .update(`${input.operationId}\n${input.absoluteOutput}`)
+    .digest('hex');
+  const sourceHash = createHash('sha256')
+    .update(input.operationId)
+    .digest('hex');
+  await mkdir(outputDirectory, { recursive: true });
+  if (input.restart) {
+    await Promise.all([
+      rm(partialOutput, { force: true }),
+      rm(checkpointPath, { force: true }),
+    ]);
+  }
+
+  let checkpoint = await readDownloadCheckpoint(checkpointPath);
+  let receivedBytes = 0;
+  if (checkpoint) {
+    const partialStat = await stat(partialOutput).catch(() => null);
+    if (
+      checkpoint.checkpointId !== checkpointId ||
+      checkpoint.sourceHash !== sourceHash ||
+      !partialStat ||
+      partialStat.size !== checkpoint.receivedBytes
+    ) {
+      throw downloadError({
+        checkpointId,
+        code: 'integrity_mismatch',
+        detail: 'The partial download and its checkpoint do not match.',
+        resumeAvailable: false,
+        retryable: false,
+        stage: 'stream-bytes',
+        targetUrl: input.url,
+        totalBytes: checkpoint.totalBytes,
+        transferredBytes: partialStat?.size ?? 0,
+        userAction: 'Rerun with --restart to discard the unsafe partial file.',
+      });
+    }
+    receivedBytes = checkpoint.receivedBytes;
+    if (receivedBytes === checkpoint.totalBytes) {
+      await commitDownloadedFile({
+        absoluteOutput: input.absoluteOutput,
+        checkpointId,
+        checkpointPath,
+        partialOutput,
+        targetUrl: input.url,
+        totalBytes: checkpoint.totalBytes,
+      });
+      return checkpoint.totalBytes;
+    }
+  } else {
+    const partialStat = await stat(partialOutput).catch(() => null);
+    if (partialStat) {
+      throw downloadError({
+        checkpointId,
+        code: 'integrity_mismatch',
+        detail: 'A partial download exists without a trusted checkpoint.',
+        resumeAvailable: false,
+        retryable: false,
+        stage: 'stream-bytes',
+        targetUrl: input.url,
+        totalBytes: null,
+        transferredBytes: partialStat.size,
+        userAction:
+          'Rerun with --restart to discard the untrusted partial file.',
+      });
+    }
+  }
+
+  const headers: Record<string, string> = {};
+  if (checkpoint) {
+    headers.range = `bytes=${checkpoint.receivedBytes}-`;
+    headers['if-range'] = checkpoint.etag ?? checkpoint.lastModified ?? '';
+  }
+  const controller = new AbortController();
+  const connectTimeoutMs =
+    input.options?.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
+  const idleTimeoutMs = input.options?.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+  let timeout = setTimeout(() => controller.abort(), connectTimeoutMs);
+  let response: Response;
+  try {
+    response = await input.request(input.url, {
+      headers,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    clearTimeout(timeout);
+    throw downloadError({
+      cause: error,
+      checkpointId,
+      code: controller.signal.aborted ? 'connect_timeout' : 'source_rejected',
+      resumeAvailable: Boolean(checkpoint),
+      retryable: true,
+      stage: 'fetch-bytes',
+      targetUrl: input.url,
+      totalBytes: checkpoint?.totalBytes ?? null,
+      transferredBytes: receivedBytes,
+      userAction: checkpoint
+        ? 'Run the same command again to resume the download.'
+        : 'Retry the command.',
+    });
+  }
+
+  if (!response.ok || !response.body) {
+    clearTimeout(timeout);
+    await response.body?.cancel().catch(() => {});
+    throw downloadError({
+      checkpointId,
+      code: 'source_rejected',
+      detail: `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}; response body ${response.body ? 'present' : 'missing'}`,
+      resumeAvailable: Boolean(checkpoint),
+      retryable: response.status >= 500,
+      stage: 'receive-response',
+      targetUrl: input.url,
+      totalBytes: checkpoint?.totalBytes ?? null,
+      transferredBytes: receivedBytes,
+      userAction:
+        response.status >= 500
+          ? 'Run the same command again.'
+          : 'Correct the source or permissions before retrying.',
+    });
+  }
+
+  const responseShape = resolveDownloadResponseShape({
+    checkpoint,
+    response,
+  });
+  if ('error' in responseShape) {
+    clearTimeout(timeout);
+    await response.body.cancel().catch(() => {});
+    throw downloadError({
+      checkpointId,
+      code: responseShape.error,
+      detail: responseShape.detail,
+      resumeAvailable: false,
+      retryable: false,
+      stage: 'receive-response',
+      targetUrl: input.url,
+      totalBytes: checkpoint?.totalBytes ?? null,
+      transferredBytes: receivedBytes,
+      userAction: 'Rerun with --restart to transfer the object from byte zero.',
+    });
+  }
+
+  if (
+    responseShape.totalBytes !== null &&
+    responseShape.totalBytes > DOWNLOAD_LIMIT_BYTES
+  ) {
+    clearTimeout(timeout);
+    await response.body.cancel().catch(() => {});
+    throw downloadError({
+      checkpointId,
+      code: 'size_limit',
+      detail: 'Hosted media download exceeds the 200 MiB product limit.',
+      resumeAvailable: false,
+      retryable: false,
+      stage: 'receive-response',
+      targetUrl: input.url,
+      totalBytes: responseShape.totalBytes,
+      transferredBytes: receivedBytes,
+      userAction: 'Use a supported media object at or below 200 MiB.',
+    });
+  }
+
+  checkpoint =
+    responseShape.resumeSupported && responseShape.totalBytes !== null
+      ? {
+          checkpointId,
+          etag: responseShape.etag,
+          lastModified: responseShape.lastModified,
+          receivedBytes,
+          sourceHash,
+          totalBytes: responseShape.totalBytes,
+        }
+      : null;
+  if (checkpoint) {
+    await writeDownloadCheckpoint(checkpointPath, checkpoint);
+  }
+
+  const progressStream = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      receivedBytes += chunk.byteLength;
+      if (receivedBytes > DOWNLOAD_LIMIT_BYTES) {
+        callback(
+          downloadError({
+            checkpointId,
+            code: 'size_limit',
+            detail: 'Hosted media download exceeded the 200 MiB product limit.',
+            resumeAvailable: false,
+            retryable: false,
+            stage: 'stream-bytes',
+            targetUrl: input.url,
+            totalBytes: responseShape.totalBytes,
+            transferredBytes: receivedBytes,
+            userAction: 'Use a supported media object at or below 200 MiB.',
+          }),
+        );
+        return;
+      }
+      clearTimeout(timeout);
+      timeout = setTimeout(() => controller.abort(), idleTimeoutMs);
+      input.options?.onProgress?.({
+        attempt: 1,
+        checkpointId,
+        stage: 'transferring',
+        totalBytes: responseShape.totalBytes,
+        transferredBytes: receivedBytes,
+      });
+      callback(null, chunk);
+    },
+  });
+  clearTimeout(timeout);
+  timeout = setTimeout(() => controller.abort(), idleTimeoutMs);
+
+  try {
+    await pipeline(
+      Readable.fromWeb(
+        response.body as import('node:stream/web').ReadableStream,
+      ),
+      progressStream,
+      createWriteStream(partialOutput, {
+        flags: receivedBytes > 0 ? 'a' : 'wx',
+      }),
+    );
+  } catch (error) {
+    clearTimeout(timeout);
+    const partialStat = await stat(partialOutput).catch(() => null);
+    receivedBytes = partialStat?.size ?? receivedBytes;
+    if (checkpoint) {
+      checkpoint.receivedBytes = receivedBytes;
+      await writeDownloadCheckpoint(checkpointPath, checkpoint);
+    } else {
+      await Promise.all([
+        rm(partialOutput, { force: true }),
+        rm(checkpointPath, { force: true }),
+      ]);
+    }
+    if (error instanceof HostedMediaDownloadError) throw error;
+    throw downloadError({
+      cause: error,
+      checkpointId,
+      code: controller.signal.aborted ? 'idle_timeout' : 'source_rejected',
+      resumeAvailable: Boolean(checkpoint),
+      retryable: true,
+      stage: 'stream-bytes',
+      targetUrl: input.url,
+      totalBytes: responseShape.totalBytes,
+      transferredBytes: receivedBytes,
+      userAction: checkpoint
+        ? 'Run the same command again to resume from the confirmed local bytes.'
+        : 'The server does not support safe resume; retry retransfers from byte zero.',
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (
+    responseShape.totalBytes !== null &&
+    receivedBytes !== responseShape.totalBytes
+  ) {
+    if (checkpoint) {
+      checkpoint.receivedBytes = receivedBytes;
+      await writeDownloadCheckpoint(checkpointPath, checkpoint);
+    }
+    throw downloadError({
+      checkpointId,
+      code: 'integrity_mismatch',
+      detail:
+        'Hosted media download byte count does not match the remote object.',
+      resumeAvailable: Boolean(checkpoint),
+      retryable: false,
+      stage: 'stream-bytes',
+      targetUrl: input.url,
+      totalBytes: responseShape.totalBytes,
+      transferredBytes: receivedBytes,
+      userAction: 'Rerun with --restart after verifying the source object.',
+    });
+  }
+
+  await commitDownloadedFile({
+    absoluteOutput: input.absoluteOutput,
+    checkpointId,
+    checkpointPath,
+    partialOutput,
+    targetUrl: input.url,
+    totalBytes: responseShape.totalBytes ?? receivedBytes,
+  });
+  return receivedBytes;
 }
 
 async function uploadWithPut(input: {
@@ -776,6 +1150,185 @@ function emptyCheckpointFile(): UploadCheckpointFile {
     entries: {},
     schemaVersion: 'postplus-media-transfer-checkpoints/v1',
   };
+}
+
+async function readDownloadCheckpoint(
+  checkpointPath: string,
+): Promise<DownloadCheckpoint | null> {
+  try {
+    const parsed = JSON.parse(
+      await readFile(checkpointPath, 'utf8'),
+    ) as Partial<DownloadCheckpoint>;
+    if (
+      typeof parsed.checkpointId !== 'string' ||
+      typeof parsed.sourceHash !== 'string' ||
+      !Number.isSafeInteger(parsed.receivedBytes) ||
+      !Number.isSafeInteger(parsed.totalBytes) ||
+      parsed.receivedBytes! < 0 ||
+      parsed.totalBytes! <= 0 ||
+      parsed.receivedBytes! > parsed.totalBytes! ||
+      (parsed.etag !== null && typeof parsed.etag !== 'string') ||
+      (parsed.lastModified !== null && typeof parsed.lastModified !== 'string')
+    ) {
+      throw new Error('invalid checkpoint shape');
+    }
+    return parsed as DownloadCheckpoint;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new Error('PostPlus media download checkpoint is unreadable.', {
+      cause: error,
+    });
+  }
+}
+
+async function writeDownloadCheckpoint(
+  checkpointPath: string,
+  checkpoint: DownloadCheckpoint,
+) {
+  const temporary = `${checkpointPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(checkpoint, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: CHECKPOINT_FILE_MODE,
+    });
+    await rename(temporary, checkpointPath);
+    await chmod(checkpointPath, CHECKPOINT_FILE_MODE);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => {});
+    throw new Error(
+      'Unable to persist the PostPlus media download checkpoint.',
+      {
+        cause: error,
+      },
+    );
+  }
+}
+
+function resolveDownloadResponseShape(input: {
+  checkpoint: DownloadCheckpoint | null;
+  response: Response;
+}):
+  | {
+      etag: string | null;
+      lastModified: string | null;
+      resumeSupported: boolean;
+      totalBytes: number | null;
+    }
+  | {
+      detail: string;
+      error: 'integrity_mismatch' | 'source_rejected';
+    } {
+  const etag = input.response.headers.get('etag');
+  const lastModified = input.response.headers.get('last-modified');
+  if (input.checkpoint) {
+    if (input.response.status !== 206) {
+      return {
+        detail:
+          'The remote server did not honor the requested byte range or its validator changed.',
+        error: 'source_rejected',
+      };
+    }
+    const contentRange = parseContentRange(
+      input.response.headers.get('content-range'),
+    );
+    if (
+      !contentRange ||
+      contentRange.start !== input.checkpoint.receivedBytes ||
+      contentRange.total !== input.checkpoint.totalBytes ||
+      (input.checkpoint.etag && etag !== input.checkpoint.etag) ||
+      (input.checkpoint.lastModified &&
+        lastModified !== input.checkpoint.lastModified)
+    ) {
+      return {
+        detail:
+          'The resumed response does not match the checkpoint range or validator.',
+        error: 'integrity_mismatch',
+      };
+    }
+    return {
+      etag,
+      lastModified,
+      resumeSupported: true,
+      totalBytes: contentRange.total,
+    };
+  }
+
+  const contentRange = parseContentRange(
+    input.response.headers.get('content-range'),
+  );
+  if (input.response.status === 206 && contentRange?.start !== 0) {
+    return {
+      detail: 'The initial response started at a non-zero byte offset.',
+      error: 'integrity_mismatch',
+    };
+  }
+  const contentLength = Number(input.response.headers.get('content-length'));
+  const totalBytes = contentRange?.total ?? contentLength;
+  const trustworthyTotal =
+    Number.isSafeInteger(totalBytes) && totalBytes > 0 ? totalBytes : null;
+  const acceptsRanges =
+    input.response.headers.get('accept-ranges')?.toLowerCase() === 'bytes';
+  return {
+    etag,
+    lastModified,
+    resumeSupported: Boolean(
+      trustworthyTotal !== null && acceptsRanges && (etag || lastModified),
+    ),
+    totalBytes: trustworthyTotal,
+  };
+}
+
+function parseContentRange(value: string | null) {
+  const match = value?.match(/^bytes (\d+)-(\d+)\/(\d+)$/u);
+  if (!match) return null;
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  const total = Number(match[3]);
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    !Number.isSafeInteger(total) ||
+    start < 0 ||
+    end < start ||
+    total <= end
+  ) {
+    return null;
+  }
+  return { end, start, total };
+}
+
+async function commitDownloadedFile(input: {
+  absoluteOutput: string;
+  checkpointId: string;
+  checkpointPath: string;
+  partialOutput: string;
+  targetUrl: string;
+  totalBytes: number;
+}) {
+  try {
+    await rename(input.partialOutput, input.absoluteOutput);
+    await rm(input.checkpointPath, { force: true });
+  } catch (error) {
+    throw downloadError({
+      cause: error,
+      checkpointId: input.checkpointId,
+      code: 'source_rejected',
+      resumeAvailable: true,
+      retryable: true,
+      stage: 'commit-output',
+      targetUrl: input.targetUrl,
+      totalBytes: input.totalBytes,
+      transferredBytes: input.totalBytes,
+      userAction:
+        'Retry the same command to commit the completed partial file.',
+    });
+  }
+}
+
+function downloadError(
+  input: ConstructorParameters<typeof HostedMediaDownloadError>[0],
+) {
+  return new HostedMediaDownloadError(input);
 }
 
 async function readCheckpointFile(): Promise<UploadCheckpointFile> {

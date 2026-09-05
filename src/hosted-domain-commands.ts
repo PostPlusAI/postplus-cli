@@ -1,9 +1,6 @@
-import { randomUUID } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { setTimeout as sleepMs } from 'node:timers/promises';
 
 import { resolveFreshRemoteAuth } from './auth-session.js';
@@ -32,19 +29,19 @@ import {
   resolveManifestMediaInputs,
 } from './hosted-media-input.js';
 import {
+  HostedMediaDownloadError,
   type HostedMediaTransferProgress,
   type MediaFileFingerprint,
   type SignedHostedUpload,
   createMediaFileFingerprint,
+  downloadHostedMediaFile,
   uploadHostedMediaFile,
 } from './hosted-media-transfer.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import {
   fetchWithNetworkDiagnostics,
-  formatNetworkErrorChain,
   isNetworkFailure,
-  readTargetHost,
 } from './network-diagnostics.js';
 import {
   type LargeCreditQuoteConfirmationChallenge,
@@ -760,7 +757,7 @@ async function runMediaFileDownload(
   args: string[],
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
-  const flags = parseFlags(args, new Set(['debug', 'json']));
+  const flags = parseFlags(args, new Set(['debug', 'json', 'restart']));
   const allowedKeys = new Set([
     'hosted-operation-id',
     'debug',
@@ -768,6 +765,7 @@ async function runMediaFileDownload(
     'output',
     'output-file',
     'reference',
+    'restart',
     'skill',
     'url',
   ]);
@@ -800,6 +798,15 @@ async function runMediaFileDownload(
   const outputPath = flags.values.get('output') ?? null;
   const hostedOperationId = flags.values.get('hosted-operation-id') ?? null;
   const debug = flags.booleans.has('debug');
+  const restart = flags.booleans.has('restart');
+  const downloadOperationId =
+    hostedOperationId ??
+    `postplus-cli:media-file:download:${createHash('sha256')
+      .update(`${reference ?? directUrl}\n${absoluteOutput}`)
+      .digest('hex')}`;
+  const checkpointId = createHash('sha256')
+    .update(`${downloadOperationId}\n${absoluteOutput}`)
+    .digest('hex');
 
   return dispatchHostedCommand(
     {
@@ -816,9 +823,7 @@ async function runMediaFileDownload(
                 capability: 'media-file',
                 operation: 'create-read-url',
                 file: { mediaReference: reference },
-                operationId:
-                  hostedOperationId ??
-                  `postplus-cli:media-file:create-read-url:${randomUUID()}`,
+                operationId: `postplus-cli:media-file:create-read-url:${downloadOperationId}`,
               },
               pathName: '/api/postplus-cli/hosted/capability',
               skillName: flags.values.get('skill') ?? null,
@@ -832,8 +837,15 @@ async function runMediaFileDownload(
 
             throw new HostedMediaDownloadError({
               cause: error,
+              checkpointId,
+              code: 'source_rejected',
+              resumeAvailable: false,
+              retryable: true,
               stage: 'resolve-read-url',
               targetUrl: cloudBaseUrl,
+              totalBytes: null,
+              transferredBytes: 0,
+              userAction: 'Retry the same command to resolve a fresh read URL.',
             });
           }
 
@@ -846,16 +858,25 @@ async function runMediaFileDownload(
           }
           downloadUrl = signedUrl.trim();
         }
-        const sizeBytes = await fetchMediaBytesToFile(
-          downloadUrl as string,
+        const sizeBytes = await downloadHostedMediaFile({
           absoluteOutput,
           debug,
-        );
+          operationId: downloadOperationId,
+          options: { onProgress: createTransferProgressReporter() },
+          request: (url, init) =>
+            fetchWithNetworkDiagnostics(url, init, {
+              debug,
+              label: 'media-download',
+              redirectPolicy: 'follow-https',
+            }),
+          restart,
+          url: downloadUrl as string,
+        });
         return {
           output: {
             downloadedTo: absoluteOutput,
             sizeBytes,
-            source: reference ?? downloadUrl,
+            source: reference ? 'postplus-media-reference' : 'https-url',
           },
         };
       },
@@ -865,118 +886,6 @@ async function runMediaFileDownload(
     },
     context,
   );
-}
-
-async function fetchMediaBytesToFile(
-  url: string,
-  absoluteOutput: string,
-  debug: boolean,
-): Promise<number> {
-  const outputDirectory = path.dirname(absoluteOutput);
-  const temporaryOutput = path.join(
-    outputDirectory,
-    `.${path.basename(absoluteOutput)}.postplus-download-${randomUUID()}.tmp`,
-  );
-  await mkdir(outputDirectory, { recursive: true });
-  let response: Response;
-
-  try {
-    response = await fetchWithNetworkDiagnostics(
-      url,
-      { signal: AbortSignal.timeout(120000) },
-      {
-        debug,
-        label: 'media-download',
-        redirectPolicy: 'follow-https',
-      },
-    );
-  } catch (error) {
-    throw new HostedMediaDownloadError({
-      cause: error,
-      stage: 'fetch-bytes',
-      targetUrl: url,
-    });
-  }
-
-  if (!response.ok || !response.body) {
-    // Release the pooled connection undici keeps reserved for the unread error
-    // body (this code also runs on the long-lived in-process hosted-lib path);
-    // a cancel() rejection must never mask the classified download error.
-    await response.body?.cancel().catch(() => {});
-    throw new HostedMediaDownloadError({
-      detail: `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}; response body ${response.body ? 'present' : 'missing'}`,
-      stage: 'receive-response',
-      targetUrl: url,
-    });
-  }
-
-  try {
-    try {
-      await pipeline(
-        Readable.fromWeb(
-          response.body as import('node:stream/web').ReadableStream,
-        ),
-        createWriteStream(temporaryOutput, { flags: 'wx' }),
-      );
-    } catch (error) {
-      throw new HostedMediaDownloadError({
-        cause: error,
-        stage: 'stream-bytes',
-        targetUrl: url,
-      });
-    }
-
-    let written;
-    try {
-      written = await stat(temporaryOutput);
-      await rename(temporaryOutput, absoluteOutput);
-    } catch (error) {
-      throw new HostedMediaDownloadError({
-        cause: error,
-        stage: 'commit-output',
-        targetUrl: url,
-      });
-    }
-
-    return written.size;
-  } finally {
-    // Best-effort cleanup: after a successful rename the temp file is gone
-    // (`force` suppresses ENOENT), so a rejection here can only happen while a
-    // stage-classified download error is already propagating — never let the
-    // cleanup rejection replace that error.
-    await rm(temporaryOutput, { force: true }).catch(() => {});
-  }
-}
-
-type HostedMediaDownloadStage =
-  | 'commit-output'
-  | 'fetch-bytes'
-  | 'receive-response'
-  | 'resolve-read-url'
-  | 'stream-bytes';
-
-class HostedMediaDownloadError extends Error {
-  readonly code = 'postplus_cli_hosted_media_download_failed';
-  readonly stage: HostedMediaDownloadStage;
-  readonly targetHost: string;
-
-  constructor(input: {
-    cause?: unknown;
-    detail?: string;
-    stage: HostedMediaDownloadStage;
-    targetUrl: string;
-  }) {
-    const targetHost = readTargetHost(input.targetUrl);
-    const detail =
-      input.detail ?? formatNetworkErrorChain(input.cause ?? 'unknown error');
-    super(
-      `Hosted media download failed (code=postplus_cli_hosted_media_download_failed, stage=${input.stage}, host=${targetHost}): ${detail}`,
-      input.cause === undefined ? undefined : { cause: input.cause },
-    );
-    this.name = 'HostedMediaDownloadError';
-    this.stage = input.stage;
-    this.targetHost = targetHost;
-  }
 }
 
 function readHostedUploadOutput(payload: unknown): Record<string, unknown> {
@@ -1144,7 +1053,9 @@ function createTransferProgressReporter() {
   let lastReportedBytes = -1;
   return (progress: HostedMediaTransferProgress) => {
     const now = Date.now();
-    const isTerminal = progress.transferredBytes >= progress.totalBytes;
+    const isTerminal =
+      progress.totalBytes !== null &&
+      progress.transferredBytes >= progress.totalBytes;
     if (
       !progress.userAction &&
       !isTerminal &&
@@ -1155,7 +1066,7 @@ function createTransferProgressReporter() {
     }
     const suffix = progress.userAction ? `; ${progress.userAction}` : '';
     process.stderr.write(
-      `PostPlus media transfer: stage=${progress.stage} bytes=${progress.transferredBytes}/${progress.totalBytes} attempt=${progress.attempt}${suffix}\n`,
+      `PostPlus media transfer: stage=${progress.stage} bytes=${progress.transferredBytes}/${progress.totalBytes ?? 'unknown'} attempt=${progress.attempt}${suffix}\n`,
     );
     lastReportedAt = now;
     lastReportedBytes = progress.transferredBytes;
@@ -1172,7 +1083,7 @@ completed artifact.
 
 Usage:
   postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
-  postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
+  postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--restart] [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
 
 Upload returns a reusable PostPlus media reference. Normal generation commands
 prepare local role files automatically.

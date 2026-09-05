@@ -7816,7 +7816,7 @@ describe('hosted domain commands', () => {
       const output = JSON.parse(await readFile(resultPath, 'utf8'));
       assert.equal(output.output.downloadedTo, mediaPath);
       assert.equal(output.output.sizeBytes, mediaBytes.length);
-      assert.equal(output.output.source, mediaReference);
+      assert.equal(output.output.source, 'postplus-media-reference');
     } finally {
       globalThis.fetch = originalFetch;
       process.stdout.write = originalStdoutWrite;
@@ -7865,6 +7865,94 @@ describe('hosted domain commands', () => {
         },
       );
       assert.deepEqual(await readFile(mediaPath), originalBytes);
+      assert.deepEqual(await readdir(downloadDir), ['clip.mp4']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('media-file download resumes only with a matching range validator', async () => {
+    const downloadDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-cli-download-resume-'),
+    );
+    tempDirs.push(downloadDir);
+    const mediaPath = resolve(downloadDir, 'clip.mp4');
+    const mediaBytes = Buffer.from('0123456789');
+    const originalFetch = globalThis.fetch;
+    let requestCount = 0;
+    const seenRanges: Array<{ ifRange: string | null; range: string | null }> =
+      [];
+    globalThis.fetch = async (_input, init) => {
+      requestCount += 1;
+      const headers = new Headers(init?.headers);
+      seenRanges.push({
+        ifRange: headers.get('if-range'),
+        range: headers.get('range'),
+      });
+      if (requestCount === 1) {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(mediaBytes.subarray(0, 4));
+            setTimeout(
+              () =>
+                controller.error(new Error('simulated interrupted download')),
+              5,
+            );
+          },
+        });
+        return new Response(body, {
+          headers: {
+            'accept-ranges': 'bytes',
+            'content-length': String(mediaBytes.length),
+            etag: '"media-v1"',
+          },
+          status: 200,
+        });
+      }
+      return new Response(mediaBytes.subarray(4), {
+        headers: {
+          'content-range': `bytes 4-9/${mediaBytes.length}`,
+          etag: '"media-v1"',
+        },
+        status: 206,
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () =>
+          runMediaFileCommand([
+            'download',
+            '--url',
+            'https://download.test/resumable-clip',
+            '--hosted-operation-id',
+            'download-resume-operation',
+            '--output-file',
+            mediaPath,
+          ]),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(error.message, /resumeAvailable=true/u);
+          assert.doesNotMatch(error.message, /resumable-clip/u);
+          return true;
+        },
+      );
+
+      const result = await runMediaFileCommand([
+        'download',
+        '--url',
+        'https://download.test/resumable-clip',
+        '--hosted-operation-id',
+        'download-resume-operation',
+        '--output-file',
+        mediaPath,
+      ]);
+      assert.equal(result, 0);
+      assert.deepEqual(await readFile(mediaPath), mediaBytes);
+      assert.deepEqual(seenRanges, [
+        { ifRange: null, range: null },
+        { ifRange: '"media-v1"', range: 'bytes=4-' },
+      ]);
       assert.deepEqual(await readdir(downloadDir), ['clip.mp4']);
     } finally {
       globalThis.fetch = originalFetch;
