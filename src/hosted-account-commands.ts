@@ -139,15 +139,22 @@ export async function runBalanceCommand(args: string[]): Promise<number> {
 // ---------------------------------------------------------------------------
 
 export type HostedRunSummary = {
+  attempt: number;
   id: string;
+  operationId: string;
+  retryable: boolean;
+  stage: string | null;
   capability: string;
   status: string;
   target: string | null;
+  totalBytes: number | null;
+  transferredBytes: number;
   createdAt: string;
   updatedAt: string;
   finalizedCredits: number;
   reservedCredits: number;
   hasError: boolean;
+  userAction: string | null;
 };
 
 export type HostedRunsListReport = {
@@ -163,7 +170,6 @@ export type HostedRunsListReport = {
 // Full single-run product projection. Provider identity, task ids, URLs,
 // request dimensions and raw settlement evidence stay server-side.
 export type HostedRunDetail = HostedRunSummary & {
-  operationId: string;
   outputs: unknown;
   error: unknown;
   completedAt: string | null;
@@ -275,7 +281,6 @@ export async function fetchHostedRunDetail(
   const summary = normalizeRunSummary(record);
   return {
     ...summary,
-    operationId: readString(record.operationId) ?? '',
     outputs: record.outputs ?? null,
     error: record.error ?? null,
     completedAt: readString(record.completedAt),
@@ -290,15 +295,22 @@ function normalizeRunSummary(value: unknown): HostedRunSummary {
       ? (value as Record<string, unknown>)
       : {};
   return {
+    attempt: readNumber(record.attempt) ?? 0,
     id: readString(record.id) ?? '',
+    operationId: readString(record.operationId) ?? '',
+    retryable: record.retryable === true,
+    stage: readString(record.stage),
     capability: readString(record.capability) ?? '',
     status: readString(record.status) ?? '',
     target: readString(record.target),
+    totalBytes: readNumber(record.totalBytes),
+    transferredBytes: readNumber(record.transferredBytes) ?? 0,
     createdAt: readString(record.createdAt) ?? '',
     updatedAt: readString(record.updatedAt) ?? '',
     finalizedCredits: readNumber(record.finalizedCredits) ?? 0,
     reservedCredits: readNumber(record.reservedCredits) ?? 0,
     hasError: record.hasError === true,
+    userAction: readString(record.userAction),
   };
 }
 
@@ -325,7 +337,7 @@ export function formatHostedRunsListReport(
         ? `${run.finalizedCredits} credits`
         : `~${run.reservedCredits} credits reserved`;
     lines.push(
-      `- ${run.id}  [${run.status}]  ${run.capability}${run.target ? ` ${run.target}` : ''}  ${cost}  ${run.updatedAt}`,
+      `- ${run.id}  [${run.status}${run.stage ? `/${run.stage}` : ''}]  ${run.capability}${run.target ? ` ${run.target}` : ''}  ${cost}  ${formatRunBytes(run)}  ${run.updatedAt}`,
     );
   }
   lines.push('');
@@ -339,6 +351,8 @@ export function formatHostedRunDetailReport(report: HostedRunDetail): string {
     `PostPlus run ${report.id}`,
     '',
     `Status: ${report.status}`,
+    report.stage ? `Stage: ${report.stage}` : '',
+    `Progress: ${formatRunBytes(report)} (attempt ${report.attempt})`,
     `Capability: ${report.capability}${report.target ? ` ${report.target}` : ''}`,
     settled
       ? `Finalized: ${report.finalizedCredits} PostPlus credits`
@@ -346,6 +360,7 @@ export function formatHostedRunDetailReport(report: HostedRunDetail): string {
     `Created: ${report.createdAt}`,
     `Updated: ${report.updatedAt}`,
     report.hasError ? 'Error: see error field (postplus runs show --json)' : '',
+    report.userAction ? `Action: ${report.userAction}` : '',
     '',
     report.status === 'completed' || report.status === 'failed'
       ? 'This run is terminal.'
@@ -353,6 +368,10 @@ export function formatHostedRunDetailReport(report: HostedRunDetail): string {
   ]
     .filter((line) => line !== '')
     .join('\n');
+}
+
+function formatRunBytes(run: HostedRunSummary): string {
+  return `${run.transferredBytes}/${run.totalBytes ?? 'unknown'} bytes`;
 }
 
 export async function runRunsCommand(args: string[]): Promise<number> {

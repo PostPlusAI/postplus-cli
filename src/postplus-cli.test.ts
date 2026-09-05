@@ -7506,6 +7506,95 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('polls a durable video-analysis run and reports resumable progress', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    const postedBodies: Array<Record<string, unknown>> = [];
+    let stderr = '';
+    let statusCalls = 0;
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      postedBodies.push(body);
+      const output =
+        body.operation === 'analyze'
+          ? {
+              data: {
+                attempt: 1,
+                id: 'run_video_1',
+                stage: 'staging',
+                status: 'accepted',
+                totalBytes: 21_000_000,
+                transferredBytes: 1_048_576,
+              },
+            }
+          : ++statusCalls === 1
+            ? {
+                data: {
+                  attempt: 1,
+                  id: 'run_video_1',
+                  stage: 'provider_processing',
+                  status: 'processing',
+                  totalBytes: 21_000_000,
+                  transferredBytes: 21_000_000,
+                },
+              }
+            : { candidates: [{ content: { parts: [{ text: 'done' }] } }] };
+      return new Response(JSON.stringify({ ok: true, output }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    process.stderr.write = ((chunk: unknown) => {
+      stderr += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const result = await runHostedDomainCommand('media', [
+        'analyze',
+        'video-analysis',
+        '--video',
+        'https://media.example.test/clip.mp4?token=secret',
+        '--prompt',
+        'Analyze this video.',
+        '--poll-interval-seconds',
+        '0.01',
+      ]);
+      assert.equal(result, 0);
+      assert.equal(postedBodies.length, 3);
+      assert.equal(postedBodies[0]?.operation, 'analyze');
+      assert.deepEqual(postedBodies[1], {
+        capability: 'video-analysis',
+        handle: 'run_video_1',
+        operation: 'status',
+        operationId: postedBodies[1]?.operationId,
+      });
+      assert.match(
+        String(postedBodies[1]?.operationId),
+        /^postplus-cli:media:video-analysis:status:/u,
+      );
+      assert.match(stderr, /stage=staging bytes=1048576\/21000000 attempt=1/u);
+      assert.match(
+        stderr,
+        /stage=provider_processing bytes=21000000\/21000000 attempt=1/u,
+      );
+      assert.doesNotMatch(stderr, /token=secret/u);
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalStderrWrite;
+    }
+  });
+
   it('media analyze forwards --video-seconds as estimatedUsage.videoSeconds', async () => {
     await setLocalSession({
       accountId: 'account_1',
@@ -9488,15 +9577,22 @@ describe('account read-only commands', () => {
           count: 1,
           runs: [
             {
+              attempt: 2,
               id: 'run_1',
+              operationId: 'operation_1',
+              retryable: true,
+              stage: 'provider_processing',
               capability: 'media-generation',
               status: 'completed',
               target: 'video-seedance-2-text',
+              totalBytes: 21_000_000,
+              transferredBytes: 21_000_000,
               createdAt: '2026-07-02T10:00:00Z',
               updatedAt: '2026-07-02T10:05:00Z',
               finalizedCredits: 3.2,
               reservedCredits: 4,
               hasError: false,
+              userAction: 'postplus runs show run_1',
             },
           ],
         }),
@@ -9516,8 +9612,10 @@ describe('account read-only commands', () => {
       assert.equal(report.runs.length, 1);
       const human = formatHostedRunsListReport(report);
       assert.match(human, /run_1/u);
+      assert.match(human, /completed\/provider_processing/u);
+      assert.match(human, /21000000\/21000000 bytes/u);
       assert.match(human, /3\.2 credits/u);
-      assert.doesNotMatch(human, /provider|millicredit/u);
+      assert.doesNotMatch(human, /Moyu|millicredit/u);
     } finally {
       globalThis.fetch = originalFetch;
     }

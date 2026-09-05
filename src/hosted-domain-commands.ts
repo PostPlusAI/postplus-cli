@@ -519,16 +519,19 @@ async function runVideoAnalysisVerb(args: {
       `media ${verb} ${modelKey} resolved without a model contract.`,
     );
   }
-  const flags = parseFlags(args.args, new Set(['json']));
+  const flags = parseFlags(args.args, new Set(['debug', 'json']));
   const allowedKeys = new Set([
     'hosted-operation-id',
+    'debug',
     'json',
     'output',
+    'poll-interval-seconds',
     'quote-confirmation-token',
     'prompt',
     'skill',
     'video-seconds',
     'video',
+    'wait-seconds',
   ]);
   for (const key of [...flags.values.keys(), ...flags.booleans]) {
     if (!allowedKeys.has(key)) {
@@ -587,18 +590,50 @@ async function runVideoAnalysisVerb(args: {
       flags.values.get('quote-confirmation-token') ?? undefined,
   };
 
+  const wait = resolveHostedSubmitWaitFlags(flags);
+  const reportProgress = createHostedRunProgressReporter();
   return dispatchHostedCommand(
     {
-      request: () =>
-        postHostedJson({
+      request: async () => {
+        const submitted = await postHostedJson({
           body,
           pathName: '/api/postplus-cli/hosted/capability',
           skillName: flags.values.get('skill') ?? resolved.skill,
           context,
-        }),
+          debug: flags.booleans.has('debug'),
+        });
+        const run = readMediaPollRun(submitted);
+        reportProgress(submitted);
+        if (!run.status || isTerminalRunStatus(run.status)) return submitted;
+        if (!run.id) {
+          throw new Error(
+            `Video analysis returned non-terminal status ${run.status} without a durable run handle.`,
+          );
+        }
+        return pollHostedRunUntilSettled({
+          onProgress: reportProgress,
+          pollIntervalMs: wait.pollIntervalMs,
+          pollOnce: () =>
+            postHostedJson({
+              body: {
+                capability: 'video-analysis',
+                handle: run.id,
+                operation: 'status',
+                operationId: `postplus-cli:media:video-analysis:status:${randomUUID()}`,
+              },
+              context,
+              debug: flags.booleans.has('debug'),
+              pathName: '/api/postplus-cli/hosted/capability',
+              skillName: null,
+            }),
+          readStatus: (payload) => readMediaPollRun(payload).status,
+          waitBudgetMs: wait.waitBudgetMs,
+        });
+      },
       errorInputLabel: `media-${verb}-${modelKey}`,
       json: flags.booleans.has('json'),
       outputPath,
+      asyncResume: (payload) => extractRunShowResume(payload),
     },
     context,
   );
@@ -1248,6 +1283,7 @@ async function runMediaPoll(
 // the wait budget is spent — then returns the latest payload as-is. Every check
 // is an independent short HTTP read; nothing holds a connection open.
 async function pollHostedRunUntilSettled(input: {
+  onProgress?: (payload: unknown) => void;
   pollIntervalMs: number;
   pollOnce: () => Promise<unknown>;
   readStatus: (payload: unknown) => string | null;
@@ -1256,6 +1292,7 @@ async function pollHostedRunUntilSettled(input: {
   const startedAt = Date.now();
   while (true) {
     const payload = await input.pollOnce();
+    input.onProgress?.(payload);
     const status = input.readStatus(payload);
     if (!status || isTerminalRunStatus(status)) {
       return payload;
@@ -2855,6 +2892,57 @@ function readMediaPollRun(payload: unknown): {
         ? record.status
         : null,
   };
+}
+
+function createHostedRunProgressReporter() {
+  let lastLine = '';
+  return (payload: unknown) => {
+    const data = readHostedRunData(payload);
+    if (!data) return;
+    const stage = normalizeString(data.stage);
+    const status = normalizeString(data.status);
+    const transferredBytes = readFiniteNumber(data.transferredBytes);
+    const totalBytes = readFiniteNumber(data.totalBytes);
+    const attempt = readFiniteNumber(data.attempt);
+    if (!stage && !status) return;
+    const line = [
+      `stage=${stage ?? status}`,
+      transferredBytes === null
+        ? null
+        : `bytes=${transferredBytes}/${totalBytes ?? 'unknown'}`,
+      attempt === null ? null : `attempt=${attempt}`,
+    ]
+      .filter((value): value is string => value !== null)
+      .join(' ');
+    if (line === lastLine) return;
+    process.stderr.write(`PostPlus hosted run: ${line}\n`);
+    lastLine = line;
+  };
+}
+
+function readHostedRunData(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+  const output = (payload as Record<string, unknown>).output;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    return null;
+  }
+  const data = (output as Record<string, unknown>).data;
+  return data && typeof data === 'object' && !Array.isArray(data)
+    ? (data as Record<string, unknown>)
+    : null;
+}
+
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function extractRunShowResume(payload: unknown): string | null {
+  const { id, status } = readMediaPollRun(payload);
+  return id && (!status || !isTerminalRunStatus(status))
+    ? `postplus runs show ${shellQuoteArg(id)}`
+    : null;
 }
 
 function extractMediaPollResume(
