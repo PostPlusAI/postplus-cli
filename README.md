@@ -116,17 +116,21 @@ runtime cache and logs stay under `PostPlus Studio/.postplus/`.
 
 ## The Vision
 
-PostPlus is built for a world where one marketer, founder, operator, or agency strategist can work with an AI agent as if they had a larger marketing team around them.
+<!-- BEGIN POSTPLUS PRODUCT BRIEF -->
+Marketing should not begin with a maze of tools. It should begin with an ambition.
 
-The goal is not to replace marketing judgment. The goal is to make the repeatable parts of marketing more structured:
+PostPlus is building a new way for founders, marketers, and teams to work with AI—not as a chatbot that simply offers ideas, but as a capable marketing partner that can move real work forward.
 
-- finding public signals
-- comparing channels, creators, products, and content angles
-- turning research into briefs, scripts, captions, subtitles, images, videos, reports, and outreach lists
-- publishing or handing work off through Feishu, Google Workspace, social tools, email, or local files
-- improving the result through experiments, feedback, and performance analysis
+Today, PostPlus brings together 42 specialized marketing skills spanning research, strategy, creative production, and publishing. Its research coverage includes 8 major channels and signal sources—TikTok, Instagram, YouTube, Facebook, X, Reddit, Pinterest, and Google Trends—alongside workflows for competitor analysis, audience insight, short-form video, images, voice, transcription, campaign briefs, and reports.
 
-PostPlus gives the agent durable marketing workflows so it does not improvise from a blank page every time.
+Simply describe what you want to achieve. PostPlus helps your AI agent choose the right path, gather reliable signals, turn evidence into useful work, and preserve the results—so every project can build on what came before.
+
+Next, we’re expanding PostPlus to support multiple brands and accounts in one place, connect and understand advertising accounts, recommend improvements, and safely carry out changes after your approval. Shared workspaces, roles, reviews, and approvals will also make it easier for teams to collaborate without losing context or control.
+
+Human judgment remains at the center. You set the direction, approve important decisions, and make the final call. PostPlus helps with everything required to get there.
+
+Our ambition is simple: give individuals and lean teams the operating power of a much larger marketing organization—without adding more tools, handoffs, or noise.
+<!-- END POSTPLUS PRODUCT BRIEF -->
 
 ## Who This Is For
 
