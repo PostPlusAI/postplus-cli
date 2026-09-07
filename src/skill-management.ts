@@ -234,7 +234,7 @@ async function reconcilePostPlusSkills(
     catalog,
     dependencies,
     outcome:
-      baseline.releaseId === null
+      baseline.releaseId === null && lockedSkillNames.length === 0
         ? 'ready'
         : baseline.releaseId === catalog.releaseId
           ? 'repaired'
