@@ -392,12 +392,23 @@ async function readRepeatableHandoffResponse(input: {
             'content-type': 'application/json',
           },
           body: JSON.stringify(input.body),
+          redirect: 'manual',
           signal: AbortSignal.timeout(15_000),
         },
       );
     } catch {
       if (attempt === 0) continue;
       break;
+    }
+    // Handoff bodies contain secrets. Reject redirects outside the transport
+    // catch so neither forwarding nor the bounded retry can replay them.
+    if (response.status >= 300 && response.status < 400) {
+      throw new Error(
+        `PostPlus CLI sign-in ${input.action} refused HTTP redirect (${response.status}).` +
+          (input.action === 'acknowledge'
+            ? ' Your credential was saved. Run `postplus auth validate` to check cloud access; no new login was started.'
+            : ' No new login was started.'),
+      );
     }
     let payload: unknown;
     try {
