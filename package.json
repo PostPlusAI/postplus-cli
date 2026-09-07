@@ -36,6 +36,7 @@
     "build/network-diagnostics.js",
     "build/quote-confirmation.js",
     "build/skill-catalog.js",
+    "build/skill-installation.js",
     "build/skill-management.js",
     "build/status.js",
     "build/studio.js",
@@ -69,7 +70,7 @@
     "release:package": "node ./scripts/package-release.mjs",
     "start": "tsx src/index.ts",
     "test:acceptance": "node ./scripts/acceptance.mjs",
-    "test": "tsx --test src/postplus-cli.test.ts src/command-runner.test.ts src/local-config.test.ts src/update-installation.test.ts src/update-lock.test.ts src/skills-mutation-lock.test.ts src/recovery-output.test.ts src/auth-handoff-redirect.test.ts",
+    "test": "tsx --test src/postplus-cli.test.ts src/command-runner.test.ts src/local-config.test.ts src/update-installation.test.ts src/update-lock.test.ts src/skills-mutation-lock.test.ts src/recovery-output.test.ts src/auth-handoff-redirect.test.ts src/skills-scope.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

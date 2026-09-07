@@ -52,6 +52,7 @@ import {
   runPostPlusSkillVerify,
 } from './skill-management.js';
 import { formatStatusReport, generateStatusReport } from './status.js';
+import { resolvePostPlusSkillsScope } from './skill-installation.js';
 import { runStudioCommand } from './studio.js';
 import {
   clearUpdateCheckCache,
@@ -202,10 +203,13 @@ async function runVersion(): Promise<number> {
 async function runSkillUpdateCommand(rest: string[]): Promise<number> {
   const options = parseSkillMutationOptions(rest, 'update');
   const updatePlan = resolvePostPlusUpdatePlan();
+  const scope = updatePlan.skills && !rest.includes('--current-directory')
+    ? await resolvePostPlusSkillsScope()
+    : options.scope;
 
   if (updatePlan.cli) {
     const cliSelfUpdate = await runCliSelfUpdateIfOutdated({
-      continuationArgs: rest,
+      continuationArgs: scope === 'current-directory' ? ['--current-directory'] : rest,
       quiet: updatePlan.implicitRecovery,
     });
 
@@ -222,7 +226,7 @@ async function runSkillUpdateCommand(rest: string[]): Promise<number> {
 
   return runPostPlusSkillUpdate(undefined, {
     messageMode: updatePlan.implicitRecovery ? 'implicit' : 'explicit',
-    scope: options.scope,
+    scope,
   });
 }
 
@@ -263,7 +267,9 @@ async function runSkillsCommand(rest: string[]): Promise<number> {
       if (options.includes('--json')) {
         writeJson(report);
       } else {
-        process.stdout.write(`${formatSkillBaselineVerifyReport(report)}\n`);
+        process.stdout.write(
+          `${formatSkillBaselineVerifyReport(report)}\n`,
+        );
       }
 
       return report.ok ? 0 : 1;
@@ -275,13 +281,13 @@ async function runSkillsCommand(rest: string[]): Promise<number> {
       process.stdout.write(`PostPlus CLI — skills commands
 
 Usage:
-  postplus skills verify [--json]  Verify installed public skills and record the managed baseline
+  postplus skills verify [--json]  Check installed public skills against their verified release
 
 Options:
   --json    Output results as JSON
 
 Install scope:
-  postplus update                       Update global PostPlus skills
+  postplus update                       Update current project Skills when present, otherwise global
   postplus update --current-directory   Update PostPlus skills in the current directory
   postplus uninstall                    Remove global PostPlus skills
   postplus uninstall --current-directory  Remove PostPlus skills from the current directory
