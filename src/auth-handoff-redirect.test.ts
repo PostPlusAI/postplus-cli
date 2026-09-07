@@ -11,6 +11,8 @@ import {
 
 describe('auth handoff redirect boundary', () => {
   const previousConfigDir = process.env.POSTPLUS_CONFIG_DIR;
+  const previousHome = process.env.HOME;
+  const previousDirectory = process.cwd();
   let configDir: string;
 
   before(async () => {
@@ -18,11 +20,16 @@ describe('auth handoff redirect boundary', () => {
     await mkdir(fixtureRoot, { recursive: true });
     configDir = await mkdtemp(resolve(fixtureRoot, 'auth-handoff-redirect-'));
     process.env.POSTPLUS_CONFIG_DIR = configDir;
+    process.env.HOME = configDir;
+    process.chdir(configDir);
   });
 
   after(async () => {
     if (previousConfigDir === undefined) delete process.env.POSTPLUS_CONFIG_DIR;
     else process.env.POSTPLUS_CONFIG_DIR = previousConfigDir;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    process.chdir(previousDirectory);
     await rm(configDir, { recursive: true, force: true });
   });
 
