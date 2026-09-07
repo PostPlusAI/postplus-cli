@@ -108,12 +108,13 @@ export async function runInteractiveCommand(
   args: string[],
   options: {
     env?: NodeJS.ProcessEnv;
+    stdout?: 'inherit' | 'stderr';
   } = {},
 ): Promise<number> {
   return await new Promise((resolve, reject) => {
     const child = commandSpawner(command)(command, args, {
       env: options.env,
-      stdio: 'inherit',
+      stdio: ['inherit', options.stdout === 'stderr' ? 2 : 'inherit', 'inherit'],
     });
 
     child.on('error', reject);

@@ -132,7 +132,7 @@ export async function runPostPlusClientUpgradeRecovery(
   const runInteractiveCommand =
     dependencies.runInteractiveCommand ?? runDefaultInteractiveCommand;
   const writeOutput =
-    dependencies.writeOutput ?? ((message) => process.stdout.write(message));
+    dependencies.writeOutput ?? ((message) => process.stderr.write(message));
   const writeError =
     dependencies.writeError ?? ((message) => process.stderr.write(message));
 
@@ -161,6 +161,7 @@ export async function runPostPlusClientUpgradeRecovery(
 
   const updateExitCode = await runInteractiveCommand('postplus', ['update'], {
     env: recoveryEnvironment,
+    stdout: 'stderr',
   });
   if (updateExitCode !== 0) {
     writeError(
