@@ -154,6 +154,18 @@ export function formatPostPlusCompatibilityError(payload: unknown) {
   return null;
 }
 
+// Execution paths must preserve the typed preflight rejection so the CLI can
+// recover once. Diagnostics may still use the string formatter above.
+export function readPostPlusCompatibilityError(payload: unknown): Error | null {
+  if (isPostPlusClientUpgradePayload(payload)) {
+    return new PostPlusClientUpgradeRequiredError(payload);
+  }
+  if (isPostPlusCloudReleaseInProgressPayload(payload)) {
+    return new Error(formatPostPlusCloudReleaseInProgressError(payload));
+  }
+  return null;
+}
+
 export function isPostPlusClientUpgradePayload(
   payload: unknown,
 ): payload is PostPlusClientUpgradePayload & {

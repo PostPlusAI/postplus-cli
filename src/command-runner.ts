@@ -1,17 +1,48 @@
-import { spawn } from 'node:child_process';
+import crossSpawn from 'cross-spawn';
+import {
+  type ChildProcess,
+  type SpawnOptions,
+  spawn,
+} from 'node:child_process';
 import { mkdtemp, open, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+// npm/npx/postplus may resolve to a .cmd shim, including one supplied by a Node version
+// manager. Preserve PATH selection and let cross-spawn escape the actual shim;
+// do not guess a global npm JS entrypoint or enable a shell for native commands.
+function commandSpawner(
+  command: string,
+): (command: string, args: string[], options: SpawnOptions) => ChildProcess {
+  return process.platform === 'win32' &&
+    /(?:^|[\\/])(?:npm|npx|postplus)(?:\.cmd|\.exe|\.com)?$/i.test(command)
+    ? crossSpawn
+    : spawn;
+}
 
 export type CommandResult = {
   stdout: string;
   stderr: string;
 };
 
+export class CommandInterruptedError extends Error {
+  readonly code = 'postplus_command_interrupted';
+  constructor(
+    readonly command: string,
+    readonly signal: NodeJS.Signals,
+  ) {
+    super(
+      `Command ${command} was interrupted by ${signal}; child processes may still be running.`,
+    );
+    this.name = 'CommandInterruptedError';
+  }
+}
+
 export async function runCommand(
   command: string,
   args: string[],
   options: {
+    env?: NodeJS.ProcessEnv;
     timeoutMs?: number;
   } = {},
 ): Promise<CommandResult> {
@@ -21,7 +52,8 @@ export async function runCommand(
 
   try {
     const result = await new Promise<CommandResult>((resolve, reject) => {
-      const child = spawn(command, args, {
+      const child = commandSpawner(command)(command, args, {
+        env: options.env,
         stdio: ['ignore', stdoutFile.fd, 'pipe'],
       });
       const stderr: Buffer[] = [];
@@ -37,7 +69,7 @@ export async function runCommand(
         clearTimeout(timer);
         reject(error);
       });
-      child.on('exit', (code) => {
+      child.on('close', (code) => {
         clearTimeout(timer);
         const stderrText = Buffer.concat(stderr).toString('utf8');
 
@@ -79,13 +111,17 @@ export async function runInteractiveCommand(
   } = {},
 ): Promise<number> {
   return await new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = commandSpawner(command)(command, args, {
       env: options.env,
       stdio: 'inherit',
     });
 
     child.on('error', reject);
-    child.on('exit', (code) => {
+    child.on('exit', (code, signal) => {
+      if (signal) {
+        reject(new CommandInterruptedError(command, signal));
+        return;
+      }
       resolve(code ?? 1);
     });
   });

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 
-import { formatAccountBindingLines } from './account-binding-display.js';
 import {
   formatAuthRefreshReport,
   refreshRemoteAuth,
@@ -65,7 +64,7 @@ function printAuthHelp(): void {
   process.stdout.write(`PostPlus CLI — auth commands
 
 Usage:
-  postplus auth login          Sign in with your PostPlus account in a browser
+  postplus auth login [--no-browser]  Sign in with your PostPlus account in a browser
   postplus auth status         Show current auth state (tokens, account, expiry)
   postplus auth validate       Validate the current session against PostPlus Cloud
   postplus auth refresh        Refresh the current session tokens
@@ -73,7 +72,8 @@ Usage:
   postplus auth logout         Clear local auth state
 
 Options:
-  --json    Output results as JSON
+  --no-browser  Print the login URL without opening a browser (login only)
+  --json        Output results as JSON (status, validate, refresh, revoke, logout)
 
 Run \`postplus help\` for all commands.
 `);
@@ -83,7 +83,7 @@ function printHelp(): void {
   process.stdout.write(`PostPlus CLI
 
 Usage:
-  postplus auth login
+  postplus auth login [--no-browser]
   postplus auth refresh [--json]
   postplus auth revoke [--json]
   postplus auth status [--json]
@@ -525,18 +525,11 @@ async function runAuthRevoke(json: boolean): Promise<number> {
   return 0;
 }
 
-async function runAuthLogin(): Promise<number> {
-  const report = await loginWithCloudHandoff();
-  process.stdout.write(
-    [
-      '',
-      'PostPlus CLI login complete.',
-      ...formatAccountBindingLines(report),
-      `PostPlus Cloud: ${report.apiBaseUrl}`,
-      `User: ${report.userEmail ?? 'unknown'}`,
-      '',
-    ].join('\n'),
-  );
+async function runAuthLogin(browser: boolean): Promise<number> {
+  const report = await loginWithCloudHandoff({ browser });
+  if (report.ok) {
+    process.stdout.write('Successfully authenticated.\n');
+  }
   return report.ok ? 0 : 1;
 }
 
@@ -645,22 +638,26 @@ async function main(): Promise<void> {
     case 'auth': {
       const [subcommand, ...authRest] = rest;
       switch (subcommand) {
-        case 'login':
+        case 'login': {
           if (authRest.some(isHelpArg)) {
             printAuthHelp();
             process.exitCode = 0;
             return;
           }
-          if (authRest.length > 0) {
+          const unknownOption = authRest.find((arg) => arg !== '--no-browser');
+          if (unknownOption !== undefined) {
             process.stderr.write(
-              `Unknown auth login option: ${authRest[0]}\n\n`,
+              `Unknown auth login option: ${unknownOption}\n\n`,
             );
             printAuthHelp();
             process.exitCode = 1;
             return;
           }
-          process.exitCode = await runAuthLogin();
+          process.exitCode = await runAuthLogin(
+            !authRest.includes('--no-browser'),
+          );
           return;
+        }
         case 'refresh':
           process.exitCode = await runAuthRefresh(authRest.includes('--json'));
           return;

@@ -1,6 +1,6 @@
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
 import {
-  formatPostPlusCompatibilityError,
+  readPostPlusCompatibilityError,
   writeCurrentCliVersionToLocalConfig,
 } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
@@ -134,11 +134,11 @@ export async function refreshRemoteAuthSession(input?: {
   const payload = (await response.json()) as RemoteAuthRefreshPayload;
 
   if (!response.ok) {
-    const compatibilityError = formatPostPlusCompatibilityError(payload);
+    const compatibilityError = readPostPlusCompatibilityError(payload);
 
     if (compatibilityError) {
       await clearUpdateCheckCache();
-      throw new Error(compatibilityError);
+      throw compatibilityError;
     }
 
     throw new Error(

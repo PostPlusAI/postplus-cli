@@ -36,6 +36,29 @@ postplus install
 postplus auth login
 ```
 
+`postplus auth login` opens your system browser and waits for you to connect
+PostPlus. If you are already signed in there, you can approve the connection
+directly. The CLI always prints the real login URL, so an agent can share it or
+you can open it yourself if the browser does not launch.
+
+```text
+Opening browser for authentication...
+If browser does not open, visit:
+<your PostPlus login URL>
+Waiting for approval...
+Successfully authenticated.
+```
+
+For a remote terminal or CI, use `postplus auth login --no-browser` to print the
+URL without trying to open a browser. Browser launch failures show a clear
+message and keep waiting for approval through that URL. The wait is bounded by
+the login request's expiry; cancellation, expiry, or an invalid approval payload
+stops without starting another login. The CLI atomically saves approved credentials,
+confirms delivery to activate the session, then validates cloud access before
+reporting success. If delivery cannot be confirmed, it keeps the saved credentials
+and reports the uncertainty instead of claiming success. Use `postplus auth validate`
+to check cloud access; `postplus auth status` only inspects local credentials.
+
 If you explicitly do not want global skills, run the install from the target
 project directory:
 

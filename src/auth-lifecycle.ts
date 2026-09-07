@@ -2,7 +2,7 @@ import { formatAccountBindingLines } from './account-binding-display.js';
 import { refreshRemoteAuthSession } from './auth-session.js';
 import { clearAuthState, generateAuthStatusReport } from './auth.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
-import { formatPostPlusCompatibilityError } from './client-compatibility.js';
+import { readPostPlusCompatibilityError } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { resolveCliSessionTokenState } from './local-state.js';
 import { readSubscriptionStatusField } from './subscription-status.js';
@@ -72,10 +72,10 @@ export async function revokeRemoteAuth() {
       };
 
   if (!response.ok) {
-    const compatibilityError = formatPostPlusCompatibilityError(payload);
+    const compatibilityError = readPostPlusCompatibilityError(payload);
 
     if (compatibilityError) {
-      throw new Error(compatibilityError);
+      throw compatibilityError;
     }
 
     throw new Error(

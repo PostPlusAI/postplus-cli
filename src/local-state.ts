@@ -1,15 +1,23 @@
+import { randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import {
   access,
   chmod,
   mkdir,
+  open,
   readFile,
+  readdir,
+  rename,
   rm,
+  rmdir,
   stat,
+  unlink,
   writeFile,
 } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+
+import { CommandInterruptedError } from './command-runner.js';
 
 export type PostPlusLocalConfig = {
   accessToken?: string;
@@ -114,78 +122,179 @@ const UPDATE_LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 export async function withPostPlusUpdateLock<T>(
   operation: () => Promise<T>,
   options: {
+    installationRoot?: string;
+    lockName?: '.postplus-cli-update.lock' | '.postplus-skills-update.lock';
     pollMs?: number;
     timeoutMs?: number;
   } = {},
 ): Promise<T> {
-  const configDir = getPostPlusConfigDir();
-  const lockPath = join(configDir, UPDATE_LOCK_DIRECTORY);
-  const ownerPath = join(lockPath, 'owner.json');
+  const configDir = options.installationRoot ?? getPostPlusConfigDir();
+  const lockPath = join(
+    configDir,
+    options.installationRoot
+      ? (options.lockName ?? '.postplus-cli-update.lock')
+      : UPDATE_LOCK_DIRECTORY,
+  );
+  const ownerFile = `owner-${randomUUID()}.json`;
+  const candidatePath = join(configDir, `.update-${ownerFile}`);
   const pollMs = options.pollMs ?? UPDATE_LOCK_POLL_MS;
   const timeoutMs = options.timeoutMs ?? UPDATE_LOCK_TIMEOUT_MS;
   const startedAt = Date.now();
 
   await mkdir(configDir, { recursive: true });
+  await mkdir(candidatePath);
+  try {
+    // Publish a populated directory atomically: a live lock is never empty.
+    // The unique filename is also the deletion token. A stale observer can
+    // unlink only that generation, never a replacement owner's file.
+    await writeFile(
+      join(candidatePath, ownerFile),
+      `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), operationStarted: false })}\n`,
+      { encoding: 'utf8', mode: CONFIG_FILE_MODE },
+    );
 
-  while (true) {
-    try {
-      await mkdir(lockPath);
+    while (true) {
       try {
+        await rename(candidatePath, lockPath);
+        break;
+      } catch (error) {
+        const nodeError = error as NodeJS.ErrnoException;
+        const destinationExists =
+          nodeError.code === 'EEXIST' ||
+          nodeError.code === 'ENOTEMPTY' ||
+          (platform() === 'win32' &&
+            (nodeError.code === 'EACCES' || nodeError.code === 'EPERM') &&
+            (await stat(lockPath).then(
+              (value) => value.isDirectory(),
+              () => false,
+            )));
+        if (!destinationExists) {
+          throw error;
+        }
+
+        const owner = await readPostPlusUpdateLockOwner(lockPath);
+        if (owner && !owner.alive) {
+          if (
+            options.installationRoot &&
+            owner.file &&
+            owner.operationStarted !== false
+          ) {
+            throw new Error(
+              `PostPlus cannot confirm whether an interrupted installer is still running (code=postplus_update_installation_uncertain). No update was started and the lock was retained at ${lockPath}. Confirm the installer has stopped before removing this lock.`,
+            );
+          }
+          await removePostPlusUpdateLockOwner(lockPath, owner.file);
+        }
+
+        if (Date.now() - startedAt >= timeoutMs) {
+          throw new Error(
+            'Another PostPlus update is still running. Wait for it to finish, then retry.',
+          );
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+      }
+    }
+
+    let releaseLock = true;
+    try {
+      if (options.installationRoot) {
+        // Persist before spawning an installer. A dead parent is not proof that
+        // npm (or a Windows shim's descendant) stopped; do not auto-reclaim it.
         await writeFile(
-          ownerPath,
-          `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`,
+          join(lockPath, ownerFile),
+          `${JSON.stringify({ pid: process.pid, operationStarted: true })}\n`,
           { encoding: 'utf8', mode: CONFIG_FILE_MODE },
         );
-      } catch (error) {
-        await rm(lockPath, { force: true, recursive: true });
-        throw error;
       }
-      break;
+      return await operation();
     } catch (error) {
-      const nodeError = error as NodeJS.ErrnoException;
-      if (nodeError.code !== 'EEXIST') {
-        throw error;
-      }
-
-      if (!(await isPostPlusUpdateLockOwnerAlive(lockPath, ownerPath))) {
-        await rm(lockPath, { force: true, recursive: true });
-        continue;
-      }
-
-      if (Date.now() - startedAt >= timeoutMs) {
+      if (
+        options.installationRoot &&
+        error instanceof CommandInterruptedError
+      ) {
+        releaseLock = false;
         throw new Error(
-          'Another PostPlus update is still running. Wait for it to finish, then retry.',
+          `PostPlus installer or continuation was interrupted (code=postplus_update_installation_uncertain). The lock was retained at ${lockPath}; confirm its child processes have stopped before removing it.`,
+          { cause: error },
         );
       }
+      throw error;
+    } finally {
+      if (releaseLock) await removePostPlusUpdateLockOwner(lockPath, ownerFile);
+    }
+  } finally {
+    // Only our unpublished, uniquely named staging directory may be removed
+    // recursively. Never recursively delete the shared update.lock path.
+    await rm(candidatePath, { force: true, recursive: true });
+  }
+}
 
-      await new Promise((resolve) => setTimeout(resolve, pollMs));
+async function removePostPlusUpdateLockOwner(
+  lockPath: string,
+  ownerFile: string | null,
+): Promise<void> {
+  if (ownerFile) {
+    try {
+      await unlink(join(lockPath, ownerFile));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
     }
   }
 
   try {
-    return await operation();
-  } finally {
-    await rm(lockPath, { force: true, recursive: true });
+    await rmdir(lockPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT' && code !== 'ENOTEMPTY' && code !== 'EEXIST') {
+      throw error;
+    }
   }
 }
 
-async function isPostPlusUpdateLockOwnerAlive(
-  lockPath: string,
-  ownerPath: string,
-): Promise<boolean> {
+async function readPostPlusUpdateLockOwner(lockPath: string): Promise<{
+  alive: boolean;
+  file: string | null;
+  operationStarted?: boolean;
+} | null> {
+  let file: string | null = null;
   try {
-    const owner = JSON.parse(await readFile(ownerPath, 'utf8')) as {
+    const files = await readdir(lockPath);
+    if (
+      files.length > 1 ||
+      (files[0] && !/^owner(?:-[a-f0-9-]+)?\.json$/u.test(files[0]))
+    ) {
+      throw new Error(
+        'PostPlus update lock has unexpected contents; no files were removed.',
+      );
+    }
+    file = files[0] ?? null;
+    if (!file) {
+      return { alive: false, file: null };
+    }
+    const owner = JSON.parse(await readFile(join(lockPath, file), 'utf8')) as {
       pid?: unknown;
+      operationStarted?: unknown;
     };
+    const operationStarted =
+      typeof owner.operationStarted === 'boolean'
+        ? owner.operationStarted
+        : undefined;
     if (!Number.isInteger(owner.pid) || (owner.pid as number) <= 0) {
-      return false;
+      return { alive: false, file, operationStarted };
     }
 
     try {
       process.kill(owner.pid as number, 0);
-      return true;
+      return { alive: true, file, operationStarted };
     } catch (error) {
-      return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+      return {
+        alive: (error as NodeJS.ErrnoException).code !== 'ESRCH',
+        file,
+        operationStarted,
+      };
     }
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
@@ -195,10 +304,10 @@ async function isPostPlusUpdateLockOwnerAlive(
 
     try {
       const lock = await stat(lockPath);
-      return Date.now() - lock.mtimeMs < 5_000;
+      return { alive: Date.now() - lock.mtimeMs < 5_000, file };
     } catch (statError) {
       if ((statError as NodeJS.ErrnoException).code === 'ENOENT') {
-        return false;
+        return null;
       }
       throw statError;
     }
@@ -217,19 +326,106 @@ export async function readLocalConfig(): Promise<PostPlusLocalConfig | null> {
     if (nodeError.code === 'ENOENT') {
       return null;
     }
-    throw error;
+    throw new PostPlusLocalConfigError('read', error);
   }
 }
 
 const CONFIG_FILE_MODE = 0o600;
 
+type ConfigFailureStage =
+  | 'read'
+  | 'write'
+  | 'permissions'
+  | 'commit'
+  | 'cleanup';
+
+export class PostPlusLocalConfigError extends Error {
+  readonly code: string;
+  readonly systemCode: string;
+  constructor(
+    readonly stage: ConfigFailureStage,
+    error: unknown,
+  ) {
+    const systemCode =
+      error instanceof SyntaxError
+        ? 'INVALID_JSON'
+        : ((error as NodeJS.ErrnoException)?.code ?? 'UNKNOWN');
+    const code = `postplus_cli_config_${stage}_failed`;
+    // JSON parser excerpts and arbitrary filesystem messages may contain secrets.
+    super(
+      `PostPlus local configuration ${stage} failed (${systemCode}; code=${code}). Check access to ${getPostPlusConfigPath()}. Do not repeat login until local storage is ready.`,
+    );
+    this.name = 'PostPlusLocalConfigError';
+    this.code = code;
+    this.systemCode = systemCode;
+  }
+}
+
+// Windows access is governed by ACLs; POSIX mode bits are not an ACL check.
+export function usesPosixConfigPermissions(osPlatform = platform()): boolean {
+  return osPlatform !== 'win32';
+}
+
+async function stageLocalConfig(
+  contents: string,
+  commit: boolean,
+): Promise<void> {
+  const configPath = getPostPlusConfigPath();
+  const temporaryPath = join(
+    dirname(configPath),
+    `.config-${randomUUID()}.tmp`,
+  );
+  let stage: ConfigFailureStage = 'write';
+  let created = false;
+  try {
+    await mkdir(dirname(configPath), { recursive: true });
+    // Atomic replacement must not silently override a read-only target.
+    try {
+      await access(configPath, fsConstants.W_OK);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    const file = await open(temporaryPath, 'wx', CONFIG_FILE_MODE);
+    created = true;
+    try {
+      await file.writeFile(contents, 'utf8');
+      await file.sync();
+      if (usesPosixConfigPermissions()) {
+        stage = 'permissions';
+        await file.chmod(CONFIG_FILE_MODE);
+      }
+    } finally {
+      await file.close();
+    }
+    if (commit) {
+      stage = 'commit';
+      await rename(temporaryPath, configPath);
+      created = false;
+    }
+  } catch (error) {
+    throw new PostPlusLocalConfigError(stage, error);
+  } finally {
+    if (created) {
+      try {
+        await unlink(temporaryPath);
+      } catch (error) {
+        throw new PostPlusLocalConfigError('cleanup', error);
+      }
+    }
+  }
+}
+
+export async function assertLocalConfigWritable(): Promise<void> {
+  // A probe proves prerequisites, not that a later save cannot fail.
+  await readLocalConfig();
+  await assertConfigFilePermissions();
+  await stageLocalConfig('{}\n', false);
+}
+
 export async function writeLocalConfig(
   config: PostPlusLocalConfig,
 ): Promise<void> {
-  const configPath = getPostPlusConfigPath();
-  await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(
-    configPath,
+  await stageLocalConfig(
     `${JSON.stringify(
       {
         ...config,
@@ -238,13 +434,12 @@ export async function writeLocalConfig(
       null,
       2,
     )}\n`,
-    { encoding: 'utf8', mode: CONFIG_FILE_MODE },
+    true,
   );
-  // Repair permissions if the file pre-existed with broader access.
-  await chmod(configPath, CONFIG_FILE_MODE);
 }
 
 export async function assertConfigFilePermissions(): Promise<void> {
+  if (!usesPosixConfigPermissions()) return;
   const configPath = getPostPlusConfigPath();
 
   try {
@@ -260,7 +455,7 @@ export async function assertConfigFilePermissions(): Promise<void> {
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError.code !== 'ENOENT') {
-      throw error;
+      throw new PostPlusLocalConfigError('permissions', error);
     }
   }
 }
@@ -370,6 +565,7 @@ export async function setLocalSession(input: {
   accountType?: 'personal' | 'team' | null;
   apiBaseUrl: string;
   cliSessionToken: string;
+  cliVersion?: string;
   sessionExpiresAt: number | null;
   userEmail: string | null;
   userId: string;
@@ -389,6 +585,7 @@ export async function setLocalSession(input: {
   return updateLocalConfig((current) => {
     const next: PostPlusLocalConfig = {
       ...omitLegacyAuthFields(current),
+      ...(input.cliVersion ? { cliVersion: input.cliVersion } : {}),
       accountId: input.accountId,
       accountName: input.accountName ?? null,
       accountSlug: input.accountSlug ?? null,

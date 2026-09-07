@@ -1,7 +1,7 @@
 import { formatAccountBindingLines } from './account-binding-display.js';
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
-import { formatPostPlusCompatibilityError } from './client-compatibility.js';
+import { readPostPlusCompatibilityError } from './client-compatibility.js';
 import { readSubscriptionStatusField } from './subscription-status.js';
 
 export type AuthValidateReport = {
@@ -28,10 +28,10 @@ export async function validateRemoteAuth(): Promise<AuthValidateReport> {
   const payload = (await response.json()) as Record<string, unknown>;
 
   if (!response.ok) {
-    const compatibilityError = formatPostPlusCompatibilityError(payload);
+    const compatibilityError = readPostPlusCompatibilityError(payload);
 
     if (compatibilityError) {
-      throw new Error(compatibilityError);
+      throw compatibilityError;
     }
 
     throw new Error(

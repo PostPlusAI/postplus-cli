@@ -1,5 +1,13 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import {
+  mkdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 
 import {
   POSTPLUS_CLI_UPDATE_COMMAND,
@@ -8,6 +16,7 @@ import {
   readCurrentCliVersion,
 } from './client-compatibility.js';
 import {
+  runCommand as runDefaultCommand,
   runInteractiveCommand as runDefaultInteractiveCommand,
 } from './command-runner.js';
 import {
@@ -23,10 +32,6 @@ import {
 const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_CHECK_CACHE_FILE = 'update-check.json';
 const NPM_PACKAGE_NAME = '@postplus/cli';
-const NPM_LATEST_URL = `https://registry.npmjs.org/${encodeURIComponent(
-  NPM_PACKAGE_NAME,
-)}/latest`;
-const POSTPLUS_CLI_UPDATE_ARGS = ['install', '-g', '@postplus/cli@latest'];
 const POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION =
   'POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION';
 export const POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV =
@@ -64,6 +69,7 @@ type UpdateCheckCache = {
   cli: {
     currentVersion: string;
     latestVersion: string;
+    registryIdentity: string;
   };
   skills: {
     latestReleaseId: string;
@@ -72,6 +78,8 @@ type UpdateCheckCache = {
 
 type UpdateCheckDependencies = {
   fetchFn: typeof fetch;
+  environment?: NodeJS.ProcessEnv;
+  runCommand?: typeof runDefaultCommand;
 };
 
 export type CliSelfUpdateResult = {
@@ -92,14 +100,12 @@ export type ClientUpgradeRecoveryResult = {
 export function resolvePostPlusUpdatePlan(
   environment: NodeJS.ProcessEnv = process.env,
 ): PostPlusUpdatePlan {
-  const components = environment[
-    POSTPLUS_CLIENT_RECOVERY_COMPONENTS_ENV
-  ]?.trim();
+  const components =
+    environment[POSTPLUS_CLIENT_RECOVERY_COMPONENTS_ENV]?.trim();
 
   return {
     cli: components !== 'skills',
-    implicitRecovery:
-      environment[POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV] === '1',
+    implicitRecovery: environment[POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV] === '1',
     skills: components !== 'cli',
   };
 }
@@ -150,14 +156,12 @@ export async function runPostPlusClientUpgradeRecovery(
     [POSTPLUS_CLIENT_RECOVERY_COMPONENTS_ENV]: components,
   };
   writeOutput(
-    'PostPlus is updating and will continue the current task.\n',
+    'PostPlus is updating. The current task can resume only if the update succeeds and no agent restart is required.\n',
   );
 
-  const updateExitCode = await runInteractiveCommand(
-    'postplus',
-    ['update'],
-    { env: recoveryEnvironment },
-  );
+  const updateExitCode = await runInteractiveCommand('postplus', ['update'], {
+    env: recoveryEnvironment,
+  });
   if (updateExitCode !== 0) {
     writeError(
       `PostPlus automatic update failed with exit code ${updateExitCode}. The original command was not retried.\n`,
@@ -170,11 +174,9 @@ export async function runPostPlusClientUpgradeRecovery(
     };
   }
 
-  if (
-    input.payload.compatibility?.upgrade?.restartAgentSession === true
-  ) {
+  if (input.payload.compatibility?.upgrade?.restartAgentSession === true) {
     writeError(
-      'PostPlus updated successfully, but the refreshed skills require a new agent session. The original command was not retried.\n',
+      'PostPlus updated successfully, but this compatibility change requires a new agent session. The original command was not retried.\n',
     );
     return {
       attempted: true,
@@ -225,24 +227,38 @@ export async function generateUpdateStatusReport(
   const currentVersion = await readCurrentCliVersion();
   const managedSkillBaseline = await readManagedSkillBaseline();
   const cache = await readUpdateCheckCache();
-
-  if (
-    cache &&
-    !input.force &&
-    cache.cli.currentVersion === currentVersion &&
-    Date.now() - Date.parse(cache.checkedAt) < UPDATE_CHECK_TTL_MS
-  ) {
-    return buildUpdateReport({
-      cache,
-      currentVersion,
-      currentSkillsReleaseId: managedSkillBaseline.releaseId,
-      source: 'cache',
-    });
-  }
+  const environment = dependencies.environment ?? process.env;
+  const runCommand = dependencies.runCommand ?? runDefaultCommand;
+  let matchingCache: UpdateCheckCache | null = null;
 
   try {
+    const registryIdentity = await readNpmRegistryIdentity(
+      runCommand,
+      environment,
+    );
+    // Revalidate the effective source even for cache hits. Legacy caches, a
+    // changed scope/default registry, or a failed config query cannot establish
+    // which distribution the previous version belongs to.
+    if (
+      cache?.cli.registryIdentity === registryIdentity &&
+      cache.cli.currentVersion === currentVersion
+    ) {
+      matchingCache = cache;
+    }
+    if (
+      matchingCache &&
+      !input.force &&
+      Date.now() - Date.parse(matchingCache.checkedAt) < UPDATE_CHECK_TTL_MS
+    ) {
+      return buildUpdateReport({
+        cache: matchingCache,
+        currentVersion,
+        currentSkillsReleaseId: managedSkillBaseline.releaseId,
+        source: 'cache',
+      });
+    }
     const [latestCliVersion, latestSkillsReleaseId] = await Promise.all([
-      fetchLatestCliVersion(dependencies.fetchFn),
+      fetchLatestCliVersion(runCommand, environment),
       fetchLatestSkillReleaseId(dependencies.fetchFn),
     ]);
     const nextCache = {
@@ -250,6 +266,7 @@ export async function generateUpdateStatusReport(
       cli: {
         currentVersion,
         latestVersion: latestCliVersion,
+        registryIdentity,
       },
       skills: {
         latestReleaseId: latestSkillsReleaseId,
@@ -267,10 +284,10 @@ export async function generateUpdateStatusReport(
     const warning =
       error instanceof Error ? error.message : 'Update check failed.';
 
-    if (cache) {
+    if (matchingCache) {
       return {
         ...buildUpdateReport({
-          cache,
+          cache: matchingCache,
           currentVersion,
           currentSkillsReleaseId: managedSkillBaseline.releaseId,
           source: 'cache',
@@ -317,13 +334,12 @@ export async function runCliSelfUpdateIfOutdated(
     continuationArgs?: string[];
     currentCliEntryPath?: string;
     environment?: NodeJS.ProcessEnv;
-    fetchFn?: typeof fetch;
     quiet?: boolean;
+    runCommand?: typeof runDefaultCommand;
     runInteractiveCommand?: typeof runDefaultInteractiveCommand;
     writeOutput?: (message: string) => void;
   } = {},
 ): Promise<CliSelfUpdateResult> {
-  const fetchFn = dependencies.fetchFn ?? fetch;
   const runInteractiveCommand =
     dependencies.runInteractiveCommand ?? runDefaultInteractiveCommand;
   const writeOutput =
@@ -350,7 +366,10 @@ export async function runCliSelfUpdateIfOutdated(
     };
   }
 
-  const latestVersion = await fetchLatestCliVersion(fetchFn);
+  const latestVersion = await fetchLatestCliVersion(
+    dependencies.runCommand ?? runDefaultCommand,
+    environment,
+  );
 
   if (compareVersions(latestVersion, currentVersion) <= 0) {
     return {
@@ -362,6 +381,14 @@ export async function runCliSelfUpdateIfOutdated(
     };
   }
 
+  const { installationRoot, cliEntryPath } = await resolveCliUpdateInstallation(
+    {
+      currentCliEntryPath: dependencies.currentCliEntryPath ?? process.argv[1],
+      environment,
+      runCommand: dependencies.runCommand,
+    },
+  );
+
   if (!quiet) {
     writeOutput(
       [
@@ -372,65 +399,133 @@ export async function runCliSelfUpdateIfOutdated(
     );
   }
 
-  const exitCode = await withPostPlusUpdateLock(() =>
-    runInteractiveCommand('npm', POSTPLUS_CLI_UPDATE_ARGS),
-  );
-
-  if (exitCode === 0) {
-    const currentCliEntryPath =
-      dependencies.currentCliEntryPath ?? process.argv[1];
-
-    if (!currentCliEntryPath) {
-      throw new Error(
-        'PostPlus CLI updated, but the current CLI entry path is unavailable for continuation.',
+  return await withPostPlusUpdateLock(
+    async () => {
+      // Another updater may have completed while we waited. Read the installed
+      // package under the target lock rather than replacing it a second time.
+      const installed = JSON.parse(
+        await readFile(
+          join(installationRoot, '@postplus/cli/package.json'),
+          'utf8',
+        ),
+      ) as { version?: unknown };
+      if (typeof installed.version !== 'string' || !installed.version.trim()) {
+        throw new Error(
+          'The installed PostPlus CLI has no valid version. No installation was changed.',
+        );
+      }
+      const needsInstall =
+        compareVersions(installed.version, latestVersion) < 0;
+      const exitCode = needsInstall
+        ? await runInteractiveCommand(
+            'npm',
+            ['install', '-g', `${NPM_PACKAGE_NAME}@${latestVersion}`],
+            {
+              env: environment,
+            },
+          )
+        : 0;
+      if (exitCode !== 0) {
+        writeOutput(
+          `PostPlus CLI update failed with exit code ${exitCode}. Fix the npm install error, then rerun: ${POSTPLUS_UPDATE_COMMAND}\n`,
+        );
+        return {
+          command: POSTPLUS_CLI_UPDATE_COMMAND,
+          currentVersion,
+          exitCode,
+          latestVersion,
+          updateAvailable: true,
+        };
+      }
+      writeOutput(
+        needsInstall
+          ? 'npm installation finished. Verifying the installed CLI before continuing.\n'
+          : 'Another update completed. Verifying the installed CLI before continuing.\n',
       );
-    }
 
-    writeOutput(
-      quiet
-        ? `PostPlus CLI updated to ${latestVersion}.\n`
-        : [
-            `PostPlus CLI updated to ${latestVersion}.`,
-            'Continuing with the updated CLI to update skills.',
-            '',
-          ].join('\n'),
-    );
-
-    const continuationExitCode = await runInteractiveCommand(
-      process.execPath,
-      [currentCliEntryPath, 'update', ...(dependencies.continuationArgs ?? [])],
-      {
-        env: {
-          ...environment,
-          [POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION]: latestVersion,
+      // Keep the package stable until the fresh CLI has finished its continuation.
+      // Its version guard skips self-update, so it does not acquire this lock again.
+      const continuationExitCode = await runInteractiveCommand(
+        process.execPath,
+        [cliEntryPath, 'update', ...(dependencies.continuationArgs ?? [])],
+        {
+          env: {
+            ...environment,
+            [POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION]: latestVersion,
+          },
         },
-      },
-    );
+      );
 
-    return {
-      command: POSTPLUS_CLI_UPDATE_COMMAND,
-      currentVersion,
-      exitCode: continuationExitCode,
-      latestVersion,
-      updateAvailable: true,
-    };
-  } else {
-    writeOutput(
-      [
-        `PostPlus CLI update failed with exit code ${exitCode}.`,
-        `Fix the npm install error, then rerun: ${POSTPLUS_UPDATE_COMMAND}`,
-        '',
-      ].join('\n'),
+      return {
+        command: POSTPLUS_CLI_UPDATE_COMMAND,
+        currentVersion,
+        exitCode: continuationExitCode,
+        latestVersion,
+        updateAvailable: true,
+      };
+    },
+    { installationRoot },
+  );
+}
+
+export async function resolveCliUpdateInstallation(input: {
+  currentCliEntryPath: string | undefined;
+  environment: NodeJS.ProcessEnv;
+  runCommand?: typeof runDefaultCommand;
+}): Promise<{ installationRoot: string; cliEntryPath: string }> {
+  if (!input.currentCliEntryPath) {
+    throw new Error(
+      'PostPlus cannot determine the running CLI entry. No installation was changed.',
     );
   }
 
-  return {
-    command: POSTPLUS_CLI_UPDATE_COMMAND,
-    currentVersion,
-    exitCode,
-    latestVersion,
-    updateAvailable: true,
-  };
+  const runCommand = input.runCommand ?? runDefaultCommand;
+  const result = await runCommand('npm', ['root', '-g'], {
+    env: input.environment,
+  });
+  const npmRoot = result.stdout.trim();
+  if (!isAbsolute(npmRoot) || /[\r\n]/u.test(npmRoot)) {
+    throw new Error(
+      'npm did not return a single absolute global installation directory. No installation was changed.',
+    );
+  }
+
+  let installationRoot: string;
+  let cliEntryPath: string;
+  try {
+    installationRoot = await realpath(npmRoot);
+    cliEntryPath = await realpath(input.currentCliEntryPath);
+    if (
+      !(await stat(installationRoot)).isDirectory() ||
+      !(await stat(cliEntryPath)).isFile()
+    ) {
+      throw new Error(
+        'Expected an installation directory and a CLI entry file.',
+      );
+    }
+  } catch (cause) {
+    throw new Error(
+      'PostPlus could not verify the npm installation directory and running CLI entry. No installation was changed.',
+      { cause },
+    );
+  }
+
+  // Resolve the entry and root, not the package directory: npm-linked packages
+  // outside this installation must not authorize overwriting a different target.
+  const packageRoot = join(installationRoot, '@postplus', 'cli');
+  const entryRelativePath = relative(packageRoot, cliEntryPath);
+  if (
+    !entryRelativePath ||
+    entryRelativePath === '..' ||
+    entryRelativePath.startsWith(`..${sep}`) ||
+    isAbsolute(entryRelativePath)
+  ) {
+    throw new Error(
+      'The running PostPlus CLI does not belong to the selected npm global installation. Use the npm environment that installed this CLI, then retry. No installation was changed.',
+    );
+  }
+
+  return { installationRoot, cliEntryPath };
 }
 
 export function formatUpdateStatusReport(report: UpdateStatusReport): string {
@@ -499,28 +594,73 @@ function buildUpdateReport(input: {
   };
 }
 
-async function fetchLatestCliVersion(fetchFn: typeof fetch): Promise<string> {
-  const response = await fetchFn(NPM_LATEST_URL, {
-    headers: {
-      accept: 'application/json',
-      'user-agent': `postplus-cli-update-check/${await readCurrentCliVersion()}`,
-    },
-    signal: AbortSignal.timeout(15_000),
-  });
-
-  if (!response.ok) {
+async function fetchLatestCliVersion(
+  runCommand: typeof runDefaultCommand,
+  environment: NodeJS.ProcessEnv,
+): Promise<string> {
+  let stdout: string;
+  try {
+    // Global mode must match installation: a project's .npmrc must not change
+    // the distribution selected for a global CLI installation.
+    ({ stdout } = await runCommand(
+      'npm',
+      ['view', '--global', `${NPM_PACKAGE_NAME}@latest`, 'version', '--json'],
+      { env: environment, timeoutMs: 15_000 },
+    ));
+  } catch {
+    // npm stderr can contain private registry URLs or credentials.
     throw new Error(
-      `Failed to check latest PostPlus CLI version (${response.status}).`,
+      'Failed to check latest PostPlus CLI version with npm. No installation was changed.',
     );
   }
-
-  const payload = (await response.json()) as { version?: unknown };
-
-  if (typeof payload.version !== 'string' || !payload.version.trim()) {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(stdout);
+  } catch {
     throw new Error('NPM returned an invalid PostPlus CLI version payload.');
   }
+  if (
+    typeof payload !== 'string' ||
+    !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(
+      payload,
+    )
+  ) {
+    throw new Error('NPM returned an invalid PostPlus CLI version payload.');
+  }
+  return payload;
+}
 
-  return payload.version.trim();
+async function readNpmRegistryIdentity(
+  runCommand: typeof runDefaultCommand,
+  environment: NodeJS.ProcessEnv,
+): Promise<string> {
+  try {
+    const read = async (key: string) =>
+      (
+        await runCommand('npm', ['config', 'get', key, '--global'], {
+          env: environment,
+          timeoutMs: 15_000,
+        })
+      ).stdout.trim();
+    const scoped = await read('@postplus:registry');
+    const registry =
+      !scoped || scoped === 'undefined' || scoped === 'null'
+        ? await read('registry')
+        : scoped;
+    const url = new URL(registry);
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      /[\r\n]/u.test(registry)
+    ) {
+      throw new Error('Invalid registry');
+    }
+    // Never persist registry credentials or private URLs in the status cache.
+    return createHash('sha256').update(registry).digest('hex');
+  } catch {
+    throw new Error(
+      'Failed to determine the npm registry for PostPlus update checks.',
+    );
+  }
 }
 
 async function fetchLatestSkillReleaseId(
@@ -546,6 +686,7 @@ async function readUpdateCheckCache(): Promise<UpdateCheckCache | null> {
       typeof parsed.checkedAt !== 'string' ||
       typeof parsed.cli?.currentVersion !== 'string' ||
       typeof parsed.cli?.latestVersion !== 'string' ||
+      typeof parsed.cli?.registryIdentity !== 'string' ||
       typeof parsed.skills?.latestReleaseId !== 'string'
     ) {
       return null;

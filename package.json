@@ -1,6 +1,6 @@
 {
   "name": "@postplus/cli",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017",
   "type": "module",
   "description": "PostPlus CLI for PostPlus Cloud auth, status, and diagnostics.",
@@ -69,10 +69,14 @@
     "release:package": "node ./scripts/package-release.mjs",
     "start": "tsx src/index.ts",
     "test:acceptance": "node ./scripts/acceptance.mjs",
-    "test": "tsx --test src/postplus-cli.test.ts",
+    "test": "tsx --test src/postplus-cli.test.ts src/command-runner.test.ts src/local-config.test.ts src/update-installation.test.ts src/update-lock.test.ts src/skills-mutation-lock.test.ts",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "cross-spawn": "7.0.6"
+  },
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "@types/node": "^24.6.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
