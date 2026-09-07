@@ -51,6 +51,17 @@ async function fixture(t: TestContext) {
       schemaVersion: 2,
       releaseId: 'release-new',
       source: 'PostPlusAI/postplus-skills',
+      productBrief: {
+        schemaVersion: 1,
+        paragraphs: ['FIRST-INSTALL-BRIEF'],
+      },
+      releaseNotes: {
+        schemaVersion: 1,
+        releaseId: 'release-new',
+        title: 'Official release notes',
+        summary: 'Released maintenance improvements.',
+        highlights: ['Current project updates preserve their scope.'],
+      },
       skills: [
         { name: 'demo', path: 'skills/demo/SKILL.md', status: 'released' },
       ],
@@ -220,6 +231,36 @@ test('coexisting project/global installs update only the current project', async
   await assert.rejects(readFile(join(f.home, '.postplus-skills.json')), {
     code: 'ENOENT',
   });
+});
+
+test('an existing installation without a baseline reports release notes once, then verifies quietly', async (t) => {
+  const f = await fixture(t);
+  await f.lock(f.project);
+  const messages: string[] = [];
+  const dependencies = {
+    ...f.dependencies,
+    reportSuccess: (message: string) => messages.push(message),
+  };
+  await runPostPlusSkillUpdate(dependencies);
+  assert.match(messages.join('\n'), /PostPlus Skills updated/);
+  assert.match(
+    messages.join('\n'),
+    /PostPlus update release-new: Official release notes/,
+  );
+  assert.doesNotMatch(
+    messages.join('\n'),
+    /FIRST-INSTALL-BRIEF|PostPlus is ready/,
+  );
+  f.mutations.length = 0;
+  messages.length = 0;
+  await runPostPlusSkillUpdate(dependencies);
+  assert.deepEqual(f.mutations, []);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0]!, /already current/);
+  assert.doesNotMatch(
+    messages[0]!,
+    /FIRST-INSTALL-BRIEF|Official release notes/,
+  );
 });
 
 test('malformed project installer state stops before selecting global or mutating', async (t) => {
