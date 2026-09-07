@@ -55,11 +55,7 @@ export async function generateStatusReportWithDependencies(
     dependencies.generateAuthStatus ?? generateAuthStatusReport;
   const generateDoctor = dependencies.generateDoctor ?? generateDoctorReport;
   const generateSkillStatus =
-    dependencies.generateSkillStatus ??
-    (() =>
-      generateSkillInstallStatusReport(undefined, {
-        repairManagedBaseline: true,
-      }));
+    dependencies.generateSkillStatus ?? generateSkillInstallStatusReport;
   const generateUpdateStatus =
     dependencies.generateUpdateStatus ?? generateUpdateStatusReport;
 

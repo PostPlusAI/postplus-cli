@@ -67,6 +67,7 @@ import {
   withPostPlusUpdateLock,
   writeLocalConfig,
   writeManagedSkillBaseline,
+  readManagedSkillBaseline,
 } from './local-state.js';
 import {
   QuoteAutoConfirmCeilingExceededError,
@@ -602,12 +603,15 @@ async function generateFixtureUpdateStatus(input: { force?: boolean } = {}) {
 }
 
 beforeEach(async () => {
-  process.env = { ...originalEnv };
+  for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
+  Object.assign(process.env, originalEnv);
   const configDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-test-'));
   const stateDir = await mkdtemp(resolve(tmpdir(), 'postplus-skills-state-'));
   tempDirs.push(configDir);
   tempDirs.push(stateDir);
   process.env.POSTPLUS_CONFIG_DIR = configDir;
+  process.env.HOME = configDir;
+  process.env.USERPROFILE = configDir;
   // The test host declares proxy variables; production Node requires this at
   // process start. Unit requests are mocked, and this keeps them aligned with
   // the explicit transport preflight contract.
@@ -616,7 +620,8 @@ beforeEach(async () => {
 });
 
 after(async () => {
-  process.env = originalEnv;
+  for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
+  Object.assign(process.env, originalEnv);
   await Promise.all(
     tempDirs.map((dir) => rm(dir, { force: true, recursive: true })),
   );
@@ -762,7 +767,7 @@ describe('doctor and status', () => {
     }
   });
 
-  it('repairs stale managed skill metadata before hosted readiness during status', async () => {
+  it('does not promote an old account baseline from matching names during status', async () => {
     await writeLocalConfig({
       apiBaseUrl: 'https://postplus.example.com',
       accountId: 'account-1',
@@ -885,16 +890,16 @@ process.exit(1);
         generateUpdateStatus: generateFixtureUpdateStatus,
       });
 
-      assert.equal(status.ok, true);
-      assert.equal(status.skills.managedSkillsReleaseId, 'catalog-2');
-      assert.deepEqual(status.skills.scopes, ['global', 'project']);
-      assert.equal(status.updates.skills.currentReleaseId, 'catalog-2');
+      assert.equal(status.ok, false);
+      assert.equal(status.skills.managedSkillsReleaseId, null);
+      assert.deepEqual(status.skills.scopes, ['global']);
+      assert.equal(status.updates.skills.currentReleaseId, null);
       assert.equal(status.updates.skills.latestReleaseId, 'catalog-2');
-      assert.equal(status.updates.skills.updateAvailable, false);
-      assert.deepEqual(hostedSkillsReleaseIds, ['catalog-2']);
+      assert.equal(status.updates.skills.updateAvailable, true);
+      assert.deepEqual(hostedSkillsReleaseIds, [undefined]);
       assert.equal(
-        (await readLocalConfig())?.managedSkills?.releaseId,
-        'catalog-2',
+        (await readManagedSkillBaseline())?.releaseId,
+        null,
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -4026,7 +4031,7 @@ describe('update checks', () => {
     }
   });
 
-  it('refreshes status update state from remote after skills verify advances the baseline', async () => {
+  it('refreshes update state only after update installs and verifies the new release', async () => {
     const originalFetch = globalThis.fetch;
     let catalogReleaseId = 'catalog-1';
     const listInstalled = async () => ({
@@ -4082,6 +4087,9 @@ describe('update checks', () => {
       const verify = await runPostPlusSkillVerify({
         runCommand: listInstalled,
       });
+      assert.equal(verify.ok, false);
+      assert.equal((await readManagedSkillBaseline()).releaseId, 'catalog-1');
+      await runPostPlusSkillUpdate({ runCommand: listInstalled, runInteractiveCommand: async () => 0 });
       const status = await generateStatusReportWithDependencies({
         generateUpdateStatus: generateFixtureUpdateStatus,
         generateAuthStatus: async () => ({
@@ -4120,8 +4128,8 @@ describe('update checks', () => {
           }),
       });
 
-      assert.equal(verify.baselineUpdated, true);
-      assert.equal(verify.verifiedSkillsReleaseId, 'catalog-2');
+      assert.equal(verify.baselineUpdated, false);
+      assert.equal(verify.verifiedSkillsReleaseId, null);
       assert.equal(status.skills.managedSkillsReleaseId, 'catalog-2');
       assert.equal(status.updates.source, 'remote');
       assert.equal(status.updates.skills.currentReleaseId, 'catalog-2');
@@ -4525,13 +4533,13 @@ describe('skill management commands', () => {
       });
 
       assert.equal(report.ok, false);
-      assert.deepEqual(report.missingSkills, ['missing-skill']);
+      assert.deepEqual(report.missingSkills, ['demo-skill', 'missing-skill']);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it('lists project and global skills sequentially to avoid npx cache races', async () => {
+  it('lists only the selected global scope without combining project skills', async () => {
     const originalFetch = globalThis.fetch;
     let activeListCalls = 0;
     const calls: string[][] = [];
@@ -4580,9 +4588,8 @@ describe('skill management commands', () => {
         },
       });
 
-      assert.equal(report.ok, true);
+      assert.equal(report.ok, false, 'matching names alone do not prove a release');
       assert.deepEqual(calls, [
-        ['-y', 'skills', 'list', '--json'],
         ['-y', 'skills', 'list', '--json', '--global'],
       ]);
     } finally {
@@ -4740,11 +4747,11 @@ describe('skill management commands', () => {
         calls[POSTPLUS_SKILLS_AGENT_TARGETS.length],
         buildPostPlusSkillUninstallArgs(['retired-skill'], 'global'),
       );
-      assert.deepEqual(config?.managedSkills?.skillNames, [
+      assert.deepEqual((await readManagedSkillBaseline())?.skillNames, [
         'demo-skill',
         'new-skill',
       ]);
-      assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
+      assert.equal((await readManagedSkillBaseline())?.releaseId, 'catalog-2');
       assert.equal(config?.cliVersion, CURRENT_CLI_VERSION);
       assert.deepEqual(successMessages, [
         'PostPlus Skills updated: 2 current, 1 retired removed (global).',
@@ -5040,8 +5047,8 @@ describe('skill management commands', () => {
       );
 
       const config = await readLocalConfig();
-      assert.equal(config?.managedSkills?.releaseId, 'catalog-1');
-      assert.deepEqual(config?.managedSkills?.skillNames, [
+      assert.equal((await readManagedSkillBaseline())?.releaseId, 'catalog-1');
+      assert.deepEqual((await readManagedSkillBaseline())?.skillNames, [
         'demo-skill',
         'retired-skill',
       ]);
@@ -5363,7 +5370,7 @@ describe('skill management commands', () => {
 
       assert.equal(mutationCalls, 0);
       assert.equal(
-        (await readLocalConfig())?.managedSkills?.releaseId,
+        (await readManagedSkillBaseline())?.releaseId,
         'catalog-1',
       );
     } finally {
@@ -5423,7 +5430,7 @@ describe('skill management commands', () => {
       );
 
       assert.equal(
-        (await readLocalConfig())?.managedSkills?.releaseId,
+        (await readManagedSkillBaseline())?.releaseId,
         'catalog-1',
       );
     } finally {
@@ -5626,7 +5633,7 @@ describe('skill management commands', () => {
     }
   });
 
-  it('verifies installed public skills before recording the managed baseline', async () => {
+  it('verifies an already recorded installation without rewriting its baseline', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
       new Response(
@@ -5655,6 +5662,7 @@ describe('skill management commands', () => {
     const calls: string[][] = [];
 
     try {
+      await writeManagedSkillBaseline({ releaseId: 'catalog-2', skillNames: ['demo-skill', 'new-skill'] });
       const report = await runPostPlusSkillVerify({
         runCommand: async (_command, args) => {
           calls.push(args);
@@ -5682,19 +5690,18 @@ describe('skill management commands', () => {
       const config = await readLocalConfig();
 
       assert.equal(report.ok, true);
-      assert.equal(report.baselineUpdated, true);
-      assert.equal(report.previousManagedSkillsReleaseId, null);
+      assert.equal(report.baselineUpdated, false);
+      assert.equal(report.previousManagedSkillsReleaseId, 'catalog-2');
       assert.equal(report.verifiedSkillsReleaseId, 'catalog-2');
       assert.deepEqual(calls, [
-        ['-y', 'skills', 'list', '--json'],
         ['-y', 'skills', 'list', '--json', '--global'],
       ]);
-      assert.deepEqual(config?.managedSkills?.skillNames, [
+      assert.deepEqual((await readManagedSkillBaseline())?.skillNames, [
         'demo-skill',
         'new-skill',
       ]);
-      assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
-      assert.match(formatSkillBaselineVerifyReport(report), /postplus status/);
+      assert.equal((await readManagedSkillBaseline())?.releaseId, 'catalog-2');
+      assert.match(formatSkillBaselineVerifyReport(report), /Verified baseline: catalog-2/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -5770,7 +5777,7 @@ describe('skill management commands', () => {
       assert.equal(report.ok, false);
       assert.equal(report.baselineUpdated, false);
       assert.deepEqual(report.retiredManagedSkills, ['retired-skill']);
-      assert.equal(config?.managedSkills?.releaseId, 'catalog-2');
+      assert.equal((await readManagedSkillBaseline())?.releaseId, 'catalog-2');
       assert.match(
         formatSkillBaselineVerifyReport(report),
         /Retired managed skills: retired-skill/,
@@ -5898,7 +5905,7 @@ describe('skill management commands', () => {
       assert.equal(report.baselineUpdated, false);
       assert.equal(report.previousManagedSkillsReleaseId, 'catalog-1');
       assert.deepEqual(report.missingSkills, ['missing-skill']);
-      assert.equal(config?.managedSkills?.releaseId, 'catalog-1');
+      assert.equal((await readManagedSkillBaseline())?.releaseId, 'catalog-1');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -5950,7 +5957,7 @@ describe('skill management commands', () => {
           'global',
         ),
       );
-      assert.equal(config?.managedSkills, undefined);
+      assert.equal((await readManagedSkillBaseline('global')).releaseId, null);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -6006,7 +6013,7 @@ describe('skill management commands', () => {
           'current-directory',
         ),
       );
-      assert.equal(config?.managedSkills, undefined);
+      assert.equal((await readManagedSkillBaseline('current-directory')).releaseId, null);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -6059,7 +6066,7 @@ describe('skill management commands', () => {
       );
 
       assert.equal(
-        (await readLocalConfig())?.managedSkills?.releaseId,
+        (await readManagedSkillBaseline())?.releaseId,
         'catalog-2',
       );
     } finally {
@@ -11496,8 +11503,8 @@ describe('hosted lib / bin request parity', () => {
       ...(await readLocalConfig()),
       apiBaseUrl: PARITY_AUTH.apiBaseUrl,
       cliSessionToken: PARITY_AUTH.cliSessionToken,
-      managedSkills: { releaseId: PARITY_RELEASE_ID, skillNames: [] },
     });
+    await writeManagedSkillBaseline({ releaseId: PARITY_RELEASE_ID, skillNames: [] });
   }
 
   type ParityCase = {

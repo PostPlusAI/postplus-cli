@@ -66,6 +66,18 @@ project directory:
 postplus install --current-directory
 ```
 
+Run `postplus update` for maintenance. From a project with PostPlus Skills,
+it updates that project; otherwise it updates global Skills. If both are
+installed, only the current project is updated. `--current-directory` explicitly
+targets the current directory, including a first installation there.
+
+Each installation keeps its own verified release record. Switching projects or
+moving a project preserves that installation's record. `postplus status` and
+`postplus skills verify` check the selected installation without upgrading its
+record merely because skill names match. Installations created by an older CLI
+need one `postplus update` to establish their own verified release; another
+project's or global installation's version cannot stand in for it.
+
 Useful checks:
 
 ```bash
