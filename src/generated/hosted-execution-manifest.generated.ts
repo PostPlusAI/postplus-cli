@@ -1758,6 +1758,42 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       ]
     }
   ],
+  "media-analysis": [
+    {
+      "skill": "media-analysis",
+      "mode": "cli-runner",
+      "surface": "flags",
+      "verb": "analyze",
+      "domain": "media",
+      "capability": "video-analysis",
+      "modelKeys": [
+        "video-analysis"
+      ],
+      "effect": "spend",
+      "models": [
+        {
+          "modelKey": "video-analysis",
+          "fields": [
+            {
+              "name": "video",
+              "class": "intent",
+              "flag": "--video",
+              "type": "media-url",
+              "mediaKind": "video",
+              "required": true
+            },
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
   "pinterest-search": [
     {
       "skill": "pinterest-search",
@@ -2280,42 +2316,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             "handles",
             "hashtags",
             "urls"
-          ]
-        }
-      ]
-    }
-  ],
-  "video-analysis": [
-    {
-      "skill": "video-analysis",
-      "mode": "cli-runner",
-      "surface": "flags",
-      "verb": "analyze",
-      "domain": "media",
-      "capability": "video-analysis",
-      "modelKeys": [
-        "video-analysis"
-      ],
-      "effect": "spend",
-      "models": [
-        {
-          "modelKey": "video-analysis",
-          "fields": [
-            {
-              "name": "video",
-              "class": "intent",
-              "flag": "--video",
-              "type": "media-url",
-              "mediaKind": "video",
-              "required": true
-            },
-            {
-              "name": "prompt",
-              "class": "intent",
-              "flag": "--prompt",
-              "type": "string",
-              "required": true
-            }
           ]
         }
       ]

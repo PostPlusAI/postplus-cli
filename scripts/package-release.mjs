@@ -99,7 +99,7 @@ function copyReleaseFiles() {
     cpSync(resolve(repoRoot, fileName), targetPath);
   }
 
-  for (const fileName of ['package.json', 'README.md', 'LICENSE']) {
+  for (const fileName of ['package.json', ...packageJson.files.filter((name) => !name.startsWith('build/'))]) {
     cpSync(resolve(repoRoot, fileName), resolve(packageRoot, fileName));
   }
 
@@ -111,13 +111,15 @@ function copyReleaseFiles() {
 
 function getReleaseBuildFiles() {
   return packageJson.files.filter(
-    (fileName) => fileName.startsWith('build/') && fileName.endsWith('.js'),
+    (fileName) => fileName.startsWith('build/'),
   );
 }
 
 function createArchive() {
   execFileSync('tar', ['-czf', resolve(distDir, versionedArchive), '-C', resolve(distDir, 'package'), 'postplus-cli'], {
     cwd: repoRoot,
+    // macOS tar must not add AppleDouble files outside package.json.files.
+    env: { ...process.env, COPYFILE_DISABLE: '1' },
     stdio: 'inherit',
   });
 

@@ -145,8 +145,10 @@ export type HostedRunSummary = {
   target: string | null;
   createdAt: string;
   updatedAt: string;
-  finalizedCredits: number;
-  reservedCredits: number;
+  finalizedCredits: number | null;
+  reservedCredits: number | null;
+  billingPending?: boolean;
+  estimatedOnly?: boolean;
   hasError: boolean;
 };
 
@@ -296,9 +298,19 @@ function normalizeRunSummary(value: unknown): HostedRunSummary {
     target: readString(record.target),
     createdAt: readString(record.createdAt) ?? '',
     updatedAt: readString(record.updatedAt) ?? '',
-    finalizedCredits: readNumber(record.finalizedCredits) ?? 0,
-    reservedCredits: readNumber(record.reservedCredits) ?? 0,
+    finalizedCredits:
+      record.billingPending === true
+        ? null
+        : (readNumber(record.finalizedCredits) ?? 0),
+    reservedCredits:
+      record.billingPending === true
+        ? null
+        : (readNumber(record.reservedCredits) ?? 0),
+    ...(typeof record.billingPending === 'boolean'
+      ? { billingPending: record.billingPending }
+      : {}),
     hasError: record.hasError === true,
+    ...(record.estimatedOnly === true ? { estimatedOnly: true } : {}),
   };
 }
 
@@ -320,9 +332,10 @@ export function formatHostedRunsListReport(
   }
 
   for (const run of report.runs) {
-    const cost =
-      run.status === 'completed' || run.finalizedCredits > 0
-        ? `${run.finalizedCredits} credits`
+    const cost = run.billingPending
+      ? 'billing pending verification'
+      : run.status === 'completed' || (run.finalizedCredits ?? 0) > 0
+        ? `${run.finalizedCredits} credits${run.estimatedOnly ? ' (estimated settlement)' : ''}`
         : `~${run.reservedCredits} credits reserved`;
     lines.push(
       `- ${run.id}  [${run.status}]  ${run.capability}${run.target ? ` ${run.target}` : ''}  ${cost}  ${run.updatedAt}`,
@@ -334,15 +347,18 @@ export function formatHostedRunsListReport(
 }
 
 export function formatHostedRunDetailReport(report: HostedRunDetail): string {
-  const settled = report.status === 'completed' || report.finalizedCredits > 0;
+  const settled =
+    report.status === 'completed' || (report.finalizedCredits ?? 0) > 0;
   return [
     `PostPlus run ${report.id}`,
     '',
     `Status: ${report.status}`,
     `Capability: ${report.capability}${report.target ? ` ${report.target}` : ''}`,
-    settled
-      ? `Finalized: ${report.finalizedCredits} PostPlus credits`
-      : `Reserved: ${report.reservedCredits} PostPlus credits`,
+    report.billingPending
+      ? 'Billing: pending verification; do not submit another analysis.'
+      : settled
+        ? `Finalized: ${report.finalizedCredits} PostPlus credits${report.estimatedOnly ? ' (estimated settlement; actual usage unconfirmed)' : ''}`
+        : `Reserved: ${report.reservedCredits} PostPlus credits`,
     `Created: ${report.createdAt}`,
     `Updated: ${report.updatedAt}`,
     report.hasError ? 'Error: see error field (postplus runs show --json)' : '',

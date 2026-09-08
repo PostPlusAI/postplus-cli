@@ -1,6 +1,6 @@
 {
   "name": "@postplus/cli",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017",
   "type": "module",
   "description": "PostPlus CLI for PostPlus Cloud auth, status, and diagnostics.",
@@ -32,6 +32,10 @@
     "build/hosted-request-schemas.js",
     "build/index.js",
     "build/local-dependencies.js",
+    "build/media-image-source.js",
+    "build/media-image-download.js",
+    "build/media-source-http.js",
+    "build/media-prepare.js",
     "build/local-state.js",
     "build/network-diagnostics.js",
     "build/quote-confirmation.js",
@@ -44,7 +48,14 @@
     "build/update-check.js",
     "LICENSE",
     "NOTICE",
-    "README.md"
+    "README.md",
+    "build/media-video-file.js",
+    "build/media-video-transfer.js",
+    "build/hosted-command-runtime.js",
+    "build/media-run-checkpoint.js",
+    "build/media-video-command.js",
+    "build/hosted-command-runtime.d.ts",
+    "build/quote-confirmation.d.ts"
   ],
   "publishConfig": {
     "access": "public",
@@ -69,7 +80,7 @@
     "release:package": "node ./scripts/package-release.mjs",
     "start": "tsx src/index.ts",
     "test:acceptance": "node ./scripts/acceptance.mjs",
-    "test": "tsx --test src/postplus-cli.test.ts",
+    "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
