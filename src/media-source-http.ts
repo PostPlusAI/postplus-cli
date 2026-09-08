@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process';
-import type { LookupAddress } from 'node:dns';
 import { lookup } from 'node:dns/promises';
 import { Agent, request } from 'node:https';
 import { BlockList, isIP } from 'node:net';
@@ -66,8 +65,17 @@ export async function readMediaProxyEnvironment(): Promise<
     process.env.http_proxy ??
     process.env.HTTP_PROXY;
   const noProxy = process.env.no_proxy ?? process.env.NO_PROXY;
-  if (proxy)
+  if (proxy) {
+    let url: URL;
+    try {
+      url = new URL(proxy);
+    } catch {
+      throw new Error('media_source_proxy_configuration_unsupported');
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:')
+      throw new Error('media_source_proxy_configuration_unsupported');
     return { HTTPS_PROXY: proxy, ...(noProxy ? { NO_PROXY: noProxy } : {}) };
+  }
   if (process.env.ALL_PROXY || process.env.all_proxy)
     throw new Error('media_source_proxy_configuration_unsupported');
   if (process.platform !== 'darwin') return {};
@@ -81,9 +89,17 @@ export async function readMediaProxyEnvironment(): Promise<
   );
   const field = (name: string) =>
     new RegExp(`^\\s*${name}\\s*:\\s*(.+)$`, 'mu').exec(stdout)?.[1]?.trim();
-  if (field('ProxyAutoConfigEnable') === '1')
+  if (
+    ['ProxyAutoConfigEnable', 'ProxyAutoDiscoveryEnable'].some(
+      (name) => field(name) === '1',
+    )
+  )
     throw new Error('media_source_proxy_configuration_unsupported');
-  if (field('HTTPSEnable') !== '1') return {};
+  if (field('HTTPSEnable') !== '1') {
+    if (field('SOCKSEnable') === '1')
+      throw new Error('media_source_proxy_configuration_unsupported');
+    return {};
+  }
   const host = field('HTTPSProxy');
   const port = field('HTTPSPort');
   if (
@@ -112,22 +128,6 @@ export async function createImageSourceFetcher() {
   ): Promise<Response> => {
     const url = assertImageSourceUrl(value);
     signal.throwIfAborted();
-    // Validate DNS even for a trusted user-configured proxy. In direct mode,
-    // bind the exact validated address. A configured proxy owns its DNS path.
-    const addresses = await new Promise<LookupAddress[]>((resolve, reject) => {
-      const aborted = () => reject(new Error('media_source_timeout'));
-      signal.addEventListener('abort', aborted, { once: true });
-      lookup(url.hostname, { all: true })
-        .then(resolve, () => reject(new Error('media_source_network_failed')))
-        .finally(() => signal.removeEventListener('abort', aborted));
-      if (signal.aborted) aborted();
-    });
-    signal.throwIfAborted();
-    if (
-      !addresses.length ||
-      addresses.some(({ address }) => !isPublicImageSourceAddress(address))
-    )
-      throw new Error('media_source_non_public_address');
     return new Promise<Response>((resolve, reject) => {
       const req = request(
         url,
@@ -136,11 +136,28 @@ export async function createImageSourceFetcher() {
           signal,
           method: 'GET',
           headers: { ...headers, 'Accept-Encoding': 'identity' },
-          lookup: (_host, _options, callback) => {
-            const first = addresses[0]!;
-            if (typeof _options === 'object' && _options?.all)
-              callback(null, addresses);
-            else callback(null, first.address, first.family);
+          // Node invokes this only for direct connections, including NO_PROXY.
+          // A trusted configured proxy resolves the CONNECT hostname itself.
+          lookup: (host, options, callback) => {
+            lookup(host, { all: true }).then(
+              (addresses) => {
+                if (signal.aborted) return;
+                if (
+                  !addresses.length ||
+                  addresses.some(
+                    ({ address }) => !isPublicImageSourceAddress(address),
+                  )
+                ) {
+                  callback(new Error('media_source_non_public_address'), '', 4);
+                  return;
+                }
+                const first = addresses[0]!;
+                if (typeof options === 'object' && options?.all)
+                  callback(null, addresses);
+                else callback(null, first.address, first.family);
+              },
+              () => callback(new Error('media_source_network_failed'), '', 4),
+            );
           },
         },
         (incoming) => {
@@ -162,13 +179,15 @@ export async function createImageSourceFetcher() {
       req.on('error', (error: NodeJS.ErrnoException) =>
         reject(
           new Error(
-            signal.aborted
+            signal.aborted || error.message === 'media_source_timeout'
               ? 'media_source_timeout'
-              : /^(?:ERR_TLS|CERT_|ERR_SSL|DEPTH_ZERO_SELF_SIGNED_CERT|UNABLE_TO_VERIFY)/u.test(
-                    error.code ?? '',
-                  )
-                ? 'media_source_tls_failed'
-                : 'media_source_network_failed',
+              : error.message === 'media_source_non_public_address'
+                ? 'media_source_non_public_address'
+                : /^(?:ERR_TLS|CERT_|ERR_SSL|DEPTH_ZERO_SELF_SIGNED_CERT|UNABLE_TO_VERIFY)/u.test(
+                      error.code ?? '',
+                    )
+                  ? 'media_source_tls_failed'
+                  : 'media_source_network_failed',
           ),
         ),
       );

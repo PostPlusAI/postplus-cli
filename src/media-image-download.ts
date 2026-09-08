@@ -138,6 +138,27 @@ export async function prepareImageSequence(input: {
   let directory: string | undefined;
   let stage = 'validating_media';
   let imageIndex = 0;
+  let pendingFilePath: string | undefined;
+  let manifestWriteStarted = false;
+  let manifestWritten = false;
+  const manifest = {
+    kind: 'ordered-images' as const,
+    directory: '',
+    manifestPath: '',
+    sourceIdentifier: input.sourceIdentifier,
+    completenessBasis: input.sequence.completenessBasis,
+    declaredCount: input.sequence.declaredCount,
+    readability: 'agent-required' as const,
+    images: [] as {
+      index: number;
+      filePath: string;
+      mime: string;
+      sourceDimensions: { width: number | null; height: number | null };
+      bytes: number;
+      sha256: string;
+    }[],
+    totalBytes: 0,
+  };
   try {
     input.signal.throwIfAborted();
     const sequence = input.sequence;
@@ -172,24 +193,8 @@ export async function prepareImageSequence(input: {
       path.join(input.parentDirectory ?? tmpdir(), 'postplus-images-'),
     );
     await chmod(directory, 0o700);
-    const manifest = {
-      kind: 'ordered-images' as const,
-      directory,
-      manifestPath: path.join(directory, 'manifest.json'),
-      sourceIdentifier: input.sourceIdentifier,
-      completenessBasis: sequence.completenessBasis,
-      declaredCount: sequence.declaredCount,
-      readability: 'agent-required' as const,
-      images: [] as {
-        index: number;
-        filePath: string;
-        mime: string;
-        sourceDimensions: { width: number | null; height: number | null };
-        bytes: number;
-        sha256: string;
-      }[],
-      totalBytes: 0,
-    };
+    manifest.directory = directory;
+    manifest.manifestPath = path.join(directory, 'manifest.json');
     for (const entry of sequence.images) {
       imageIndex = entry.index;
       input.signal.throwIfAborted();
@@ -234,6 +239,7 @@ export async function prepareImageSequence(input: {
         `${String(entry.index).padStart(3, '0')}.image`,
       );
       const file = await open(filePath, 'wx', 0o600);
+      pendingFilePath = filePath;
       const reader = response.body.getReader();
       let bytes = 0;
       const abort = () => {
@@ -281,41 +287,77 @@ export async function prepareImageSequence(input: {
         sourceDimensions: { width: entry.width, height: entry.height },
       });
       manifest.totalBytes += bytes;
+      pendingFilePath = undefined;
     }
     input.signal.throwIfAborted();
+    manifestWriteStarted = true;
     await writeFile(
       manifest.manifestPath,
       JSON.stringify(manifest, null, 2) + '\n',
       { flag: 'wx', mode: 0o600 },
     );
+    manifestWritten = true;
     input.signal.throwIfAborted();
     return manifest;
   } catch (error) {
-    if (directory) await rm(directory, { recursive: true, force: true });
-    if (input.signal.aborted)
-      throw failure('media_image_cancelled', stage, true);
-    if (error instanceof Error && /^media_source_[a-z_]+$/u.test(error.message))
-      throw Object.assign(
-        failure(
-          error.message,
-          stage,
-          ['media_source_timeout', 'media_source_network_failed'].includes(
+    const originalError = input.signal.aborted
+      ? failure('media_image_cancelled', stage, true)
+      : error instanceof Error && /^media_source_[a-z_]+$/u.test(error.message)
+        ? failure(
             error.message,
-          ),
-        ),
-        { imageIndex },
-      );
-    if (error instanceof Error && /^media_image_[a-z_]+$/u.test(error.message))
-      throw Object.assign(error, { imageIndex });
-    throw Object.assign(
-      failure(
-        stage === 'downloading_source'
-          ? 'media_image_download_failed'
-          : 'media_image_invalid_file',
-        stage,
-        stage === 'downloading_source',
-      ),
-      { imageIndex },
-    );
+            stage,
+            ['media_source_timeout', 'media_source_network_failed'].includes(
+              error.message,
+            ),
+          )
+        : error instanceof Error && /^media_image_[a-z_]+$/u.test(error.message)
+          ? error
+          : failure(
+              stage === 'downloading_source'
+                ? 'media_image_download_failed'
+                : 'media_image_invalid_file',
+              stage,
+              stage === 'downloading_source',
+            );
+    const failed = Object.assign(originalError, { imageIndex });
+    if (pendingFilePath) await rm(pendingFilePath, { force: true });
+    if (!manifest.images.length) {
+      if (directory) await rm(directory, { recursive: true, force: true });
+      throw failed;
+    }
+    const partialEvidence = {
+      ...manifest,
+      status: 'partial' as const,
+      failedImageIndex:
+        manifest.images.length < input.sequence.images.length
+          ? imageIndex
+          : null,
+    };
+    // Retain only verified files. A manifest persistence failure must not hide
+    // those files or claim a manifest exists; return the same evidence inline.
+    let manifestWriteFailed = manifestWriteStarted && !manifestWritten;
+    if (!manifestWriteFailed) {
+      try {
+        await writeFile(
+          manifest.manifestPath,
+          JSON.stringify(partialEvidence, null, 2) + '\n',
+          { flag: manifestWritten ? 'w' : 'wx', mode: 0o600 },
+        );
+      } catch {
+        manifestWriteFailed = true;
+      }
+    }
+    if (manifestWriteFailed) {
+      await rm(manifest.manifestPath, { force: true });
+      const { manifestPath: _manifestPath, ...inlineEvidence } =
+        partialEvidence;
+      throw Object.assign(failed, {
+        partialEvidence: {
+          ...inlineEvidence,
+          manifestError: 'media_image_manifest_write_failed',
+        },
+      });
+    }
+    throw Object.assign(failed, { partialEvidence });
   }
 }

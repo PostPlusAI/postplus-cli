@@ -231,9 +231,18 @@ export async function runMediaPrepareCommand(
         Number.isSafeInteger(error.imageIndex)
           ? { imageIndex: error.imageIndex }
           : {}),
-        userAction: known.includes('proxy')
-          ? 'Check the configured network proxy and supported Node runtime; no media was analyzed.'
-          : 'Check that the source is public and readable. Resume any existing source operation; collection may have incurred charges even when preparation fails.',
+        ...(error instanceof Error && 'partialEvidence' in error
+          ? { partialEvidence: error.partialEvidence }
+          : {}),
+        userAction:
+          (known === 'media_source_non_public_address'
+            ? 'Local DNS returned a non-public address. Check DNS/Fake-IP settings and whether the configured proxy route applies. The blocked request was not sent; this does not establish that the post is unavailable.'
+            : known.includes('proxy')
+              ? 'Check the configured network proxy and supported Node runtime; no media was analyzed.'
+              : 'Check that the source is public and readable. Resume any existing source operation; collection may have incurred charges even when preparation fails.') +
+          (error instanceof Error && 'partialEvidence' in error
+            ? ' Downloaded images are available in partialEvidence. Inspect them and clearly state the missing pages.'
+            : ''),
       }),
     );
     return 1;

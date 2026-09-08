@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
@@ -14,7 +16,7 @@ import {
   parseInstagramImageSequence,
   parseTikTokImageSequence,
 } from './media-image-source.js';
-import { prepareMediaSource } from './media-prepare.js';
+import { prepareMediaSource, runMediaPrepareCommand } from './media-prepare.js';
 import {
   assertImageSourceUrl,
   isPublicImageSourceAddress,
@@ -46,6 +48,21 @@ const seq = (count = 2): ImageSequence => ({
     height: 6,
   })),
 });
+type PartialImageFailure = Error & {
+  code: string;
+  stage: string;
+  imageIndex: number;
+  retryable: boolean;
+  partialEvidence: Omit<
+    Awaited<ReturnType<typeof prepareImageSequence>>,
+    'manifestPath'
+  > & {
+    status: 'partial';
+    failedImageIndex: number | null;
+    manifestPath?: string;
+    manifestError?: string;
+  };
+};
 
 test('retries only transient headers once, keeping successful pages and exact URLs', async (t) => {
   const p = await temp(t);
@@ -66,6 +83,11 @@ test('retries only transient headers once, keeping successful pages and exact UR
     },
   });
   assert.equal(result.images.length, 2);
+  assert.equal('status' in result, false);
+  assert.deepEqual(
+    JSON.parse(await readFile(result.manifestPath, 'utf8')),
+    result,
+  );
   assert.deepEqual(calls, [
     sequence.images[0]!.url,
     sequence.images[1]!.url,
@@ -236,52 +258,292 @@ test('Instagram exact public page uses anonymous session only, no GraphQL or acc
 
 for (const scenario of [
   'network',
+  'source',
+  'http',
   'invalid',
   'truncated',
   'declared-limit',
   'cancel',
   'stall',
 ] as const)
-  test(`partial image collection cleans up on ${scenario}`, async (t) => {
+  test(`partial image collection retains only verified pages on ${scenario}`, async (t) => {
     const p = await temp(t);
     const bytes = await png();
     const sequence = seq();
     let calls = 0;
     const controller = new AbortController();
-    await assert.rejects(
-      prepareImageSequence({
-        sequence,
-        sourceIdentifier: 'tiktok:123',
-        parentDirectory: p,
-        signal: controller.signal,
-        fetchImage: async () => {
-          if (calls++ === 0) return new Response(new Uint8Array(bytes));
-          if (scenario === 'network')
-            throw new Error('https://signed.example/?secret=private');
-          if (scenario === 'cancel') controller.abort();
-          if (scenario === 'stall') {
-            setTimeout(() => controller.abort(), 10);
-            return new Response(new ReadableStream({}));
-          }
-          if (scenario === 'invalid') return new Response('<html>');
-          return new Response(
-            new Uint8Array(bytes),
-            scenario === 'declared-limit'
-              ? { headers: { 'content-length': String(21 * 1024 * 1024) } }
-              : scenario === 'truncated'
-                ? { headers: { 'content-length': String(bytes.length + 1) } }
-                : undefined,
-          );
-        },
-      }),
-      (error) => {
-        assert.ok(error instanceof Error);
-        assert.doesNotMatch(error.message, /secret|https:/u);
-        return true;
+    const error = await prepareImageSequence({
+      sequence,
+      sourceIdentifier: 'tiktok:123',
+      parentDirectory: p,
+      signal: controller.signal,
+      fetchImage: async () => {
+        if (calls++ === 0) return new Response(new Uint8Array(bytes));
+        if (scenario === 'network')
+          throw new Error('https://signed.example/?secret=private');
+        if (scenario === 'source')
+          throw new Error('media_source_non_public_address');
+        if (scenario === 'http')
+          return new Response('forbidden', { status: 403 });
+        if (scenario === 'cancel') controller.abort();
+        if (scenario === 'stall') {
+          setTimeout(() => controller.abort(), 10);
+          return new Response(new ReadableStream({}));
+        }
+        if (scenario === 'invalid') return new Response('<html>');
+        return new Response(
+          new Uint8Array(bytes),
+          scenario === 'declared-limit'
+            ? { headers: { 'content-length': String(21 * 1024 * 1024) } }
+            : scenario === 'truncated'
+              ? { headers: { 'content-length': String(bytes.length + 1) } }
+              : undefined,
+        );
       },
+    }).then(
+      () => assert.fail('the failed page must still reject the operation'),
+      (error: PartialImageFailure) => error,
     );
+    assert.equal(
+      error.code,
+      {
+        network: 'media_image_download_failed',
+        source: 'media_source_non_public_address',
+        http: 'media_image_download_failed',
+        invalid: 'media_image_unsupported',
+        truncated: 'media_image_incomplete_download',
+        'declared-limit': 'media_image_size_limit',
+        cancel: 'media_image_cancelled',
+        stall: 'media_image_cancelled',
+      }[scenario],
+    );
+    assert.equal(error.imageIndex, 2);
+    const partial = error.partialEvidence;
+    assert.equal(partial.status, 'partial');
+    assert.equal(partial.kind, 'ordered-images');
+    assert.equal(partial.failedImageIndex, 2);
+    assert.equal(partial.completenessBasis, 'returned-list');
+    assert.equal(partial.declaredCount, null);
+    assert.equal(partial.readability, 'agent-required');
+    assert.equal(partial.totalBytes, bytes.length);
+    assert.deepEqual(
+      partial.images.map((image) => image.index),
+      [1],
+    );
+    assert.deepEqual(await readFile(partial.images[0]!.filePath), bytes);
+    assert.deepEqual(await readdir(partial.directory), [
+      '001.png',
+      'manifest.json',
+    ]);
+    assert.deepEqual(
+      JSON.parse(await readFile(partial.manifestPath!, 'utf8')),
+      partial,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(error),
+      /secret|private|signature|https:/u,
+    );
+    assert.equal(calls, 2);
+  });
+
+for (const scenario of ['http', 'invalid', 'cancel'] as const)
+  test(`first image failure still removes the empty collection on ${scenario}`, async (t) => {
+    const p = await temp(t);
+    const controller = new AbortController();
+    const error = await prepareImageSequence({
+      sequence: seq(),
+      sourceIdentifier: 'tiktok:123',
+      parentDirectory: p,
+      signal: controller.signal,
+      fetchImage: async () => {
+        if (scenario === 'cancel') controller.abort();
+        return new Response('<html>', {
+          status: scenario === 'http' ? 403 : 200,
+        });
+      },
+    }).then(
+      () => assert.fail(),
+      (error: PartialImageFailure) => error,
+    );
+    assert.equal('partialEvidence' in error, false);
+    assert.equal(error.imageIndex, 1);
     assert.deepEqual(await readdir(p), []);
   });
+
+for (const declaredCount of [null, 3])
+  test(`partial evidence retains duplicate positions and original declared count ${declaredCount}`, async (t) => {
+    const p = await temp(t);
+    const bytes = await png();
+    const sequence = seq(3);
+    sequence.declaredCount = declaredCount;
+    sequence.completenessBasis =
+      declaredCount === null ? 'returned-list' : 'declared-count';
+    let calls = 0;
+    const error = await prepareImageSequence({
+      sequence,
+      sourceIdentifier: 'tiktok:123',
+      parentDirectory: p,
+      signal: new AbortController().signal,
+      fetchImage: async () =>
+        ++calls === 3
+          ? new Response('forbidden', { status: 403 })
+          : new Response(new Uint8Array(bytes)),
+    }).then(
+      () => assert.fail(),
+      (error: PartialImageFailure) => error,
+    );
+    const evidence = error.partialEvidence;
+    assert.equal(evidence.declaredCount, declaredCount);
+    assert.equal(evidence.completenessBasis, sequence.completenessBasis);
+    assert.equal(evidence.failedImageIndex, 3);
+    assert.equal(evidence.totalBytes, 2 * bytes.length);
+    assert.deepEqual(
+      evidence.images.map((entry) => entry.index),
+      [1, 2],
+    );
+    assert.equal(evidence.images[0]!.sha256, evidence.images[1]!.sha256);
+    assert.notEqual(evidence.images[0]!.filePath, evidence.images[1]!.filePath);
+    for (const entry of evidence.images)
+      assert.deepEqual(await readFile(entry.filePath), bytes);
+    assert.deepEqual(await readdir(evidence.directory), [
+      '001.png',
+      '002.png',
+      'manifest.json',
+    ]);
+  });
+
+for (const failImage of [true, false])
+  test(`manifest write failure preserves inline verified evidence without a nonexistent path, failedImage=${failImage}`, async (t) => {
+    const p = await temp(t);
+    const bytes = await png();
+    const originalWrite = fs.writeFile;
+    let manifestWrites = 0;
+    t.mock.method(fs, 'writeFile', async (filename, ...args) => {
+      if (String(filename).endsWith('/manifest.json')) {
+        manifestWrites++;
+        await originalWrite(filename, '{'); // Simulate a short disk write.
+        throw Object.assign(new Error('test disk full'), { code: 'ENOSPC' });
+      }
+      return originalWrite(filename, ...args);
+    });
+    syncBuiltinESMExports();
+    t.after(() => {
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+    });
+    let calls = 0;
+    const error = await prepareImageSequence({
+      sequence: seq(),
+      sourceIdentifier: 'tiktok:123',
+      parentDirectory: p,
+      signal: new AbortController().signal,
+      fetchImage: async () =>
+        ++calls === 2 && failImage
+          ? new Response('forbidden', { status: 403 })
+          : new Response(new Uint8Array(bytes)),
+    }).then(
+      () => assert.fail(),
+      (error: PartialImageFailure) => error,
+    );
+    assert.equal(
+      error.code,
+      failImage ? 'media_image_download_failed' : 'media_image_invalid_file',
+    );
+    const evidence = error.partialEvidence;
+    assert.equal(evidence.status, 'partial');
+    assert.equal('manifestPath' in evidence, false);
+    assert.equal(evidence.manifestError, 'media_image_manifest_write_failed');
+    assert.equal(evidence.failedImageIndex, failImage ? 2 : null);
+    assert.equal(evidence.images.length, failImage ? 1 : 2);
+    for (const entry of evidence.images)
+      assert.deepEqual(await readFile(entry.filePath), bytes);
+    assert.deepEqual(
+      await readdir(evidence.directory),
+      failImage ? ['001.png'] : ['001.png', '002.png'],
+    );
+    assert.equal(manifestWrites, 1);
+  });
+
+test('cancellation after manifest persistence updates it without claiming a failed image', async (t) => {
+  const p = await temp(t);
+  const bytes = await png();
+  const controller = new AbortController();
+  const originalWrite = fs.writeFile;
+  t.mock.method(fs, 'writeFile', async (...args) => {
+    await originalWrite(...args);
+    controller.abort();
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  const error = await prepareImageSequence({
+    sequence: seq(),
+    sourceIdentifier: 'tiktok:123',
+    parentDirectory: p,
+    signal: controller.signal,
+    fetchImage: async () => new Response(new Uint8Array(bytes)),
+  }).then(
+    () => assert.fail(),
+    (error: PartialImageFailure) => error,
+  );
+  assert.equal(error.code, 'media_image_cancelled');
+  const evidence = error.partialEvidence;
+  assert.equal(evidence.status, 'partial');
+  assert.equal(evidence.failedImageIndex, null);
+  assert.equal(evidence.images.length, 2);
+  assert.deepEqual(
+    JSON.parse(await readFile(evidence.manifestPath!, 'utf8')),
+    evidence,
+  );
+});
+
+test('CLI error JSON exposes verified partial images while retaining its error and exit 1', async (t) => {
+  const p = await temp(t);
+  const bytes = await png();
+  let calls = 0;
+  // Use the existing command dependency seam to deliver a real preparation
+  // error; this checks error serialization independently of source transport.
+  const failure = await prepareImageSequence({
+    sequence: seq(),
+    sourceIdentifier: 'tiktok:123',
+    parentDirectory: p,
+    signal: new AbortController().signal,
+    fetchImage: async () =>
+      new Response(++calls === 1 ? new Uint8Array(bytes) : '<html>'),
+  }).then(
+    () => assert.fail(),
+    (error: PartialImageFailure) => error,
+  );
+  let output = '';
+  t.mock.method(console, 'error', (value) => {
+    output = String(value);
+  });
+  t.mock.method(console, 'log', () =>
+    assert.fail('failed operation must not print success'),
+  );
+  const exit = await runMediaPrepareCommand(
+    ['--source', 'https://media.example/video.mp4'],
+    {
+      prepareVideo: async () => {
+        throw failure;
+      },
+    },
+  );
+  assert.equal(exit, 1);
+  const parsed = JSON.parse(output);
+  assert.equal(parsed.code, 'media_image_unsupported');
+  assert.equal(parsed.stage, failure.stage);
+  assert.equal(parsed.imageIndex, 2);
+  assert.equal(parsed.retryable, false);
+  assert.deepEqual(parsed.partialEvidence, failure.partialEvidence);
+  assert.doesNotMatch(output, /signature|private|https:/u);
+  assert.deepEqual(
+    await readFile(parsed.partialEvidence.images[0].filePath),
+    bytes,
+  );
+});
 
 test('untrusted streaming bytes cannot bypass size bound, formats may vary', async (t) => {
   const p = await temp(t);
