@@ -932,3 +932,267 @@ test('unknown source submission still resumes with status when no trusted reject
     ['resolve-source', 'source-status'],
   );
 });
+
+for (const identityInQuery of [true, false]) {
+  test(`upload timeout internally recovers a final session (${identityInQuery ? 'query identity' : 'hosted identity'}) without resending bytes`, async (t) => {
+    const h = await setup(t);
+    const calls: string[] = [];
+    const budgets: number[] = [];
+    t.mock.method(AbortSignal, 'timeout', (ms: number) => {
+      budgets.push(ms);
+      return new AbortController().signal;
+    });
+    h.options.dependencies!.fetchResponse = async (url, init) => {
+      assert.equal(url, uploadUrl);
+      const command = new Headers(init.headers).get('x-goog-upload-command')!;
+      calls.push(command);
+      assert.equal(h.state().phase, 'uploading');
+      assert.equal(h.state().uploadToken, 'signed-ticket');
+      if (command === 'upload, finalize') {
+        for await (const _chunk of init.body as unknown as AsyncIterable<Buffer>) {
+          /* consume bytes before lost ACK */
+        }
+        throw new DOMException('The operation timed out', 'TimeoutError');
+      }
+      assert.equal(init.body, undefined);
+      return new Response(
+        identityInQuery
+          ? JSON.stringify({ file: { name: 'files/recovered' } })
+          : null,
+        {
+          headers: { 'x-goog-upload-status': 'final' },
+        },
+      );
+    };
+    h.options.request = async (request) => {
+      h.requests.push(request);
+      if (request.operation === 'prepare-upload') return upload;
+      assert.equal(request.operation, 'recover-upload');
+      assert.equal(request.operationId, 'parent-operation');
+      assert.deepEqual(request.input, { uploadToken: 'signed-ticket' });
+      return { output: { status: 'completed', fileName: 'files/recovered' } };
+    };
+    const result = await prepareVideoAnalysisInput(h.options);
+    assert.equal(
+      result.videoReference,
+      'postplus-video://signed-ticket/files/recovered',
+    );
+    assert.equal(h.state().phase, 'uploaded');
+    assert.deepEqual(calls, ['upload, finalize', 'query']);
+    assert.deepEqual(budgets, [300_000, 30_000]);
+    assert.deepEqual(
+      h.requests.map((r) => r.operation),
+      identityInQuery
+        ? ['prepare-upload']
+        : ['prepare-upload', 'recover-upload'],
+    );
+  });
+}
+
+for (const outcome of [
+  'active-zero',
+  'active-partial',
+  'unknown',
+  'query-timeout',
+  'final-unknown',
+] as const) {
+  test(`upload timeout followed by ${outcome} preserves the same checkpoint and never resends`, async (t) => {
+    const h = await setup(t);
+    const { PostPlusNetworkRequestError } = await import(
+      './network-diagnostics.js'
+    );
+    const failure = new PostPlusNetworkRequestError({
+      method: 'POST',
+      targetUrl: uploadUrl,
+      cause: new DOMException('The operation timed out', 'TimeoutError'),
+    });
+    const calls: string[] = [];
+    h.options.dependencies!.fetchResponse = async (_url, init) => {
+      const command = new Headers(init.headers).get('x-goog-upload-command')!;
+      calls.push(command);
+      if (command === 'upload, finalize') throw failure;
+      assert.equal(init.body, undefined);
+      if (outcome === 'query-timeout')
+        throw new DOMException('Timed out', 'TimeoutError');
+      return new Response(null, {
+        headers: {
+          'x-goog-upload-status': outcome.startsWith('active')
+            ? 'active'
+            : outcome === 'final-unknown'
+              ? 'final'
+              : 'unknown',
+          'x-goog-upload-size-received':
+            outcome === 'active-partial' ? '5' : '0',
+        },
+      });
+    };
+    h.options.request = async (request) => {
+      h.requests.push(request);
+      return request.operation === 'prepare-upload'
+        ? upload
+        : { output: { status: 'unknown' } };
+    };
+    await assert.rejects(
+      prepareVideoAnalysisInput(h.options),
+      (error: unknown) =>
+        outcome === 'final-unknown'
+          ? (error as { code?: string }).code ===
+            'media_video_upload_result_unknown'
+          : error === failure,
+    );
+    assert.deepEqual(calls, ['upload, finalize', 'query']);
+    assert.equal(h.state().phase, 'uploading');
+    assert.equal(h.state().uploadUrl, uploadUrl);
+    assert.equal(h.state().uploadToken, 'signed-ticket');
+    assert.equal(h.state().uploadPreparationAttempts, 1);
+    assert.deepEqual(
+      h.requests.map((r) => r.operation),
+      outcome === 'final-unknown'
+        ? ['prepare-upload', 'recover-upload']
+        : ['prepare-upload'],
+    );
+  });
+}
+
+test('an ordinary upload transport failure does not trigger the timeout query path', async (t) => {
+  const h = await setup(t);
+  let calls = 0;
+  h.options.dependencies!.fetchResponse = async () => {
+    calls += 1;
+    throw new Error('Connection reset');
+  };
+  await assert.rejects(prepareVideoAnalysisInput(h.options), {
+    code: 'media_video_upload_result_unknown',
+  });
+  assert.equal(calls, 1);
+  assert.equal(h.state().phase, 'uploading');
+});
+
+test('timeout while reading the upload ACK body also queries the original session', async (t) => {
+  const h = await setup(t);
+  const calls: string[] = [];
+  h.options.dependencies!.fetchResponse = async (_url, init) => {
+    const command = new Headers(init.headers).get('x-goog-upload-command')!;
+    calls.push(command);
+    if (command === 'upload, finalize')
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new DOMException('Timed out', 'TimeoutError'));
+          },
+        }),
+      );
+    return new Response(JSON.stringify({ file: { name: 'files/recovered' } }), {
+      headers: { 'x-goog-upload-status': 'final' },
+    });
+  };
+  const result = await prepareVideoAnalysisInput(h.options);
+  assert.equal(
+    result.videoReference,
+    'postplus-video://signed-ticket/files/recovered',
+  );
+  assert.deepEqual(calls, ['upload, finalize', 'query']);
+  assert.equal(h.requests.length, 1);
+});
+
+test('an aborted deadline still recovers when the response body reports AbortError', async (t) => {
+  const h = await setup(t);
+  const uploadDeadline = new AbortController();
+  t.mock.method(AbortSignal, 'timeout', (ms: number) =>
+    ms === 300_000 ? uploadDeadline.signal : new AbortController().signal,
+  );
+  let calls = 0;
+  h.options.dependencies!.fetchResponse = async (_url, init) => {
+    calls += 1;
+    if (calls === 1) {
+      uploadDeadline.abort(new DOMException('Timed out', 'TimeoutError'));
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new DOMException('Aborted', 'AbortError'));
+          },
+        }),
+      );
+    }
+    assert.equal(init.signal?.aborted, false);
+    assert.equal(
+      new Headers(init.headers).get('x-goog-upload-command'),
+      'query',
+    );
+    return new Response(JSON.stringify({ file: { name: 'files/recovered' } }), {
+      headers: { 'x-goog-upload-status': 'final' },
+    });
+  };
+  const result = await prepareVideoAnalysisInput(h.options);
+  assert.equal(
+    result.videoReference,
+    'postplus-video://signed-ticket/files/recovered',
+  );
+  assert.equal(calls, 2);
+});
+
+test('proven pre-execution preparation rejections do not consume the empty-session recovery budget', async (t) => {
+  const h = await setup(t);
+  const rejected = new Error('Compatibility rejected before execution');
+  h.options.isRequestRejectedBeforeExecution = (error) => error === rejected;
+  h.options.request = async (request) => {
+    h.requests.push(request);
+    throw rejected;
+  };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await assert.rejects(
+      prepareVideoAnalysisInput({
+        ...h.options,
+        state: attempt ? h.state() : undefined,
+      }),
+      (error) => error === rejected,
+    );
+    assert.equal(h.state().phase, 'downloaded');
+    assert.equal(h.state().uploadPreparationAttempts, undefined);
+    assert.equal(h.state().uploadUrl, undefined);
+  }
+  h.options.request = async (request) => {
+    h.requests.push(request);
+    return upload;
+  };
+  const result = await prepareVideoAnalysisInput({
+    ...h.options,
+    state: h.state(),
+  });
+  assert.equal(
+    result.videoReference,
+    'postplus-video://signed-ticket/files/test_file',
+  );
+  assert.equal(h.state().uploadPreparationAttempts, 1);
+  assert.equal(h.requests.length, 4);
+});
+
+test('a rejected preparation does not erase an earlier unknown preparation attempt', async (t) => {
+  const h = await setup(t);
+  const rejected = new Error('Compatibility rejected before execution');
+  h.options.isRequestRejectedBeforeExecution = (error) => error === rejected;
+  h.options.request = async () => {
+    throw new Error('ACK lost');
+  };
+  await assert.rejects(prepareVideoAnalysisInput(h.options), {
+    code: 'media_video_upload_preparation_unknown',
+  });
+  assert.equal(h.state().uploadPreparationAttempts, 1);
+  h.options.request = async () => {
+    throw rejected;
+  };
+  await assert.rejects(
+    prepareVideoAnalysisInput({ ...h.options, state: h.state() }),
+    (error) => error === rejected,
+  );
+  assert.equal(h.state().uploadPreparationAttempts, 1);
+  assert.equal(h.state().phase, 'downloaded');
+  h.options.request = async () => {
+    throw new Error('ACK lost again');
+  };
+  await assert.rejects(
+    prepareVideoAnalysisInput({ ...h.options, state: h.state() }),
+    { code: 'media_video_upload_preparation_unknown' },
+  );
+  assert.equal(h.state().uploadPreparationAttempts, 2);
+});

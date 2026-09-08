@@ -2,6 +2,7 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { VIDEO_UPLOAD_TIMEOUT_MS } from './generated/hosted-execution-manifest.generated.js';
 import {
   type LocalVideoMetadata,
   inspectVideoFile,
@@ -81,6 +82,8 @@ export type PrepareVideoAnalysisInputOptions = {
   onProgress?(message: string): void;
   /** The outer HTTP boundary recognizes its product/quote classes without a circular import. */
   isHostedRequestError?(error: unknown): boolean;
+  /** The outer compatibility boundary proves that this request never executed. */
+  isRequestRejectedBeforeExecution?(error: unknown): boolean;
   /** Trust only an outer-boundary guarantee that this source submission never occurred. */
   isSourceSubmissionRejected?(error: unknown): boolean;
   /** Produce an existing product error using the outer boundary's public-message policy. */
@@ -99,8 +102,9 @@ export class VideoTransferError extends Error {
   constructor(
     public readonly code: string,
     public readonly recoverable = false,
+    options?: ErrorOptions,
   ) {
-    super(code);
+    super(code, options);
     this.name = 'VideoTransferError';
   }
 }
@@ -308,6 +312,14 @@ export async function prepareVideoAnalysisInput(
         }),
       );
     } catch (error) {
+      if (options.isRequestRejectedBeforeExecution?.(error)) {
+        state.uploadPreparationAttempts -= 1;
+        if (state.uploadPreparationAttempts === 0)
+          delete state.uploadPreparationAttempts;
+        state.phase = 'downloaded';
+        await save();
+        throw error;
+      }
       if (options.isHostedRequestError?.(error)) throw error;
       throw new VideoTransferError(
         'media_video_upload_preparation_unknown',
@@ -341,40 +353,7 @@ export async function prepareVideoAnalysisInput(
       headers: { 'x-goog-upload-command': 'query' },
     });
     const status = response.headers.get('x-goog-upload-status');
-    if (status === 'final') {
-      let name = fileNameFrom(await response.json().catch(() => null));
-      if (!name) {
-        progress('Recovering the completed upload identity.');
-        await save();
-        let recovered: Record<string, unknown>;
-        try {
-          recovered = output(
-            await options.request({
-              operation: 'recover-upload',
-              operationId,
-              input: { uploadToken: state.uploadToken },
-            }),
-          );
-        } catch (error) {
-          if (options.isHostedRequestError?.(error)) throw error;
-          throw new VideoTransferError(
-            'media_video_upload_result_unknown',
-            true,
-          );
-        }
-        if (recovered.status === 'completed')
-          name = fileNameFrom({ file: { name: recovered.fileName } });
-        if (!name)
-          throw new VideoTransferError(
-            'media_video_upload_result_unknown',
-            true,
-          );
-      }
-      state.fileName = name;
-      state.phase = 'uploaded';
-      await save();
-      return result();
-    }
+    if (status === 'final') return completeUpload(response);
     const received = response.headers.get('x-goog-upload-size-received');
     if (status !== 'active' || received === null || !/^\d+$/u.test(received))
       throw new VideoTransferError('media_video_upload_result_unknown', true);
@@ -389,6 +368,7 @@ export async function prepareVideoAnalysisInput(
     offset < state.metadata.bytes
       ? createReadStream(state.filePath, { start: offset })
       : undefined;
+  const uploadSignal = AbortSignal.timeout(VIDEO_UPLOAD_TIMEOUT_MS);
   try {
     const response = await uploadRequest({
       headers: {
@@ -398,16 +378,70 @@ export async function prepareVideoAnalysisInput(
       },
       body: body as unknown as RequestInit['body'],
       duplex: 'half',
+      signal: uploadSignal,
     });
-    const name = fileNameFrom(await response.json().catch(() => null));
+    const name = fileNameFrom(
+      await response.json().catch((error: unknown) => {
+        if (uploadSignal.aborted || isTimeoutError(error)) throw error;
+        return null;
+      }),
+    );
     if (!name)
       throw new VideoTransferError('media_video_upload_result_unknown', true);
     state.fileName = name;
     state.phase = 'uploaded';
     await save();
     return result();
+  } catch (error) {
+    // A timeout says nothing about whether Google finalized the bytes. Stop the
+    // stream before one read-only query; never send bytes again in this call.
+    body?.destroy();
+    if (uploadSignal.aborted || isTimeoutError(error)) {
+      progress('Upload response timed out; checking the existing session.');
+      let response: Response | undefined;
+      try {
+        response = await uploadRequest({
+          headers: { 'x-goog-upload-command': 'query' },
+        });
+      } catch {
+        // Keep the original upload diagnostic and durable session on query failure.
+      }
+      if (response?.headers.get('x-goog-upload-status') === 'final')
+        return completeUpload(response);
+      await response?.body?.cancel().catch(() => undefined);
+    }
+    throw error;
   } finally {
     body?.destroy();
+  }
+
+  async function completeUpload(response: Response) {
+    let name = fileNameFrom(await response.json().catch(() => null));
+    if (!name) {
+      progress('Recovering the completed upload identity.');
+      await save();
+      let recovered: Record<string, unknown>;
+      try {
+        recovered = output(
+          await options.request({
+            operation: 'recover-upload',
+            operationId,
+            input: { uploadToken: state.uploadToken },
+          }),
+        );
+      } catch (error) {
+        if (options.isHostedRequestError?.(error)) throw error;
+        throw new VideoTransferError('media_video_upload_result_unknown', true);
+      }
+      if (recovered.status === 'completed')
+        name = fileNameFrom({ file: { name: recovered.fileName } });
+      if (!name)
+        throw new VideoTransferError('media_video_upload_result_unknown', true);
+    }
+    state.fileName = name;
+    state.phase = 'uploaded';
+    await save();
+    return result();
   }
 
   async function uploadRequest(init: RequestInit & { duplex?: 'half' }) {
@@ -416,7 +450,7 @@ export async function prepareVideoAnalysisInput(
         ...init,
         method: 'POST',
         redirect: 'error',
-        signal: AbortSignal.timeout(120_000),
+        signal: init.signal ?? AbortSignal.timeout(30_000),
       });
       if (!response.ok) {
         await response.body?.cancel();
@@ -425,7 +459,9 @@ export async function prepareVideoAnalysisInput(
       return response;
     } catch (error) {
       if (error instanceof PostPlusNetworkRequestError) throw error;
-      throw new VideoTransferError('media_video_upload_result_unknown', true);
+      throw new VideoTransferError('media_video_upload_result_unknown', true, {
+        cause: error,
+      });
     }
   }
   function result() {
@@ -436,4 +472,20 @@ export async function prepareVideoAnalysisInput(
       sourceBilling: state.sourceResult?.billing,
     };
   }
+}
+
+function isTimeoutError(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    const value = record(current);
+    if (
+      value.name === 'TimeoutError' ||
+      value.code === 'UND_ERR_HEADERS_TIMEOUT' ||
+      value.code === 'UND_ERR_BODY_TIMEOUT' ||
+      value.code === 'ETIMEDOUT'
+    )
+      return true;
+    current = value.cause;
+  }
+  return false;
 }

@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { HOSTED_MEDIA_REFERENCE_URI_PREFIX } from './generated/hosted-field-validation-core.generated.js';
 import {
+  HostedCompatibilityRequestError,
   HostedProductRequestError,
   HostedQuoteConfirmationRequiredError,
   type HostedRequestContext,
@@ -37,9 +38,13 @@ import { readLargeCreditQuoteConfirmationChallenge } from './quote-confirmation.
 
 const videoTransferErrors = {
   isSourceSubmissionRejected: (error: unknown) =>
-    error instanceof HostedProductRequestError &&
-    error.productError.sourceSubmissionRejected === true,
+    error instanceof HostedCompatibilityRequestError ||
+    (error instanceof HostedProductRequestError &&
+      error.productError.sourceSubmissionRejected === true),
+  isRequestRejectedBeforeExecution: (error: unknown) =>
+    error instanceof HostedCompatibilityRequestError,
   isHostedRequestError: (error: unknown) =>
+    error instanceof HostedCompatibilityRequestError ||
     error instanceof HostedProductRequestError ||
     error instanceof HostedQuoteConfirmationRequiredError,
   sourceFailureError: (failure: VideoSourceFailure) =>
@@ -232,13 +237,14 @@ export async function executeVideoAnalysis(input: {
             context,
           });
         } catch (error) {
-          // The synchronous quote gate rejects before creating an analysis run.
+          // Compatibility and synchronous quote gates reject before execution.
           // A failed read-only input count also proves no analysis was created.
           // Unknown transport failures must retain the submission marker.
           if (
             checkpoint &&
             !submissionAttempted &&
-            (error instanceof HostedQuoteConfirmationRequiredError ||
+            (error instanceof HostedCompatibilityRequestError ||
+              error instanceof HostedQuoteConfirmationRequiredError ||
               (error instanceof HostedProductRequestError &&
                 (error.productError.analysisSubmissionRejected === true ||
                   error.productError.code ===

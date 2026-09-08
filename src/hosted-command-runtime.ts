@@ -37,6 +37,18 @@ export type HostedRequestContext = {
   requestJson?: Record<string, unknown> | unknown[];
 };
 
+// Recognized compatibility codes are returned by the hosted route before
+// capability execution. Preserve that proof when formatting user guidance.
+export class HostedCompatibilityRequestError extends Error {
+  constructor(
+    message: string,
+    readonly code: string | null,
+  ) {
+    super(message);
+    this.name = 'HostedCompatibilityRequestError';
+  }
+}
+
 export class HostedQuoteConfirmationRequiredError extends Error {
   constructor(
     message: string,
@@ -160,7 +172,10 @@ export async function postHostedJson(input: {
     const compatibilityError = formatPostPlusCompatibilityError(payload);
     if (compatibilityError) {
       await clearUpdateCheckCache();
-      throw new Error(compatibilityError);
+      throw new HostedCompatibilityRequestError(
+        compatibilityError,
+        productError.code,
+      );
     }
     const retryAfter = response.headers.get('retry-after');
     const retryAfterMs =

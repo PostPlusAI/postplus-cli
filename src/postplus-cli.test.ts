@@ -11504,6 +11504,316 @@ globalThis.fetch=async(url,init)=>{
     });
   }
 
+  for (const rejection of [
+    'postplus_cli_cloud_release_in_progress',
+    'postplus_client_upgrade_required',
+    'unknown-json-503',
+    'unknown-html-503',
+  ]) {
+    it(`video recovery preserves submission certainty after ${rejection}`, async () => {
+      const fixture = await tinyVideoFixture();
+      await setLocalSession({
+        accountId: 'account_1',
+        apiBaseUrl: 'https://postplus.test',
+        cliSessionToken: 'cli-session-token',
+        sessionExpiresAt: null,
+        userId: 'user_1',
+      });
+      const originalFetch = globalThis.fetch;
+      const outputPath = resolve(
+        fixture.filePath,
+        '..',
+        'compatibility-report.md',
+      );
+      const rejectedBeforeExecution = !rejection.startsWith('unknown-');
+      const operations: string[] = [];
+      let executions = 0;
+      let statusGuardReturned = false;
+      globalThis.fetch = withGoogleVideoUpload(async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        operations.push(body.operation);
+        if (body.operation === 'analyze') {
+          assert.equal(body.operationId, 'compatibility-operation');
+          if (operations.length === 1) {
+            if (rejection === 'unknown-html-503')
+              return new Response('<html>Service unavailable</html>', {
+                status: 503,
+              });
+            return Response.json(
+              {
+                code: rejection,
+                // The wording alone must never prove pre-execution rejection.
+                error:
+                  'PostPlus Cloud is updating. Please retry in about one minute.',
+              },
+              {
+                status:
+                  rejection === 'postplus_client_upgrade_required' ? 426 : 503,
+              },
+            );
+          }
+          assert.equal(
+            rejectedBeforeExecution,
+            true,
+            'unknown outcomes must not resubmit',
+          );
+          executions++;
+        } else {
+          assert.equal(body.operation, 'status');
+          assert.equal(body.sourceOperationId, 'compatibility-operation');
+          assert.equal(rejectedBeforeExecution, false);
+          if (!statusGuardReturned) {
+            statusGuardReturned = true;
+            return Response.json(
+              {
+                code: 'postplus_cli_cloud_release_in_progress',
+              },
+              { status: 503 },
+            );
+          }
+        }
+        return Response.json({
+          output: {
+            data: {
+              id: 'compatibility-run',
+              status: 'completed',
+              markdown: 'Recovered report.\n',
+            },
+          },
+        });
+      }, fixture);
+      try {
+        const firstCall = runHostedDomainCommand('media', [
+          'analyze',
+          'video-analysis',
+          '--video',
+          fixture.filePath,
+          '--output',
+          outputPath,
+          '--hosted-operation-id',
+          'compatibility-operation',
+        ]);
+        if (rejectedBeforeExecution || rejection === 'unknown-html-503')
+          await assert.rejects(firstCall);
+        else assert.equal(await firstCall, 1);
+        const directory = resolve(
+          process.env.POSTPLUS_CONFIG_DIR!,
+          'media-runs',
+        );
+        const checkpointPath = resolve(
+          directory,
+          (await readdir(directory))[0]!,
+        );
+        const checkpoint = JSON.parse(await readFile(checkpointPath, 'utf8'));
+        assert.equal(checkpoint.operationId, 'compatibility-operation');
+        assert.equal(
+          checkpoint.analysisSubmissionAttempted,
+          rejectedBeforeExecution ? undefined : true,
+        );
+        assert.equal(checkpoint.videoTransfer.phase, 'uploaded');
+        const resume = [
+          'poll',
+          '--resume-from',
+          checkpointPath,
+          '--wait-seconds',
+          '0',
+          '--output',
+          outputPath,
+        ];
+        if (!rejectedBeforeExecution) {
+          await assert.rejects(
+            () => runHostedDomainCommand('media', resume),
+            /Cloud is updating/u,
+          );
+          assert.equal(
+            JSON.parse(await readFile(checkpointPath, 'utf8'))
+              .analysisSubmissionAttempted,
+            true,
+            'a compatibility rejection of status cannot prove the original submit was rejected',
+          );
+        }
+        assert.equal(await runHostedDomainCommand('media', resume), 0);
+        assert.deepEqual(
+          operations,
+          rejectedBeforeExecution
+            ? ['analyze', 'analyze']
+            : ['analyze', 'status', 'status'],
+        );
+        assert.equal(executions, rejectedBeforeExecution ? 1 : 0);
+        assert.equal(await readFile(outputPath, 'utf8'), 'Recovered report.\n');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
+
+  for (const phase of ['resolve-source', 'prepare-upload'] as const) {
+    for (const knownRejection of [true, false]) {
+      it(`video ${phase} recovery distinguishes compatibility rejection from unknown 503: ${knownRejection}`, async () => {
+        const fixture = await tinyVideoFixture();
+        await setLocalSession({
+          accountId: 'account_1',
+          apiBaseUrl: 'https://postplus.test',
+          cliSessionToken: 'cli-session-token',
+          sessionExpiresAt: null,
+          userId: 'user_1',
+        });
+        const originalFetch = globalThis.fetch;
+        const operations: string[] = [];
+        let rejected = 0;
+        const rejectionCount = phase === 'prepare-upload' ? 2 : 1;
+        const outputPath = resolve(fixture.filePath, '..', 'transfer-guard.md');
+        const source =
+          phase === 'resolve-source'
+            ? 'https://www.tiktok.com/@example/video/123'
+            : fixture.filePath;
+        const upload = withGoogleVideoUpload(async (_url, init) => {
+          const body = JSON.parse(String(init?.body));
+          assert.equal(body.operation, 'analyze');
+          return Response.json({
+            output: {
+              data: {
+                id: 'transfer-guard-run',
+                status: 'completed',
+                markdown: 'Transfer recovered.\n',
+              },
+            },
+          });
+        }, fixture);
+        globalThis.fetch = async (url, init) => {
+          if (String(url) === 'https://download.test/source.mp4')
+            return new Response(fixture.bytes, {
+              headers: { 'content-type': 'video/mp4' },
+            });
+          if (
+            String(url) ===
+            'https://postplus.test/api/postplus-cli/hosted/capability'
+          ) {
+            const body = JSON.parse(String(init?.body));
+            operations.push(body.operation);
+            assert.equal(body.operationId, 'transfer-guard-operation');
+            if (body.operation === phase && rejected < rejectionCount) {
+              rejected++;
+              return Response.json(
+                {
+                  code: knownRejection
+                    ? 'postplus_cli_cloud_release_in_progress'
+                    : 'unknown_gateway_failure',
+                  error:
+                    'PostPlus Cloud is updating. Please retry in about one minute.',
+                },
+                { status: 503 },
+              );
+            }
+            if (['resolve-source', 'source-status'].includes(body.operation))
+              return Response.json({
+                output: {
+                  status: 'completed',
+                  source: {
+                    kind: 'video',
+                    videoCandidates: [
+                      { url: 'https://download.test/source.mp4' },
+                    ],
+                  },
+                },
+              });
+          }
+          return upload(url, init);
+        };
+        try {
+          let command = [
+            'analyze',
+            'video-analysis',
+            '--video',
+            source,
+            '--hosted-operation-id',
+            'transfer-guard-operation',
+            '--output',
+            outputPath,
+          ];
+          let checkpointPath = '';
+          for (let attempt = 1; attempt <= rejectionCount; attempt++) {
+            if (knownRejection)
+              await assert.rejects(
+                () => runHostedDomainCommand('media', command),
+                /Cloud is updating/u,
+              );
+            else
+              assert.equal(await runHostedDomainCommand('media', command), 1);
+            const directory = resolve(
+              process.env.POSTPLUS_CONFIG_DIR!,
+              'media-runs',
+            );
+            checkpointPath = resolve(directory, (await readdir(directory))[0]!);
+            const checkpoint = JSON.parse(
+              await readFile(checkpointPath, 'utf8'),
+            );
+            assert.equal(checkpoint.operationId, 'transfer-guard-operation');
+            assert.equal(checkpoint.analysisSubmissionAttempted, undefined);
+            if (phase === 'resolve-source')
+              assert.equal(
+                checkpoint.videoTransfer.sourceSubmissionAttempted,
+                knownRejection ? undefined : true,
+              );
+            else
+              assert.equal(
+                checkpoint.videoTransfer.uploadPreparationAttempts ?? 0,
+                knownRejection ? 0 : attempt,
+              );
+            command = [
+              'poll',
+              '--resume-from',
+              checkpointPath,
+              '--wait-seconds',
+              '0',
+              '--output',
+              outputPath,
+            ];
+          }
+          if (phase === 'prepare-upload' && !knownRejection) {
+            await assert.rejects(() =>
+              runHostedDomainCommand('media', command),
+            );
+            assert.deepEqual(
+              operations,
+              ['prepare-upload', 'prepare-upload'],
+              'unknown preparation outcomes keep their bounded allowance',
+            );
+            const checkpoint = JSON.parse(
+              await readFile(checkpointPath, 'utf8'),
+            );
+            assert.equal(checkpoint.videoTransfer.uploadPreparationAttempts, 2);
+            assert.equal(checkpoint.videoTransfer.uploadToken, undefined);
+          } else {
+            assert.equal(await runHostedDomainCommand('media', command), 0);
+            assert.deepEqual(
+              operations,
+              phase === 'resolve-source'
+                ? [
+                    'resolve-source',
+                    knownRejection ? 'resolve-source' : 'source-status',
+                    'prepare-upload',
+                    'analyze',
+                  ]
+                : [
+                    'prepare-upload',
+                    'prepare-upload',
+                    'prepare-upload',
+                    'analyze',
+                  ],
+            );
+            assert.equal(
+              await readFile(outputPath, 'utf8'),
+              'Transfer recovered.\n',
+            );
+          }
+        } finally {
+          globalThis.fetch = originalFetch;
+        }
+      });
+    }
+  }
+
   for (const pauseAt of ['submit', 'poll'] as const) {
     it(`public hosted-lib stops at async video quote on ${pauseAt} and confirms the same operation`, async () => {
       const originalFetch = globalThis.fetch;

@@ -5,6 +5,9 @@
 export const HOSTED_EXECUTION_MANIFEST_SCHEMA_VERSION =
   'hosted-execution-manifest/v1' as const;
 
+// Internal byte-transfer budget, projected from the Google Files worker owner.
+export const VIDEO_UPLOAD_TIMEOUT_MS = 300000 as const;
+
 export const HOSTED_EXECUTION_MANIFESTS = {
   "audio-transcription": [
     {
