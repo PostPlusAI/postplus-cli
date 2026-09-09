@@ -9,6 +9,7 @@ import {
   readdir,
   realpath,
   rm,
+  stat,
   writeFile,
 } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -53,6 +54,7 @@ import {
   runBalanceCommand,
   runRunsCommand,
 } from './hosted-account-commands.js';
+import { HostedQuoteConfirmationRequiredError } from './hosted-command-runtime.js';
 import {
   runHostedDomainCommand,
   runMediaFileCommand,
@@ -196,8 +198,8 @@ function createVideoAnalysisCatalogResponse(): Response {
       source: 'PostPlusAI/postplus-skills',
       skills: [
         {
-          name: 'video-analysis',
-          path: 'skills/video-analysis/SKILL.md',
+          name: 'media-analysis',
+          path: 'skills/media-analysis/SKILL.md',
           requirements: {
             capabilities: ['media'],
             modelKeys: ['video-analysis'],
@@ -600,6 +602,99 @@ async function generateFixtureUpdateStatus(input: { force?: boolean } = {}) {
       stderr: '',
     }),
   });
+}
+
+async function tinyVideoFixture() {
+  const directory = await mkdtemp(resolve(tmpdir(), 'postplus-google-video-'));
+  tempDirs.push(directory);
+  const filePath = resolve(directory, 'clip.mp4');
+  await execFileAsync('ffmpeg', [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=blue:s=32x32:r=10',
+    '-f',
+    'lavfi',
+    '-i',
+    'anullsrc=r=16000:cl=mono',
+    '-t',
+    '0.2',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-y',
+    filePath,
+  ]);
+  return { filePath, bytes: await readFile(filePath) };
+}
+
+function withGoogleVideoUpload(
+  next: typeof fetch,
+  fixture: { filePath: string; bytes: Buffer },
+): typeof fetch {
+  const uploadUrl =
+    'https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=local-test';
+  let operationId: string | undefined;
+  let uploads = 0;
+  return async (url, init) => {
+    const headers = new Headers(init?.headers);
+    assert.equal(
+      headers.has('x-goog-api-key'),
+      false,
+      'the CLI never receives a Google key',
+    );
+    if (String(url) === uploadUrl) {
+      assert.equal(init?.method, 'POST');
+      assert.equal(headers.get('x-goog-upload-command'), 'upload, finalize');
+      const chunks: Buffer[] = [];
+      for await (const chunk of init?.body as unknown as ReadStream)
+        chunks.push(Buffer.from(chunk));
+      assert.deepEqual(Buffer.concat(chunks), fixture.bytes);
+      uploads++;
+      assert.equal(uploads, 1);
+      return Response.json({ file: { name: 'files/local-test' } });
+    }
+    const body = JSON.parse(String(init?.body));
+    assert.notEqual(
+      body.capability,
+      'media-file',
+      'video analysis must not stage to PostPlus Storage',
+    );
+    if (body.operation === 'prepare-upload') {
+      assert.equal(body.capability, 'video-analysis');
+      assert.equal(operationId, undefined, 'one upload preparation per call');
+      operationId = body.operationId;
+      assert.equal(body.input.metadata.bytes, fixture.bytes.length);
+      assert.equal(
+        body.input.metadata.sha256,
+        createHash('sha256').update(fixture.bytes).digest('hex'),
+      );
+      assert.equal(body.input.metadata.hasVideo, true);
+      assert.equal(body.input.metadata.hasAudio, true);
+      return Response.json({
+        output: {
+          uploadUrl,
+          uploadToken: 'sealed-test-token',
+          expiresAt: Date.now() + 60_000,
+        },
+      });
+    }
+    if (body.operation === 'analyze') {
+      assert.equal(body.operationId, operationId);
+      assert.equal(
+        body.input.video,
+        'postplus-video://sealed-test-token/files/local-test',
+      );
+      assert.equal(uploads, 1);
+    }
+    return next(url, init);
+  };
 }
 
 beforeEach(async () => {
@@ -1444,7 +1539,7 @@ process.exit(1);
             label: 'Task-specific local media dependencies',
             status: 'fail',
             severity: 'task_specific',
-            detail: 'Missing 1/2: ffmpeg for frame-extraction',
+            detail: 'Missing 1/2: ffmpeg for media-analysis',
             fix: 'Run the affected PostPlus skill in a local agent.',
             metadata: {
               bootstrapRule: 'postplus-shared',
@@ -1452,7 +1547,7 @@ process.exit(1);
                 {
                   dependency: 'ffmpeg',
                   detail: 'not found',
-                  skillIds: ['frame-extraction'],
+                  skillIds: ['media-analysis'],
                 },
               ],
             },
@@ -1751,13 +1846,13 @@ process.exit(1);
     };
 
     try {
-      const report = await generateDoctorReport({ skillId: 'video-analysis' });
+      const report = await generateDoctorReport({ skillId: 'media-analysis' });
       const formatted = formatDoctorReport(report);
 
-      assert.equal(report.skillId, 'video-analysis');
+      assert.equal(report.skillId, 'media-analysis');
       assert.equal(report.ok, true);
       assert.equal(report.requiredOk, true);
-      assert.match(formatted, /Hosted capabilities for video-analysis/);
+      assert.match(formatted, /Hosted capabilities for media-analysis/);
       assert.doesNotMatch(formatted, /Media generation: image-bad/);
     } finally {
       globalThis.fetch = originalFetch;
@@ -7331,11 +7426,12 @@ describe('hosted domain commands', () => {
       ),
     );
 
-    // A terminal payload has nothing to resume — stay silent.
+    // Preparation is published before POST; a completed response must not
+    // falsely claim that another poll is required.
     const terminalStderr = await runSubmit([], {
       output: { data: { id: 'run_1', status: 'completed' } },
     });
-    assert.doesNotMatch(terminalStderr, /resume/iu);
+    assert.doesNotMatch(terminalStderr, /Async run pending/iu);
   });
 
   it('submits once and waits by polling only the returned run handle', async () => {
@@ -7763,18 +7859,16 @@ describe('hosted domain commands', () => {
 
     try {
       const startedAt = Date.now();
-      const payload = (await runHostedDomainCommand(
-        'media',
-        ['poll', '--handle', 'run_1'],
-        {
+      await assert.rejects(
+        runHostedDomainCommand('media', ['poll', '--handle', 'run_1'], {
           auth: {
             apiBaseUrl: 'https://postplus.test',
             cliSessionToken: 'cli-session-token',
           },
-        },
-      )) as { output: { data: { status: string } } };
+        }),
+        /postplus_cli_hosted_media_run_failed/u,
+      );
       assert.equal(fetchCalls, 1);
-      assert.equal(payload.output.data.status, 'failed');
       // Default 45s budget must not be spent on a terminal run: no interval
       // sleep may have happened.
       assert.ok(Date.now() - startedAt < 5000);
@@ -8538,6 +8632,10 @@ describe('hosted domain commands', () => {
         String(input),
         'https://postplus.test/api/postplus-cli/hosted/capability',
       );
+      assert.equal(
+        new Headers(init?.headers).get('x-postplus-skill-name'),
+        'media-analysis',
+      );
       postedBody = JSON.parse(String(init?.body));
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -8546,15 +8644,24 @@ describe('hosted domain commands', () => {
     };
 
     try {
-      const result = await runHostedDomainCommand('media', [
-        'analyze',
-        'video-analysis',
-        '--video',
-        'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
-        '--prompt',
-        'Analyze this video for hook, pacing, and CTA.',
-      ]);
-      assert.equal(result, 0);
+      const result = await runHostedDomainCommand(
+        'media',
+        [
+          'analyze',
+          'video-analysis',
+          '--video',
+          'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
+          '--prompt',
+          'Analyze this video for hook, pacing, and CTA.',
+        ],
+        {
+          auth: {
+            apiBaseUrl: 'https://postplus.test',
+            cliSessionToken: 'cli-session-token',
+          },
+        },
+      );
+      assert.deepEqual(result, { ok: true });
       const body = postedBody as Record<string, unknown>;
       assert.equal(body.capability, 'video-analysis');
       assert.equal(body.operation, 'analyze');
@@ -8610,6 +8717,2150 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('submits a social video URL byte-for-byte without a local resolver or storage upload', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const pageUrl = 'https://www.tiktok.com/@creator/video/7675141620601195789';
+    const originalFetch = globalThis.fetch;
+    const hostedBodies: Record<string, unknown>[] = [];
+    globalThis.fetch = async (input, init) => {
+      assert.equal(
+        String(input),
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      hostedBodies.push(body);
+      return new Response(
+        JSON.stringify({
+          output: {
+            data: {
+              elapsedMs: 0,
+              id: 'video-run-1',
+              markdown: '# Analysis',
+              progress: { elapsedMs: 0, stage: 'completed' },
+              stage: 'completed',
+              status: 'completed',
+            },
+          },
+        }),
+        {
+          headers: { 'content-type': 'application/json' },
+          status: 200,
+        },
+      );
+    };
+
+    try {
+      const result = await runHostedDomainCommand(
+        'media',
+        [
+          'analyze',
+          'video-analysis',
+          '--video',
+          pageUrl,
+          '--prompt',
+          'Analyze this TikTok video.',
+        ],
+        {
+          auth: {
+            apiBaseUrl: 'https://postplus.test',
+            cliSessionToken: 'cli-session-token',
+          },
+        },
+      );
+      assert.deepEqual(result, '# Analysis');
+      assert.equal(hostedBodies.length, 1);
+      assert.equal(hostedBodies[0]?.capability, 'video-analysis');
+      assert.equal(hostedBodies[0]?.operation, 'analyze');
+      assert.deepEqual(hostedBodies[0]?.input, {
+        prompt: 'Analyze this TikTok video.',
+        video: pageUrl,
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  for (const disconnect of [false, true]) {
+    it(`analyzes a real local file through one upload and durable run${disconnect ? ', resuming a disconnected poll from its checkpoint' : ''}`, async () => {
+      await setLocalSession({
+        accountId: 'account_1',
+        apiBaseUrl: 'https://postplus.test',
+        cliSessionToken: 'private-local-session-token',
+        userId: 'user_1',
+        sessionExpiresAt: null,
+      });
+      const fixture = await tinyVideoFixture();
+      const localVideo = fixture.filePath;
+      const videoBytes = fixture.bytes;
+      const mediaReference =
+        'postplus-video://sealed-local-token/files/local-video';
+      const signedUploadUrl =
+        'https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=private-upload-token';
+      const markdown =
+        '# Local analysis\n\n## Evidence\n\n00:00–00:01 Observable hook.\n\n## Limitations\n\nNo supported claim omitted.\n';
+      const originalFetch = globalThis.fetch;
+      const originalOut = process.stdout.write;
+      const originalErr = process.stderr.write;
+      const bodies: Record<string, unknown>[] = [];
+      let stdout = '';
+      let stderr = '';
+      let uploadCount = 0;
+      let completedPolls = 0;
+      let resumed = false;
+      let checkpointPath = '';
+      let sourceOperationId = '';
+      process.stdout.write = ((chunk: unknown) => {
+        stdout += String(chunk);
+        return true;
+      }) as typeof process.stdout.write;
+      process.stderr.write = ((chunk: unknown) => {
+        stderr += String(chunk);
+        return true;
+      }) as typeof process.stderr.write;
+      globalThis.fetch = async (url, init) => {
+        if (String(url) === signedUploadUrl) {
+          uploadCount++;
+          assert.equal(init?.method, 'POST');
+          assert.equal(
+            new Headers(init?.headers).get('x-goog-upload-command'),
+            'upload, finalize',
+          );
+          assert.equal(new Headers(init?.headers).has('x-goog-api-key'), false);
+          const chunks: Buffer[] = [];
+          for await (const chunk of init?.body as unknown as ReadStream) {
+            chunks.push(Buffer.from(chunk));
+          }
+          assert.deepEqual(Buffer.concat(chunks), videoBytes);
+          return Response.json({ file: { name: 'files/local-video' } });
+        }
+        assert.equal(
+          String(url),
+          'https://postplus.test/api/postplus-cli/hosted/capability',
+        );
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        bodies.push(body);
+        assert.notEqual(body.capability, 'media-file');
+        if (body.operation === 'prepare-upload') {
+          const input = body.input as {
+            metadata: { bytes: number; sha256: string; hasAudio: boolean };
+          };
+          assert.equal(input.metadata.bytes, videoBytes.length);
+          assert.equal(
+            input.metadata.sha256,
+            createHash('sha256').update(videoBytes).digest('hex'),
+          );
+          assert.equal(input.metadata.hasAudio, true);
+          sourceOperationId = String(body.operationId);
+          return Response.json({
+            output: {
+              uploadUrl: signedUploadUrl,
+              uploadToken: 'sealed-local-token',
+              expiresAt: Date.now() + 60_000,
+            },
+          });
+        }
+        assert.equal(body.capability, 'video-analysis');
+        if (body.operation === 'analyze') {
+          assert.equal(uploadCount, 1);
+          assert.deepEqual(body.input, {
+            video: mediaReference,
+            prompt: 'private local prompt',
+          });
+          const directory = resolve(
+            process.env.POSTPLUS_CONFIG_DIR!,
+            'media-runs',
+          );
+          const files = await readdir(directory);
+          assert.equal(
+            files.length,
+            1,
+            'checkpoint must exist before analyze submit',
+          );
+          checkpointPath = resolve(directory, files[0]!);
+          assert.equal(body.operationId, sourceOperationId);
+          const checkpoint = JSON.parse(await readFile(checkpointPath, 'utf8'));
+          assert.deepEqual(
+            {
+              schemaVersion: checkpoint.schemaVersion,
+              accountId: checkpoint.accountId,
+              apiOrigin: checkpoint.apiOrigin,
+              capability: checkpoint.capability,
+              operationId: checkpoint.operationId,
+            },
+            {
+              schemaVersion: 1,
+              accountId: 'account_1',
+              apiOrigin: 'https://postplus.test',
+              capability: 'video-analysis',
+              operationId: sourceOperationId,
+            },
+          );
+          assert.equal(checkpoint.videoTransfer.phase, 'uploaded');
+          assert.equal(typeof checkpoint.videoTransfer.expiresAt, 'number');
+          assert.equal(checkpoint.analysisSubmissionAttempted, true);
+          assert.equal((await stat(checkpointPath)).mode & 0o777, 0o600);
+          return Response.json({
+            output: {
+              data: {
+                id: 'local-video-run',
+                status: 'accepted',
+                stage: 'resolving_source',
+                elapsedMs: 0,
+              },
+            },
+          });
+        }
+        assert.equal(body.operation, 'status');
+        assert.equal(body.handle, 'local-video-run');
+        assert.deepEqual(Object.keys(body).sort(), [
+          'capability',
+          'handle',
+          'operation',
+          'operationId',
+        ]);
+        const checkpoint = JSON.parse(await readFile(checkpointPath, 'utf8'));
+        assert.equal(checkpoint.operationId, sourceOperationId);
+        assert.equal(checkpoint.handle, 'local-video-run');
+        if (disconnect && !resumed)
+          throw new TypeError('fetch failed: local poll disconnected');
+        completedPolls++;
+        return Response.json({
+          output: {
+            data: {
+              id: 'local-video-run',
+              status: completedPolls < 3 ? 'running' : 'completed',
+              stage: completedPolls < 3 ? 'analyzing' : 'completed',
+              elapsedMs: completedPolls * 10,
+              markdown: completedPolls < 3 ? null : markdown,
+            },
+          },
+        });
+      };
+      try {
+        const command = [
+          'analyze',
+          'video-analysis',
+          '--video',
+          localVideo,
+          '--prompt',
+          'private local prompt',
+          '--poll-interval-seconds',
+          '0.001',
+        ];
+        if (disconnect) {
+          await assert.rejects(
+            runHostedDomainCommand('media', command),
+            /local poll disconnected/u,
+          );
+          assert.equal(stdout, '');
+          // A new invocation only needs the saved identity: even removing the
+          // caller-local source cannot force a second upload or analyze submit.
+          await rm(localVideo);
+          resumed = true;
+          assert.equal(
+            await runHostedDomainCommand('media', [
+              'poll',
+              '--resume-from',
+              checkpointPath,
+              '--poll-interval-seconds',
+              '0.001',
+            ]),
+            0,
+          );
+        } else {
+          assert.equal(await runHostedDomainCommand('media', command), 0);
+        }
+        assert.equal(uploadCount, 1);
+        assert.equal(
+          bodies.filter((body) => body.operation === 'prepare-upload').length,
+          1,
+        );
+        assert.equal(
+          bodies.filter((body) => body.operation === 'analyze').length,
+          1,
+        );
+        assert.equal(
+          bodies.filter((body) => body.operation === 'status').length,
+          disconnect ? 7 : 3,
+        );
+        assert.equal(stdout, markdown);
+        assert.equal(stderr.match(/stage=analyzing/gu)?.length, 1);
+        assert.equal(stderr.match(/stage=completed/gu)?.length, 1);
+        assert.doesNotMatch(
+          stderr,
+          /private-local-session-token|private-upload-token|private local prompt/u,
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+        process.stdout.write = originalOut;
+        process.stderr.write = originalErr;
+      }
+    });
+  }
+
+  for (const mode of ['text', 'json', 'file', 'lost-ack'] as const) {
+    it(`real CLI local video uses prepare-upload → Google bytes → one analyze → Markdown (${mode})`, async () => {
+      const fixture = await tinyVideoFixture();
+      await setLocalSession({
+        accountId: 'account_1',
+        apiBaseUrl: 'https://postplus.test',
+        cliSessionToken: 'private-cli-session',
+        userId: 'user_1',
+        sessionExpiresAt: null,
+      });
+      const tracePath = resolve(
+        process.env.POSTPLUS_CONFIG_DIR!,
+        'transfer-trace.jsonl',
+      );
+      const reportPath = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'report.md');
+      const markdown =
+        '# Requested video report\r\n\r\nA blue frame and a silent audio track.\n\n';
+      const stub = `import assert from 'node:assert/strict';
+import {appendFileSync,readFileSync,existsSync} from 'node:fs';
+const tracePath=${JSON.stringify(tracePath)}, expectedBytes=Buffer.from(${JSON.stringify(fixture.bytes.toString('base64'))},'base64');
+const log=event=>appendFileSync(tracePath,JSON.stringify(event)+'\\n');
+const history=()=>existsSync(tracePath)?readFileSync(tracePath,'utf8').trim().split('\\n').filter(Boolean).map(line=>JSON.parse(line)):[];
+const google='https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=scoped-cli';
+globalThis.fetch=async(url,init)=>{
+ const headers=new Headers(init?.headers);assert.equal(headers.has('x-goog-api-key'),false);assert.equal(headers.has('x-google-api-key'),false);
+ if(String(url)===google){
+  assert.equal(headers.has('authorization'),false);assert.equal(init.method,'POST');assert.equal(headers.get('x-goog-upload-command'),'upload, finalize');
+  const parts=[];for await(const part of init.body)parts.push(Buffer.from(part));assert.deepEqual(Buffer.concat(parts),expectedBytes);
+  log({stage:'upload',bytes:expectedBytes.length});return Response.json({file:{name:'files/cli-test'}});
+ }
+ assert.equal(String(url),'https://postplus.test/api/postplus-cli/hosted/capability');
+ const body=JSON.parse(String(init.body));assert.equal(body.capability,'video-analysis');
+ assert.ok(!JSON.stringify(body).includes('provider-key-must-not-leak'));
+ if(body.operation==='prepare-upload'){
+  assert.equal(body.input.metadata.bytes,expectedBytes.length);assert.equal(body.input.metadata.hasVideo,true);assert.equal(body.input.metadata.hasAudio,true);
+  log({stage:'prepare',operationId:body.operationId});return Response.json({output:{uploadUrl:google,uploadToken:'sealed-cli-token',expiresAt:Date.now()+60000}});
+ }
+ const prepared=history().find(event=>event.stage==='prepare');
+ if(body.operation==='analyze'){
+  assert.equal(body.operationId,prepared.operationId);assert.equal(body.input.video,'postplus-video://sealed-cli-token/files/cli-test');
+  assert.equal(Object.hasOwn(body.input,'prompt'),false);assert.ok(body.estimatedUsage.videoSeconds>0);
+  log({stage:'analyze',operationId:body.operationId});
+  if(${JSON.stringify(mode)}==='lost-ack')throw new TypeError('fetch failed: analysis ACK lost');
+  return Response.json({output:{data:{id:'cli-video-run',status:'accepted',stage:'processing_video',elapsedMs:1}}});
+ }
+ assert.equal(body.operation,'status');
+ assert.ok(body.handle==='cli-video-run'||body.sourceOperationId===prepared.operationId);
+ log({stage:'status',operationId:body.operationId,sourceOperationId:body.sourceOperationId});
+ return Response.json({output:{data:{id:'cli-video-run',status:'completed',stage:'completed',elapsedMs:5,markdown:${JSON.stringify(markdown)}}}});
+};`;
+      const invocation = [
+        '--import',
+        'tsx',
+        '--import',
+        `data:text/javascript,${encodeURIComponent(stub)}`,
+        'src/index.ts',
+      ];
+      const env = {
+        ...process.env,
+        GEMINI_API_KEY: 'provider-key-must-not-leak',
+      };
+      const command = [
+        'media',
+        'analyze',
+        'video-analysis',
+        '--video',
+        fixture.filePath,
+        '--poll-interval-seconds',
+        '0.001',
+      ];
+      if (mode === 'json') command.push('--json');
+      if (mode === 'file' || mode === 'lost-ack')
+        command.push('--output', reportPath);
+      let result: { stdout: string; stderr: string };
+      if (mode === 'lost-ack') {
+        await writeFile(reportPath, 'previous report');
+        await assert.rejects(
+          execFileAsync(process.execPath, [...invocation, ...command], { env }),
+          (error) => {
+            const failure = error as {
+              code: number;
+              stdout: string;
+              stderr: string;
+            };
+            assert.equal(failure.code, 1);
+            assert.match(failure.stderr, /ACK lost/u);
+            return true;
+          },
+        );
+        assert.equal(await readFile(reportPath, 'utf8'), 'previous report');
+        const records = await readdir(
+          resolve(process.env.POSTPLUS_CONFIG_DIR!, 'media-runs'),
+        );
+        assert.equal(records.length, 1);
+        const pointer = resolve(
+          process.env.POSTPLUS_CONFIG_DIR!,
+          'media-runs',
+          records[0]!,
+        );
+        const checkpoint = JSON.parse(await readFile(pointer, 'utf8'));
+        assert.equal(checkpoint.analysisSubmissionAttempted, true);
+        assert.equal(checkpoint.videoTransfer.phase, 'uploaded');
+        assert.equal(typeof checkpoint.videoTransfer.expiresAt, 'number');
+        assert.equal((await stat(pointer)).mode & 0o777, 0o600);
+        // The resumed process only queries the original operation. No second upload or analysis.
+        await rm(fixture.filePath);
+        result = await execFileAsync(
+          process.execPath,
+          [
+            ...invocation,
+            'media',
+            'poll',
+            '--resume-from',
+            pointer,
+            '--output',
+            reportPath,
+            '--wait-seconds',
+            '0',
+          ],
+          { env },
+        );
+      } else
+        result = await execFileAsync(
+          process.execPath,
+          [...invocation, ...command],
+          { env },
+        );
+      const events = (await readFile(tracePath, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      assert.equal(
+        events.filter((event) => event.stage === 'prepare').length,
+        1,
+      );
+      assert.equal(
+        events.filter((event) => event.stage === 'upload').length,
+        1,
+      );
+      assert.equal(
+        events.filter((event) => event.stage === 'analyze').length,
+        1,
+      );
+      assert.equal(
+        events.filter((event) => event.stage === 'status').length,
+        1,
+      );
+      if (mode === 'file' || mode === 'lost-ack') {
+        assert.equal(result.stdout, '');
+        assert.equal(await readFile(reportPath, 'utf8'), markdown);
+      } else if (mode === 'json')
+        assert.equal(JSON.parse(result.stdout), markdown);
+      else assert.equal(result.stdout, markdown);
+      assert.match(result.stderr, /stage=completed/u);
+      assert.doesNotMatch(
+        result.stdout + result.stderr,
+        /provider-key-must-not-leak|sealed-cli-token|scoped-cli|private-cli-session/u,
+      );
+    });
+  }
+
+  it('real numeric upload expiry from the hosted contract blocks Google bytes before analysis', async () => {
+    const fixture = await tinyVideoFixture();
+    await setLocalSession({
+      accountId: 'account_1',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'private-cli-session',
+      userId: 'user_1',
+      sessionExpiresAt: null,
+    });
+    const originalFetch = globalThis.fetch;
+    let prepares = 0;
+    globalThis.fetch = async (url, init) => {
+      assert.equal(
+        String(url),
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.operation, 'prepare-upload');
+      prepares++;
+      return Response.json({
+        output: {
+          uploadUrl:
+            'https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=expired',
+          uploadToken: 'sealed-expired-token',
+          expiresAt: Date.now() - 1,
+        },
+      });
+    };
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('media', [
+          'analyze',
+          'video-analysis',
+          '--video',
+          fixture.filePath,
+        ]),
+        /media_video_upload_session_expired/u,
+      );
+      assert.equal(prepares, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('waits by default on the same video run id without resubmitting and returns canonical Markdown directly', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    const bodies: Record<string, unknown>[] = [];
+    let stderrText = '';
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      const data =
+        body.operation === 'analyze'
+          ? {
+              elapsedMs: 5,
+              id: 'video-run-1',
+              markdown: null,
+              progress: { elapsedMs: 5, stage: 'resolving_source' },
+              stage: 'resolving_source',
+              status: 'accepted',
+            }
+          : {
+              elapsedMs: 70,
+              id: 'video-run-1',
+              markdown: '# Analysis\n\n00:00 Hook evidence.',
+              progress: { elapsedMs: 70, stage: 'completed' },
+              stage: 'completed',
+              status: 'completed',
+            };
+      return new Response(JSON.stringify({ output: { data } }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      });
+    };
+    process.stderr.write = ((chunk: unknown) => {
+      stderrText += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const payload = (await runHostedDomainCommand(
+        'media',
+        [
+          'analyze',
+          'video-analysis',
+          '--video',
+          'https://cdn.example.com/video.mp4',
+          '--prompt',
+          'Analyze the video.',
+          '--wait-seconds',
+          '0',
+        ],
+        {
+          auth: {
+            apiBaseUrl: 'https://postplus.test',
+            cliSessionToken: 'cli-session-token',
+          },
+        },
+      )) as string;
+
+      assert.equal(bodies.length, 2);
+      assert.equal(bodies[0]?.operation, 'analyze');
+      assert.equal(bodies[1]?.operation, 'status');
+      assert.equal(bodies[1]?.handle, 'video-run-1');
+      assert.equal('input' in bodies[1]!, false);
+      assert.equal('estimatedUsage' in bodies[1]!, false);
+      assert.equal('quoteConfirmationToken' in bodies[1]!, false);
+      assert.equal(payload, '# Analysis\n\n00:00 Hook evidence.');
+      assert.match(stderrText, /stage=resolving_source elapsed=5ms/u);
+      assert.match(stderrText, /stage=completed elapsed=70ms/u);
+      assert.equal(stderrText.match(/stage=resolving_source/gu)?.length, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalStderrWrite;
+    }
+  });
+
+  it('labels estimated video billing separately without changing the complete Markdown', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    let stderrText = '';
+    let calls = 0;
+    const markdown = '# Analysis\n\n00:00–00:12 Complete saved report.\n';
+    globalThis.fetch = async () => {
+      calls++;
+      return Response.json({
+        billing: {
+          charged: true,
+          estimatedOnly: true,
+          finalizedCredits: 1.136,
+        },
+        output: {
+          data: {
+            id: 'estimated-run',
+            status: 'completed',
+            stage: 'completed',
+            markdown,
+          },
+        },
+      });
+    };
+    process.stderr.write = ((chunk: unknown) => {
+      stderrText += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const result = await runHostedDomainCommand(
+        'media',
+        [
+          'analyze',
+          'video-analysis',
+          '--video',
+          'https://cdn.example.com/video.mp4',
+          '--prompt',
+          'Analyze the video.',
+        ],
+        {
+          auth: {
+            apiBaseUrl: 'https://postplus.test',
+            cliSessionToken: 'cli-session-token',
+          },
+        },
+      );
+      assert.equal(result, markdown);
+      assert.equal(calls, 1);
+      assert.equal(stderrText.match(/estimated settlement/gu)?.length, 1);
+      assert.match(stderrText, /1\.136 PostPlus credits/u);
+      assert.match(stderrText, /actual usage unconfirmed/u);
+      assert.doesNotMatch(stderrText, /result unconfirmed/u);
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalStderrWrite;
+    }
+  });
+
+  for (const mode of [
+    'stdout',
+    'file',
+    'json',
+    'estimated',
+    'unknown-billing',
+  ] as const) {
+    it(`delivers a narrow completed report unchanged without imposing the retired quality gate (${mode})`, async () => {
+      await setLocalSession({
+        accountId: 'account_1',
+        apiBaseUrl: 'https://postplus.test',
+        cliSessionToken: 'cli-session-token',
+        userId: 'user_1',
+        sessionExpiresAt: null,
+      });
+      const fixture = mode === 'stdout' ? await tinyVideoFixture() : null;
+      const output = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'original.md');
+      const markdown =
+        '# Requested opening only\r\n\r\nA hand lifts the cup.\n\n\n';
+      const originalFetch = globalThis.fetch,
+        originalOut = process.stdout.write,
+        originalErr = process.stderr.write;
+      let stdout = '',
+        stderr = '',
+        analyzeCalls = 0;
+      globalThis.fetch = async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.operation === 'analyze') {
+          analyzeCalls++;
+          return Response.json({
+            output: {
+              data: {
+                id: 'narrow-run',
+                status: 'accepted',
+                stage: 'analyzing',
+              },
+            },
+          });
+        }
+        assert.equal(body.operation, 'status');
+        assert.equal(body.handle, 'narrow-run');
+        return Response.json({
+          billing:
+            mode === 'unknown-billing'
+              ? null
+              : {
+                  finalizedCredits: 0.35,
+                  estimatedOnly: mode === 'estimated',
+                  rawProviderSecret: 'never-project-this',
+                },
+          output: {
+            data: {
+              id: 'narrow-run',
+              status: 'completed',
+              stage: 'completed',
+              markdown,
+            },
+          },
+        });
+      };
+      if (fixture)
+        globalThis.fetch = withGoogleVideoUpload(globalThis.fetch, fixture);
+      process.stdout.write = ((chunk: unknown) => {
+        stdout += String(chunk);
+        return true;
+      }) as typeof process.stdout.write;
+      process.stderr.write = ((chunk: unknown) => {
+        stderr += String(chunk);
+        return true;
+      }) as typeof process.stderr.write;
+      try {
+        const args = fixture
+          ? [
+              'analyze',
+              'video-analysis',
+              '--video',
+              fixture.filePath,
+              '--prompt',
+              'Describe only the opening.',
+              '--wait-seconds',
+              '0',
+            ]
+          : [
+              'poll',
+              '--handle',
+              'narrow-run',
+              '--capability',
+              'video-analysis',
+            ];
+        if (mode === 'file') args.push('--output', output);
+        if (mode === 'json') args.push('--json');
+        assert.equal(await runHostedDomainCommand('media', args), 0);
+        assert.equal(analyzeCalls, fixture ? 1 : 0);
+        if (mode === 'file') {
+          assert.equal(await readFile(output, 'utf8'), markdown);
+          assert.equal(stdout, '');
+        } else if (mode === 'json') assert.equal(JSON.parse(stdout), markdown);
+        else assert.equal(stdout, markdown);
+        if (mode === 'estimated') {
+          assert.match(stderr, /0\.35 PostPlus credits/u);
+          assert.match(stderr, /actual usage unconfirmed/u);
+        }
+        if (mode === 'unknown-billing')
+          assert.doesNotMatch(stderr, /no charge|zero charge|0 credits/u);
+        assert.doesNotMatch(
+          stdout + stderr,
+          /quality_failed|time-coverage|never-project-this|rawProviderSecret/u,
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+        process.stdout.write = originalOut;
+        process.stderr.write = originalErr;
+      }
+    });
+  }
+
+  for (const fault of ['network', 'body', '429', '503'] as const) {
+    it(`recovers a ${fault} status fault without resubmitting video analysis`, async () => {
+      const originalFetch = globalThis.fetch;
+      const bodies: Record<string, unknown>[] = [];
+      globalThis.fetch = async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        bodies.push(body);
+        if (body.operation === 'analyze')
+          return Response.json({
+            output: { data: { id: 'same-run', status: 'accepted' } },
+          });
+        assert.equal(body.operation, 'status');
+        assert.equal(body.handle, 'same-run');
+        assert.equal(body.input, undefined);
+        if (bodies.length === 2) {
+          if (fault === 'network') throw new TypeError('fetch failed');
+          if (fault === 'body')
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.error(new TypeError('socket reset'));
+                },
+              }),
+            );
+          return Response.json(
+            {
+              code: 'temporary_status_fault',
+              message: 'Temporary status failure',
+            },
+            { status: Number(fault) },
+          );
+        }
+        return Response.json({
+          output: {
+            data: {
+              id: 'same-run',
+              status: 'completed',
+              markdown: '# Complete report',
+            },
+          },
+        });
+      };
+      try {
+        const result = await runHostedDomainCommand(
+          'media',
+          [
+            'analyze',
+            'video-analysis',
+            '--video',
+            'https://video.example/clip.mp4',
+            '--prompt',
+            'Analyze.',
+            '--poll-interval-seconds',
+            '0.001',
+          ],
+          {
+            auth: {
+              apiBaseUrl: 'https://postplus.test',
+              cliSessionToken: 'token',
+            },
+          },
+        );
+        assert.equal(result, '# Complete report');
+        assert.equal(
+          bodies.filter((body) => body.operation === 'analyze').length,
+          1,
+        );
+        assert.equal(
+          bodies.filter((body) => body.operation === 'status').length,
+          2,
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
+
+  it('caps status recovery and preserves the original run identity on exhausted network errors', async () => {
+    const originalFetch = globalThis.fetch;
+    let submits = 0;
+    let polls = 0;
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.operation === 'analyze') {
+        submits++;
+        return Response.json({
+          output: { data: { id: 'original-run', status: 'accepted' } },
+        });
+      }
+      polls++;
+      assert.equal(body.handle, 'original-run');
+      throw new TypeError('fetch failed');
+    };
+    try {
+      await assert.rejects(
+        runHostedDomainCommand(
+          'media',
+          [
+            'analyze',
+            'video-analysis',
+            '--video',
+            'https://video.example/clip.mp4',
+            '--prompt',
+            'Analyze.',
+            '--hosted-operation-id',
+            'original-operation',
+            '--poll-interval-seconds',
+            '0.001',
+          ],
+          {
+            auth: {
+              apiBaseUrl: 'https://postplus.test',
+              cliSessionToken: 'token',
+            },
+          },
+        ),
+        (error: unknown) => {
+          assert.equal((error as { handle?: string }).handle, 'original-run');
+          assert.equal(
+            (error as { operationId?: string }).operationId,
+            'original-operation',
+          );
+          return true;
+        },
+      );
+      assert.equal(submits, 1);
+      assert.equal(polls, 4);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not retry permanent HTTP, TLS, redirect, or malformed successful status responses', async () => {
+    const originalFetch = globalThis.fetch;
+    for (const fault of [
+      '400',
+      '401',
+      '403',
+      '404',
+      '426',
+      '501',
+      'tls',
+      'redirect',
+      'json',
+      'business-refusal',
+      'invalid-header',
+    ]) {
+      let calls = 0;
+      globalThis.fetch = async () => {
+        calls++;
+        if (fault === 'tls')
+          throw new TypeError('fetch failed', {
+            cause: Object.assign(new Error('certificate expired'), {
+              code: 'CERT_HAS_EXPIRED',
+            }),
+          });
+        if (fault === 'redirect')
+          return new Response(null, {
+            status: 302,
+            headers: { location: 'https://private.example/?token=secret' },
+          });
+        if (fault === 'json') return new Response('{invalid');
+        return Response.json(
+          {
+            code: 'not_retryable',
+            message: 'Cannot query this task.',
+            ...(fault === 'business-refusal' ? { retryable: false } : {}),
+          },
+          { status: fault === 'business-refusal' ? 503 : Number(fault) },
+        );
+      };
+      try {
+        await assert.rejects(
+          runHostedDomainCommand(
+            'media',
+            [
+              'poll',
+              '--handle',
+              'same-run',
+              '--capability',
+              'video-analysis',
+              '--poll-interval-seconds',
+              '0.001',
+            ],
+            {
+              auth: {
+                apiBaseUrl: 'https://postplus.test',
+                cliSessionToken:
+                  fault === 'invalid-header' ? 'invalid\nheader' : 'token',
+              },
+            },
+          ),
+        );
+        assert.equal(calls, fault === 'invalid-header' ? 0 : 1, fault);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }
+  });
+
+  it('recovers a non-JSON gateway failure but does not retry a single-shot poll', async () => {
+    const originalFetch = globalThis.fetch;
+    for (const singleShot of [false, true]) {
+      let calls = 0;
+      globalThis.fetch = async () =>
+        ++calls === 1
+          ? new Response('<html>gateway error</html>', { status: 502 })
+          : Response.json({
+              output: {
+                data: {
+                  id: 'same-run',
+                  status: 'completed',
+                  markdown: '# Report',
+                },
+              },
+            });
+      try {
+        const result = runHostedDomainCommand(
+          'media',
+          [
+            'poll',
+            '--handle',
+            'same-run',
+            '--capability',
+            'video-analysis',
+            '--poll-interval-seconds',
+            '0.001',
+            '--wait-seconds',
+            singleShot ? '0' : '1',
+          ],
+          {
+            auth: {
+              apiBaseUrl: 'https://postplus.test',
+              cliSessionToken: 'token',
+            },
+          },
+        );
+        if (singleShot) {
+          await assert.rejects(result);
+          assert.equal(calls, 1);
+        } else {
+          assert.equal(await result, '# Report');
+          assert.equal(calls, 2);
+        }
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }
+  });
+
+  it('does not ignore Retry-After or poll again when the wait budget cannot admit it', async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      return Response.json(
+        { message: 'Rate limited' },
+        { status: 429, headers: { 'retry-after': '120' } },
+      );
+    };
+    try {
+      await assert.rejects(
+        runHostedDomainCommand(
+          'media',
+          [
+            'poll',
+            '--handle',
+            'same-run',
+            '--capability',
+            'video-analysis',
+            '--wait-seconds',
+            '0.1',
+          ],
+          {
+            auth: {
+              apiBaseUrl: 'https://postplus.test',
+              cliSessionToken: 'token',
+            },
+          },
+        ),
+      );
+      assert.equal(calls, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('shares the media polling deadline with a slow 401 session refresh and does not requery', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'token',
+      userId: 'user_1',
+      sessionExpiresAt: null,
+    });
+    const originalFetch = globalThis.fetch;
+    let polls = 0;
+    let refreshes = 0;
+    globalThis.fetch = async (url, init) => {
+      if (String(url).endsWith('/auth/refresh')) {
+        refreshes++;
+        assert.ok(init?.signal);
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal!.addEventListener(
+            'abort',
+            () => reject(init.signal!.reason),
+            { once: true },
+          );
+        });
+      }
+      polls++;
+      return Response.json({ message: 'Session expired' }, { status: 401 });
+    };
+    const keepAlive = setTimeout(() => undefined, 2000);
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('media', [
+          'poll',
+          '--handle',
+          'same-run',
+          '--capability',
+          'video-analysis',
+          '--wait-seconds',
+          '0.1',
+        ]),
+        /Timeout|timeout|aborted/iu,
+      );
+      assert.equal(refreshes, 1);
+      assert.equal(polls, 1);
+    } finally {
+      clearTimeout(keepAlive);
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  for (const capability of ['video-analysis', 'media-generation'] as const) {
+    it(`${capability}: persists identity before lost submit ACK and recovers without a second submission`, async () => {
+      await setLocalSession({
+        accountId: 'account_1',
+        apiBaseUrl: 'https://postplus.test',
+        cliSessionToken: 'private-session-token',
+        userId: 'user_1',
+        sessionExpiresAt: null,
+      });
+      const localFixture = await tinyVideoFixture();
+      const originalFetch = globalThis.fetch;
+      const originalOut = process.stdout.write;
+      const originalErr = process.stderr.write;
+      const bodies: Record<string, unknown>[] = [];
+      let checkpointPath = '';
+      let originalOperation = '';
+      process.stdout.write = (() => true) as typeof process.stdout.write;
+      process.stderr.write = (() => true) as typeof process.stderr.write;
+      globalThis.fetch = async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        bodies.push(body);
+        if (body.operation !== 'status') {
+          const directory = resolve(
+            process.env.POSTPLUS_CONFIG_DIR!,
+            'media-runs',
+          );
+          const files = await readdir(directory);
+          assert.equal(files.length, 1, 'checkpoint must exist before submit');
+          checkpointPath = resolve(directory, files[0]!);
+          const text = await readFile(checkpointPath, 'utf8');
+          const saved = JSON.parse(text);
+          originalOperation = String(body.operationId);
+          assert.equal(saved.operationId, originalOperation);
+          assert.equal(saved.capability, capability);
+          assert.equal(saved.accountId, 'account_1');
+          if (capability === 'video-analysis') {
+            assert.equal(saved.analysisSubmissionAttempted, true);
+            assert.equal(saved.videoRequest.source, localFixture.filePath);
+            assert.equal(saved.videoTransfer.phase, 'uploaded');
+            assert.equal((await stat(checkpointPath)).mode & 0o777, 0o600);
+          } else
+            assert.deepEqual(Object.keys(saved).sort(), [
+              'accountId',
+              'apiOrigin',
+              'capability',
+              'operationId',
+              'schemaVersion',
+            ]);
+          assert.doesNotMatch(text, /private-session-token|GEMINI_API_KEY/u);
+          throw new TypeError('fetch failed: submit ACK lost');
+        }
+        assert.equal(body.sourceOperationId, originalOperation);
+        assert.deepEqual(Object.keys(body).sort(), [
+          'capability',
+          'operation',
+          'operationId',
+          'sourceOperationId',
+        ]);
+        return Response.json({
+          output: {
+            data: {
+              id: 'recovered-run',
+              status: 'completed',
+              markdown: '# Complete report',
+            },
+          },
+        });
+      };
+      if (capability === 'video-analysis')
+        globalThis.fetch = withGoogleVideoUpload(
+          globalThis.fetch,
+          localFixture,
+        );
+      try {
+        const command =
+          capability === 'video-analysis'
+            ? [
+                'analyze',
+                'video-analysis',
+                '--video',
+                localFixture.filePath,
+                '--prompt',
+                'secret prompt',
+              ]
+            : [
+                'create',
+                'image-gpt-image-2-text',
+                '--prompt',
+                'secret prompt',
+                '--wait',
+              ];
+        await assert.rejects(
+          runHostedDomainCommand('media', command),
+          /fetch failed/u,
+        );
+        assert.ok(checkpointPath);
+        assert.equal(
+          await runHostedDomainCommand('media', [
+            'poll',
+            '--resume-from',
+            checkpointPath,
+            '--wait-seconds',
+            '0',
+          ]),
+          0,
+        );
+        assert.equal(
+          bodies.filter((body) => body.operation !== 'status').length,
+          1,
+        );
+        assert.equal(
+          bodies.filter((body) => body.operation === 'status').length,
+          1,
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+        process.stdout.write = originalOut;
+        process.stderr.write = originalErr;
+      }
+    });
+  }
+
+  it('refuses a media submit if its automatic recovery checkpoint cannot be written', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'token',
+      userId: 'user_1',
+      sessionExpiresAt: null,
+    });
+    await writeFile(
+      resolve(process.env.POSTPLUS_CONFIG_DIR!, 'media-runs'),
+      'not a directory',
+    );
+    const originalFetch = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = async () => {
+      requests += 1;
+      throw new Error('must not submit');
+    };
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('media', [
+          'create',
+          'image-gpt-image-2-text',
+          '--prompt',
+          'test',
+        ]),
+        /EEXIST|ENOTDIR/u,
+      );
+      assert.equal(requests, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects cross-account, cross-environment and malformed recovery pointers without any request', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'token',
+      userId: 'user_1',
+      sessionExpiresAt: null,
+    });
+    const pointer = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'pointer.json');
+    const base = {
+      schemaVersion: 1,
+      accountId: 'account_1',
+      apiOrigin: 'https://postplus.test',
+      capability: 'video-analysis',
+      operationId: 'original-operation',
+    };
+    const originalFetch = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = async () => {
+      requests += 1;
+      throw new Error('must not request');
+    };
+    try {
+      for (const change of [
+        { accountId: 'account_2' },
+        { apiOrigin: 'https://another.test' },
+        { prompt: 'unexpected input' },
+        { handle: 12 },
+      ]) {
+        await writeFile(pointer, JSON.stringify({ ...base, ...change }));
+        await assert.rejects(
+          runHostedDomainCommand('media', ['poll', '--resume-from', pointer]),
+          /another account|Invalid media/u,
+        );
+      }
+      await assert.rejects(
+        runHostedDomainCommand('media', [
+          'poll',
+          '--resume-from',
+          pointer,
+          '--handle',
+          'other-run',
+        ]),
+        /cannot be combined/u,
+      );
+      assert.equal(requests, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('treats failed HTTP 200 media results as failures and preserves typed recovery advice', async () => {
+    const originalFetch = globalThis.fetch;
+    const error = {
+      code: 'media_resource_unsupported',
+      stage: 'validating_media',
+      retryable: false,
+      userAction: 'Provide a supported video, not a slideshow.',
+    };
+    globalThis.fetch = async () =>
+      Response.json({
+        output: { data: { id: 'run_1', status: 'failed', stage: 'validating_media', error } },
+      });
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('media', ['poll', '--handle', 'run_1'], {
+          auth: {
+            apiBaseUrl: 'https://postplus.test',
+            cliSessionToken: 'token',
+          },
+        }),
+        (cause: unknown) => {
+          assert.ok(cause instanceof Error);
+          for (const [key, value] of Object.entries(error))
+            assert.equal(
+              (cause as unknown as { productError: Record<string, unknown> })
+                .productError[key],
+              value,
+            );
+          return true;
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('exits the actual CLI process nonzero for failed HTTP 200 tasks', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'token',
+      userId: 'user_1',
+      sessionExpiresAt: null,
+    });
+    const response = {
+      operationId: 'original-operation',
+      output: {
+        data: {
+          id: 'run_1',
+          status: 'failed',
+          stage: 'validating_media',
+          error: {
+            code: 'video_resource_unsupported',
+            stage: 'validating_media',
+            retryable: false,
+            userAction: 'Provide a video rather than a slideshow.',
+          },
+        },
+      },
+    };
+    const stub = `globalThis.fetch = async () => Response.json(${JSON.stringify(response)});`;
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        '--import',
+        'tsx',
+        '--import',
+        `data:text/javascript,${encodeURIComponent(stub)}`,
+        'src/index.ts',
+        'media',
+        'poll',
+        '--handle',
+        'run_1',
+        '--capability',
+        'video-analysis',
+      ]),
+      (error: unknown) => {
+        const result = error as {
+          code: number;
+          stdout: string;
+          stderr: string;
+        };
+        assert.equal(result.code, 1);
+        assert.equal(result.stdout, '');
+        assert.match(
+          result.stderr,
+          /code=video_resource_unsupported .*stage=validating_media retryable=false/u,
+        );
+        assert.match(result.stderr, /Provide a video rather than a slideshow/u);
+        assert.doesNotMatch(
+          result.stderr,
+          /Resume the same run|do not resubmit/u,
+        );
+        assert.match(
+          result.stderr,
+          /Task record: postplus media poll --handle 'run_1'/u,
+        );
+        return true;
+      },
+    );
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        '--import',
+        'tsx',
+        '--import',
+        `data:text/javascript,${encodeURIComponent(stub)}`,
+        'src/index.ts',
+        'media',
+        'poll',
+        '--handle',
+        'run_1',
+        '--capability',
+        'video-analysis',
+        '--json',
+      ]),
+      (error: unknown) => {
+        const result = error as { code: number; stdout: string };
+        assert.equal(result.code, 1);
+        const failure = JSON.parse(result.stdout).error;
+        assert.equal(failure.operationId, 'original-operation');
+        assert.equal(failure.runId, 'run_1');
+        for (const [key, value] of Object.entries(response.output.data.error))
+          assert.equal(failure[key], value);
+        return true;
+      },
+    );
+  });
+
+  it('reports an expired-before-inference run in real text and JSON CLI processes without resubmitting or replacing its checkpoint', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'private-expired-session-token',
+      userId: 'user_1',
+      sessionExpiresAt: null,
+    });
+    const requestDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-expired-video-'),
+    );
+    tempDirs.push(requestDir);
+    const checkpointPath = resolve(requestDir, 'recovery.json');
+    const callsPath = resolve(requestDir, 'requests.jsonl');
+    const operationId = 'original-expired-operation';
+    const runId = 'expired-video-run';
+    const checkpointText = JSON.stringify({
+      schemaVersion: 1,
+      accountId: 'account_1',
+      apiOrigin: 'https://postplus.test',
+      capability: 'video-analysis',
+      operationId,
+      handle: runId,
+    });
+    await writeFile(checkpointPath, checkpointText);
+    const deadlineMs = 300_000;
+    const elapsedMs = deadlineMs + 321;
+    const terminalError = {
+      code: 'video_analysis_expired_before_inference',
+      stage: 'downloading_source',
+      retryable: true,
+      userAction:
+        'Run the command again to start a new task; this one expired before analysis and was not charged.',
+    };
+    const response = {
+      operationId,
+      charged: false,
+      output: {
+        data: {
+          id: runId,
+          status: 'expired',
+          billingState: 'not_reserved',
+          charged: false,
+          stage: terminalError.stage,
+          elapsedMs,
+          markdown: null,
+          error: terminalError,
+        },
+      },
+    };
+    // Exercise the production CLI entry point, replacing only fetch. Every
+    // attempted request is recorded before validation so a surprise submit,
+    // upload, or billing request cannot be mistaken for a passing failure.
+    const stub = `
+      import assert from 'node:assert/strict';
+      import { appendFile } from 'node:fs/promises';
+      globalThis.fetch = async (url, init) => {
+        const body = JSON.parse(String(init?.body));
+        await appendFile(${JSON.stringify(callsPath)}, JSON.stringify({
+          url: String(url), method: init?.method, body,
+        }) + '\\n');
+        assert.equal(String(url), 'https://postplus.test/api/postplus-cli/hosted/capability');
+        assert.equal(init?.method, 'POST');
+        assert.match(body.operationId, /^postplus-cli:media:video-analysis:status:/u);
+        const { operationId: statusRequestId, ...locator } = body;
+        assert.deepEqual(locator, {
+          capability: 'video-analysis', operation: 'status',
+          handle: ${JSON.stringify(runId)},
+        });
+        return Response.json(${JSON.stringify(response)});
+      };
+    `;
+
+    for (const json of [false, true]) {
+      await assert.rejects(
+        execFileAsync(process.execPath, [
+          '--import',
+          'tsx',
+          '--import',
+          `data:text/javascript,${encodeURIComponent(stub)}`,
+          'src/index.ts',
+          'media',
+          'poll',
+          '--resume-from',
+          checkpointPath,
+          ...(json ? ['--json'] : []),
+        ]),
+        (error: unknown) => {
+          const result = error as {
+            code: number;
+            stdout: string;
+            stderr: string;
+          };
+          assert.equal(result.code, 1);
+          assert.match(
+            result.stderr,
+            /stage=downloading_source elapsed=300321ms/u,
+          );
+          assert.doesNotMatch(
+            result.stdout + result.stderr,
+            /private-expired-session-token|stage=completed|^# /mu,
+          );
+          assert.doesNotMatch(result.stderr, /Resume|do not resubmit/u);
+          assert.match(
+            result.stderr,
+            /Task record: postplus media poll --resume-from/u,
+          );
+          if (json) {
+            const output = JSON.parse(result.stdout);
+            assert.equal(Object.hasOwn(output, 'output'), false);
+            assert.equal(output.error.operationId, operationId);
+            assert.equal(output.error.runId, runId);
+            assert.equal(
+              output.error.message,
+              'The media task ended with status expired.',
+            );
+            for (const [key, value] of Object.entries(terminalError)) {
+              assert.equal(output.error[key], value);
+            }
+          } else {
+            assert.equal(result.stdout, '');
+            assert.match(result.stderr, /status expired/u);
+            assert.match(
+              result.stderr,
+              /code=video_analysis_expired_before_inference .*stage=downloading_source retryable=true/u,
+            );
+            assert.ok(result.stderr.includes(terminalError.userAction));
+          }
+          return true;
+        },
+      );
+      assert.equal(await readFile(checkpointPath, 'utf8'), checkpointText);
+    }
+    const calls = (await readFile(callsPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(calls.length, 2, 'exactly one status read per invocation');
+    for (const call of calls) {
+      assert.match(
+        call.body.operationId,
+        /^postplus-cli:media:video-analysis:status:/u,
+      );
+      const { operationId: _statusRequestId, ...locator } = call.body;
+      assert.deepEqual(locator, {
+        capability: 'video-analysis',
+        operation: 'status',
+        handle: runId,
+      });
+    }
+    // This transport test proves no CLI resubmit/upload/billing request. The
+    // backend's no-reserve/no-charge guarantee is covered by its own ledger tests.
+    assert.equal(
+      calls.filter((call) => call.body.operation !== 'status').length,
+      0,
+    );
+  });
+
+  for (const immediate of [false, true]) {
+    it(`keeps output and follows only terminal advice when video analysis expires ${immediate ? 'on submit' : 'after acceptance'}`, async () => {
+      await setLocalSession({
+        accountId: 'account_1',
+        apiBaseUrl: 'https://postplus.test',
+        cliSessionToken: 'token',
+        userId: 'user_1',
+        sessionExpiresAt: null,
+      });
+      const requestDir = await mkdtemp(
+        resolve(tmpdir(), 'postplus-expired-submit-'),
+      );
+      tempDirs.push(requestDir);
+      const outputPath = resolve(requestDir, 'report.md');
+      const existingOutput =
+        'Existing report must not be replaced by an error.';
+      await writeFile(outputPath, existingOutput);
+      const localFixture = await tinyVideoFixture();
+      const originalFetch = globalThis.fetch;
+      const originalOut = process.stdout.write;
+      const originalErr = process.stderr.write;
+      let stdout = '';
+      let stderr = '';
+      let pendingOutput = existingOutput;
+      const bodies: Record<string, unknown>[] = [];
+      process.stdout.write = ((chunk: unknown) => {
+        stdout += String(chunk);
+        return true;
+      }) as typeof process.stdout.write;
+      process.stderr.write = ((chunk: unknown) => {
+        stderr += String(chunk);
+        return true;
+      }) as typeof process.stderr.write;
+      const userAction =
+        'Start a new task; this task expired before analysis and was not charged.';
+      globalThis.fetch = async (url, init) => {
+        assert.equal(
+          String(url),
+          'https://postplus.test/api/postplus-cli/hosted/capability',
+        );
+        const body = JSON.parse(String(init?.body));
+        bodies.push(body);
+        if (body.operation === 'analyze' && !immediate) {
+          return Response.json({
+            output: {
+              data: {
+                id: 'expired-submit-run',
+                status: 'accepted',
+                stage: 'resolving_source',
+                elapsedMs: 0,
+              },
+            },
+          });
+        }
+        assert.equal(body.operation, immediate ? 'analyze' : 'status');
+        if (!immediate) {
+          assert.equal(body.handle, 'expired-submit-run');
+          pendingOutput = await readFile(outputPath, 'utf8');
+        }
+        // Earlier pending output may correctly teach recovery. Only feedback
+        // after observing the terminal response must defer to its userAction.
+        stderr = '';
+        return Response.json({
+          output: {
+            data: {
+              id: 'expired-submit-run',
+              status: 'expired',
+              stage: 'downloading_source',
+              elapsedMs: 300321,
+              billingState: 'not_reserved',
+              charged: false,
+              markdown: null,
+              error: {
+                code: 'video_analysis_expired_before_inference',
+                stage: 'downloading_source',
+                retryable: true,
+                userAction,
+              },
+            },
+          },
+        });
+      };
+      globalThis.fetch = withGoogleVideoUpload(globalThis.fetch, localFixture);
+      try {
+        assert.equal(
+          await runHostedDomainCommand('media', [
+            'analyze',
+            'video-analysis',
+            '--video',
+            localFixture.filePath,
+            '--prompt',
+            'Analyze this video.',
+            '--output',
+            outputPath,
+          ]),
+          1,
+        );
+        assert.equal(stdout, '');
+        assert.ok(stderr.includes(userAction));
+        assert.doesNotMatch(stderr, /Resume|do not resubmit/u);
+        assert.match(stderr, /Task record: postplus media poll/u);
+        assert.match(stderr, /stage=downloading_source elapsed=300321ms/u);
+        assert.equal(await readFile(outputPath, 'utf8'), pendingOutput);
+        assert.equal(
+          bodies.filter((body) => body.operation === 'analyze').length,
+          1,
+        );
+        assert.equal(
+          bodies.filter((body) => body.operation === 'status').length,
+          immediate ? 0 : 1,
+        );
+        const checkpoints = await readdir(
+          resolve(process.env.POSTPLUS_CONFIG_DIR!, 'media-runs'),
+        );
+        assert.equal(checkpoints.length, 1);
+        const checkpoint = JSON.parse(
+          await readFile(
+            resolve(
+              process.env.POSTPLUS_CONFIG_DIR!,
+              'media-runs',
+              checkpoints[0]!,
+            ),
+            'utf8',
+          ),
+        );
+        assert.equal(checkpoint.operationId, bodies[0]?.operationId);
+        assert.equal(checkpoint.handle, 'expired-submit-run');
+      } finally {
+        globalThis.fetch = originalFetch;
+        process.stdout.write = originalOut;
+        process.stderr.write = originalErr;
+      }
+    });
+  }
+
+  it('uses neutral record advice for a terminal shared media-generation checkpoint without losing its output', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'token',
+      userId: 'user_1',
+      sessionExpiresAt: null,
+    });
+    const requestDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-terminal-generation-'),
+    );
+    tempDirs.push(requestDir);
+    const checkpointPath = resolve(requestDir, 'recovery.json');
+    const outputPath = resolve(requestDir, 'result.json');
+    const checkpointText = JSON.stringify({
+      schemaVersion: 1,
+      accountId: 'account_1',
+      apiOrigin: 'https://postplus.test',
+      capability: 'media-generation',
+      operationId: 'generation-operation',
+      handle: 'generation-run',
+    });
+    await writeFile(checkpointPath, checkpointText);
+    await writeFile(outputPath, 'previous result');
+    const originalFetch = globalThis.fetch;
+    const originalErr = process.stderr.write;
+    let stderr = '';
+    let requests = 0;
+    process.stderr.write = ((chunk: unknown) => {
+      stderr += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+    globalThis.fetch = async (_url, init) => {
+      requests++;
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.operation, 'status');
+      assert.equal(body.capability, 'media-generation');
+      assert.equal(body.handle, 'generation-run');
+      return Response.json({
+        output: {
+          data: {
+            id: 'generation-run',
+            status: 'failed',
+            error: {
+              code: 'media_resource_unsupported',
+              retryable: false,
+              userAction: 'Provide a supported source.',
+            },
+          },
+        },
+      });
+    };
+    try {
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          'poll',
+          '--resume-from',
+          checkpointPath,
+          '--output',
+          outputPath,
+        ]),
+        1,
+      );
+      assert.equal(requests, 1);
+      assert.match(stderr, /Task record: postplus media poll --resume-from/u);
+      assert.match(stderr, /Provide a supported source/u);
+      assert.doesNotMatch(stderr, /Resume|do not resubmit/u);
+      assert.equal(await readFile(checkpointPath, 'utf8'), checkpointText);
+      assert.equal(await readFile(outputPath, 'utf8'), 'previous result');
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalErr;
+    }
+  });
+
+  it('resumes an acknowledged media generation task by handle after polling disconnects', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'token',
+      userId: 'user_1',
+      sessionExpiresAt: null,
+    });
+    const originalFetch = globalThis.fetch;
+    const originalOut = process.stdout.write;
+    const originalErr = process.stderr.write;
+    const bodies: Record<string, unknown>[] = [];
+    let disconnected = true;
+    process.stdout.write = (() => true) as typeof process.stdout.write;
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      if (body.operation !== 'status')
+        return Response.json({
+          output: { data: { id: 'generation_1', status: 'accepted' } },
+        });
+      assert.equal(body.handle, 'generation_1');
+      assert.equal(body.sourceOperationId, undefined);
+      if (disconnected) throw new TypeError('poll disconnected');
+      return Response.json({
+        output: { data: { id: 'generation_1', status: 'completed' } },
+      });
+    };
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('media', [
+          'create',
+          'image-gpt-image-2-text',
+          '--prompt',
+          'test',
+          '--wait',
+        ]),
+        /poll disconnected/u,
+      );
+      const directory = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'media-runs');
+      const files = await readdir(directory);
+      assert.equal(files.length, 1);
+      const pointer = resolve(directory, files[0]!);
+      assert.equal(
+        JSON.parse(await readFile(pointer, 'utf8')).handle,
+        'generation_1',
+      );
+      disconnected = false;
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          'poll',
+          '--resume-from',
+          pointer,
+          '--wait-seconds',
+          '0',
+        ]),
+        0,
+      );
+      assert.equal(
+        bodies.filter((body) => body.operation !== 'status').length,
+        1,
+      );
+      assert.equal(
+        bodies.filter((body) => body.operation === 'status').length,
+        5, // four bounded failed reads, then one successful same-handle resume
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stdout.write = originalOut;
+      process.stderr.write = originalErr;
+    }
+  });
+
+  it('does not report a completed video task without Markdown as success', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      Response.json({
+        output: { data: { id: 'run_1', status: 'completed', markdown: null } },
+      });
+    try {
+      await assert.rejects(
+        runHostedDomainCommand(
+          'media',
+          ['poll', '--handle', 'run_1', '--capability', 'video-analysis'],
+          {
+            auth: {
+              apiBaseUrl: 'https://postplus.test',
+              cliSessionToken: 'token',
+            },
+          },
+        ),
+        /video_analysis_result_incomplete.*do not resubmit/su,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('checkpoints video analysis before a network disconnect and resumes in a new invocation with only status reads', async () => {
+    const requestDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-video-resume-'),
+    );
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'analysis.md');
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const localFixture = await tinyVideoFixture();
+    const originalFetch = globalThis.fetch;
+    const originalStderrWrite = process.stderr.write;
+    const bodies: Record<string, unknown>[] = [];
+    let stderrText = '';
+    let resumed = false;
+    let resumedPolls = 0;
+    const markdown = '# Analysis\n\n00:00 Complete observable evidence.\n';
+    process.stderr.write = ((chunk: unknown) => {
+      stderrText += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      if (body.operation === 'analyze') {
+        assert.equal(bodies.length, 1, 'never resubmit a disconnected run');
+        return Response.json({
+          output: {
+            data: {
+              id: 'video-resume-1',
+              status: 'accepted',
+              stage: 'resolving_source',
+              elapsedMs: 0,
+            },
+          },
+        });
+      }
+      assert.equal(body.handle, 'video-resume-1');
+      assert.equal(body.capability, 'video-analysis');
+      assert.deepEqual(Object.keys(body).sort(), [
+        'capability',
+        'handle',
+        'operation',
+        'operationId',
+      ]);
+      // This runs before the very first status request can fail.
+      const checkpoint = JSON.parse(await readFile(outputPath, 'utf8'));
+      assert.equal(checkpoint.id, 'video-resume-1');
+      assert.equal(checkpoint.operationId, bodies[0]?.operationId);
+      assert.match(
+        stderrText,
+        /Resume: postplus media poll --handle 'video-resume-1' --capability video-analysis/u,
+      );
+      if (!resumed) throw new TypeError('fetch failed: disconnected');
+      resumedPolls += 1;
+      return Response.json({
+        output: {
+          data: {
+            id: 'video-resume-1',
+            status: resumedPolls < 3 ? 'running' : 'completed',
+            stage: resumedPolls < 3 ? 'analyzing' : 'completed',
+            elapsedMs: resumedPolls * 10,
+            markdown: resumedPolls < 3 ? null : markdown,
+          },
+        },
+      });
+    };
+    globalThis.fetch = withGoogleVideoUpload(globalThis.fetch, localFixture);
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('media', [
+          'analyze',
+          'video-analysis',
+          '--video',
+          localFixture.filePath,
+          '--prompt',
+          'private prompt',
+          '--output',
+          outputPath,
+        ]),
+        /disconnected/u,
+      );
+      const checkpointText = await readFile(outputPath, 'utf8');
+      assert.doesNotMatch(
+        checkpointText + stderrText,
+        /private-source|private prompt|cli-session-token/u,
+      );
+      assert.match(
+        stderrText,
+        /operationId=postplus-cli:media:video-analysis:analyze:/u,
+      );
+      resumed = true;
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          'poll',
+          '--handle',
+          'video-resume-1',
+          '--capability',
+          'video-analysis',
+          '--poll-interval-seconds',
+          '0.001',
+          '--output',
+          outputPath,
+        ]),
+        0,
+      );
+      assert.equal(
+        bodies.filter((body) => body.operation === 'analyze').length,
+        1,
+      );
+      assert.equal(resumedPolls, 3);
+      assert.equal(stderrText.match(/stage=analyzing/gu)?.length, 1);
+      assert.equal(stderrText.match(/stage=completed/gu)?.length, 1);
+      assert.equal(await readFile(outputPath, 'utf8'), markdown);
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalStderrWrite;
+    }
+  });
+
+  it('prints video recovery before polling without an output file and preserves an existing checkpoint on a poll product error', async () => {
+    const requestDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-video-poll-error-'),
+    );
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'analysis.md');
+    const checkpoint = JSON.stringify({
+      id: 'video-poll-1',
+      operationId: 'original-operation',
+    });
+    await writeFile(outputPath, checkpoint);
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const localFixture = await tinyVideoFixture();
+    const originalFetch = globalThis.fetch;
+    const originalStderrWrite = process.stderr.write;
+    let stderrText = '';
+    process.stderr.write = ((chunk: unknown) => {
+      stderrText += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.operation === 'analyze')
+        return Response.json({
+          output: {
+            data: {
+              id: 'video-poll-1',
+              status: 'accepted',
+              stage: 'resolving_source',
+              elapsedMs: 0,
+            },
+          },
+        });
+      assert.match(
+        stderrText,
+        /Resume: postplus media poll --handle 'video-poll-1'/u,
+      );
+      return Response.json(
+        {
+          code: 'status_unavailable',
+          error: 'Status temporarily unavailable.',
+        },
+        { status: 503 },
+      );
+    };
+    globalThis.fetch = withGoogleVideoUpload(globalThis.fetch, localFixture);
+    try {
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          'analyze',
+          'video-analysis',
+          '--video',
+          localFixture.filePath,
+          '--prompt',
+          'Analyze.',
+        ]),
+        1,
+      );
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          'poll',
+          '--handle',
+          'video-poll-1',
+          '--capability',
+          'video-analysis',
+          '--output',
+          outputPath,
+        ]),
+        1,
+      );
+      assert.equal(await readFile(outputPath, 'utf8'), checkpoint);
+      assert.match(
+        stderrText,
+        /Resume the same run: postplus media poll --handle 'video-poll-1'/u,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.stderr.write = originalStderrWrite;
+    }
+  });
+
+  it('attaches the accepted video run identity to hosted-lib network errors', async () => {
+    const originalFetch = globalThis.fetch;
+    let submitOperationId: unknown;
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.operation === 'analyze') {
+        submitOperationId = body.operationId;
+        return Response.json({
+          output: { data: { id: 'video-lib-1', status: 'accepted' } },
+        });
+      }
+      throw new TypeError('fetch failed: disconnected');
+    };
+    try {
+      await assert.rejects(
+        runHostedDomainCommand(
+          'media',
+          [
+            'analyze',
+            'video-analysis',
+            '--video',
+            'https://example.com/video.mp4',
+            '--prompt',
+            'Analyze.',
+          ],
+          {
+            auth: {
+              apiBaseUrl: 'https://postplus.test',
+              cliSessionToken: 'cli-session-token',
+            },
+          },
+        ),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.equal(
+            (error as Error & { handle: string }).handle,
+            'video-lib-1',
+          );
+          assert.equal(
+            (error as Error & { operationId: string }).operationId,
+            submitOperationId,
+          );
+          return true;
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('media analyze forwards --video-seconds as estimatedUsage.videoSeconds', async () => {
     await setLocalSession({
       accountId: 'account_1',
@@ -8632,17 +10883,26 @@ describe('hosted domain commands', () => {
     };
 
     try {
-      const result = await runHostedDomainCommand('media', [
-        'analyze',
-        'video-analysis',
-        '--video',
-        'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
-        '--prompt',
-        'Analyze this short clip.',
-        '--video-seconds',
-        '30',
-      ]);
-      assert.equal(result, 0);
+      const result = await runHostedDomainCommand(
+        'media',
+        [
+          'analyze',
+          'video-analysis',
+          '--video',
+          'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
+          '--prompt',
+          'Analyze this short clip.',
+          '--video-seconds',
+          '30',
+        ],
+        {
+          auth: {
+            apiBaseUrl: 'https://postplus.test',
+            cliSessionToken: 'cli-session-token',
+          },
+        },
+      );
+      assert.deepEqual(result, { ok: true });
       const body = postedBody as Record<string, unknown>;
       // Restores the video-analysis routing reachability the retired ffprobe runner
       // had: the caller-supplied duration reaches the Web routing/preflight boundary.
@@ -8850,7 +11110,7 @@ describe('hosted domain commands', () => {
     const resultPath = resolve(downloadDir, 'result.json');
     const mediaReference =
       'postplus-media://uploads/user_1/hosted-media/outputs/clip.mp4';
-    const mediaBytes = Buffer.from('downloaded-media-bytes');
+    const mediaBytes = (await tinyVideoFixture()).bytes;
 
     await setLocalSession({
       accountId: 'account_1',
@@ -8918,6 +11178,31 @@ describe('hosted domain commands', () => {
     } finally {
       globalThis.fetch = originalFetch;
       process.stdout.write = originalStdoutWrite;
+    }
+  });
+
+  it('media-file video download rejects a successful HTML response and preserves the existing media', async () => {
+    const fixture = await tinyVideoFixture();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response('<html><body>No media is available</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    try {
+      await assert.rejects(
+        runMediaFileCommand([
+          'download',
+          '--url',
+          'https://download.test/source',
+          '--output-file',
+          fixture.filePath,
+        ]),
+        /media_video_html_without_media_redirect/u,
+      );
+      assert.deepEqual(await readFile(fixture.filePath), fixture.bytes);
+    } finally {
+      globalThis.fetch = originalFetch;
     }
   });
 
@@ -10408,6 +12693,848 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('reuses an existing owned media read URL without uploading a new PostPlus Storage object', async () => {
+    const fixture = await tinyVideoFixture();
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const source =
+      'postplus-media://uploads/user_1/hosted-media/outputs/clip.mp4';
+    const originalFetch = globalThis.fetch;
+    let reads = 0;
+    const upload = withGoogleVideoUpload(async (_url, init) => {
+      assert.equal(JSON.parse(String(init?.body)).operation, 'analyze');
+      return Response.json({
+        output: {
+          data: {
+            id: 'owned-run',
+            status: 'completed',
+            markdown: 'Owned video.\n',
+          },
+        },
+      });
+    }, fixture);
+    globalThis.fetch = async (url, init) => {
+      if (String(url) === 'https://download.test/existing.mp4')
+        return new Response(fixture.bytes);
+      if (
+        String(url) ===
+        'https://postplus.test/api/postplus-cli/hosted/capability'
+      ) {
+        const body = JSON.parse(String(init?.body));
+        if (body.capability === 'media-file') {
+          assert.equal(body.operation, 'create-read-url');
+          assert.deepEqual(body.file, { mediaReference: source });
+          reads++;
+          return Response.json({
+            output: { signedUrl: 'https://download.test/existing.mp4' },
+          });
+        }
+      }
+      return upload(url, init);
+    };
+    try {
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          'analyze',
+          'video-analysis',
+          '--video',
+          source,
+          '--output',
+          resolve(fixture.filePath, '..', 'owned.md'),
+        ]),
+        0,
+      );
+      assert.equal(reads, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('prepares a local video as readable evidence without authentication or hosted requests', async () => {
+    const fixture = await tinyVideoFixture();
+    const originalFetch = globalThis.fetch;
+    const originalLog = console.log;
+    let result:
+      | { kind: string; filePath: string; metadata: { hasAudio: boolean } }
+      | undefined;
+    globalThis.fetch = async () =>
+      assert.fail('local evidence requires no hosted call');
+    console.log = (value: string) => {
+      result = JSON.parse(value);
+    };
+    try {
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          'prepare',
+          '--source',
+          fixture.filePath,
+        ]),
+        0,
+      );
+      assert.equal(result?.kind, 'video');
+      assert.equal(result?.filePath, fixture.filePath);
+      assert.equal(result?.metadata.hasAudio, true);
+      assert.deepEqual(await readFile(fixture.filePath), fixture.bytes);
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.log = originalLog;
+    }
+  });
+
+  it('writes a structured prepare-upload failure to output while preserving the private recovery checkpoint', async () => {
+    const fixture = await tinyVideoFixture();
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const outputPath = resolve(fixture.filePath, '..', 'upload-failure.json');
+    const originalFetch = globalThis.fetch;
+    const operations: string[] = [];
+    globalThis.fetch = async (url, init) => {
+      assert.equal(
+        String(url),
+        'https://postplus.test/api/postplus-cli/hosted/capability',
+      );
+      const body = JSON.parse(String(init?.body));
+      operations.push(body.operation);
+      assert.equal(
+        body.operation,
+        'prepare-upload',
+        'failure must not upload bytes or submit analysis',
+      );
+      return Response.json(
+        {
+          code: 'video_analysis_upload_invalid',
+          error: 'Upload metadata was rejected.',
+          operationId: body.operationId,
+          stage: 'uploading_to_provider',
+          retryable: false,
+          userAction: 'Correct the upload metadata before retrying.',
+        },
+        { status: 400 },
+      );
+    };
+    try {
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          'analyze',
+          'video-analysis',
+          '--video',
+          fixture.filePath,
+          '--output',
+          outputPath,
+          '--hosted-operation-id',
+          'upload-rejected-operation',
+        ]),
+        1,
+      );
+      const output = JSON.parse(await readFile(outputPath, 'utf8'));
+      assert.equal(output.error.code, 'video_analysis_upload_invalid');
+      assert.equal(output.error.operationId, 'upload-rejected-operation');
+      assert.equal(output.error.stage, 'uploading_to_provider');
+      assert.equal(
+        output.error.userAction,
+        'Correct the upload metadata before retrying.',
+      );
+      const directory = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'media-runs');
+      const files = await readdir(directory);
+      assert.equal(files.length, 1);
+      const checkpointPath = resolve(directory, files[0]!);
+      const checkpoint = JSON.parse(await readFile(checkpointPath, 'utf8'));
+      assert.equal(checkpoint.operationId, 'upload-rejected-operation');
+      assert.equal(checkpoint.videoTransfer.phase, 'upload-preparing');
+      assert.equal(checkpoint.videoTransfer.filePath, fixture.filePath);
+      assert.equal(checkpoint.analysisSubmissionAttempted, undefined);
+      assert.equal((await stat(checkpointPath)).mode & 0o777, 0o600);
+      assert.ok(!('videoTransfer' in output));
+      assert.deepEqual(operations, ['prepare-upload']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  for (const code of [
+    'video_analysis_quote_unavailable',
+    'video_analysis_upload_invalid',
+  ]) {
+    it(`pre-admission ${code} can resume the same uploaded file`, async () => {
+      const fixture = await tinyVideoFixture();
+      await setLocalSession({
+        accountId: 'account_1',
+        accountName: 'Account',
+        apiBaseUrl: 'https://postplus.test',
+        cliSessionToken: 'cli-session-token',
+        sessionExpiresAt: null,
+        userEmail: 'agent@example.com',
+        userId: 'user_1',
+      });
+      const originalFetch = globalThis.fetch;
+      const outputPath = resolve(fixture.filePath, '..', 'count-report.md');
+      let submissions = 0;
+      globalThis.fetch = withGoogleVideoUpload(async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.operation, 'analyze');
+        submissions++;
+        if (submissions === 1)
+          return Response.json(
+            {
+              code,
+              analysisSubmissionRejected: true,
+              error: 'Input count failed before analysis.',
+            },
+            { status: 502 },
+          );
+        return Response.json({
+          output: {
+            data: {
+              id: 'count-run',
+              status: 'completed',
+              markdown: 'Counted report.\n',
+            },
+          },
+        });
+      }, fixture);
+      const args = [
+        'analyze',
+        'video-analysis',
+        '--video',
+        fixture.filePath,
+        '--output',
+        outputPath,
+        '--hosted-operation-id',
+        'operation-1',
+      ];
+      try {
+        assert.equal(await runHostedDomainCommand('media', args), 1);
+        assert.equal(await runHostedDomainCommand('media', args), 0);
+        assert.equal(submissions, 2);
+        assert.equal(await readFile(outputPath, 'utf8'), 'Counted report.\n');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
+
+  for (const rejection of [
+    'postplus_cli_cloud_release_in_progress',
+    'postplus_client_upgrade_required',
+    'unknown-json-503',
+    'unknown-html-503',
+  ]) {
+    it(`video recovery preserves submission certainty after ${rejection}`, async () => {
+      const fixture = await tinyVideoFixture();
+      await setLocalSession({
+        accountId: 'account_1',
+        apiBaseUrl: 'https://postplus.test',
+        cliSessionToken: 'cli-session-token',
+        sessionExpiresAt: null,
+        userId: 'user_1',
+      });
+      const originalFetch = globalThis.fetch;
+      const outputPath = resolve(
+        fixture.filePath,
+        '..',
+        'compatibility-report.md',
+      );
+      const rejectedBeforeExecution = !rejection.startsWith('unknown-');
+      const operations: string[] = [];
+      let executions = 0;
+      let statusGuardReturned = false;
+      globalThis.fetch = withGoogleVideoUpload(async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        operations.push(body.operation);
+        if (body.operation === 'analyze') {
+          assert.equal(body.operationId, 'compatibility-operation');
+          if (operations.length === 1) {
+            if (rejection === 'unknown-html-503')
+              return new Response('<html>Service unavailable</html>', {
+                status: 503,
+              });
+            return Response.json(
+              {
+                code: rejection,
+                // The wording alone must never prove pre-execution rejection.
+                error:
+                  'PostPlus Cloud is updating. Please retry in about one minute.',
+              },
+              {
+                status:
+                  rejection === 'postplus_client_upgrade_required' ? 426 : 503,
+              },
+            );
+          }
+          assert.equal(
+            rejectedBeforeExecution,
+            true,
+            'unknown outcomes must not resubmit',
+          );
+          executions++;
+        } else {
+          assert.equal(body.operation, 'status');
+          assert.equal(body.sourceOperationId, 'compatibility-operation');
+          assert.equal(rejectedBeforeExecution, false);
+          if (!statusGuardReturned) {
+            statusGuardReturned = true;
+            return Response.json(
+              {
+                code: 'postplus_cli_cloud_release_in_progress',
+              },
+              { status: 503 },
+            );
+          }
+        }
+        return Response.json({
+          output: {
+            data: {
+              id: 'compatibility-run',
+              status: 'completed',
+              markdown: 'Recovered report.\n',
+            },
+          },
+        });
+      }, fixture);
+      try {
+        const firstCall = runHostedDomainCommand('media', [
+          'analyze',
+          'video-analysis',
+          '--video',
+          fixture.filePath,
+          '--output',
+          outputPath,
+          '--hosted-operation-id',
+          'compatibility-operation',
+        ]);
+        if (rejectedBeforeExecution || rejection === 'unknown-html-503')
+          await assert.rejects(firstCall);
+        else assert.equal(await firstCall, 1);
+        const directory = resolve(
+          process.env.POSTPLUS_CONFIG_DIR!,
+          'media-runs',
+        );
+        const checkpointPath = resolve(
+          directory,
+          (await readdir(directory))[0]!,
+        );
+        const checkpoint = JSON.parse(await readFile(checkpointPath, 'utf8'));
+        assert.equal(checkpoint.operationId, 'compatibility-operation');
+        assert.equal(
+          checkpoint.analysisSubmissionAttempted,
+          rejectedBeforeExecution ? undefined : true,
+        );
+        assert.equal(checkpoint.videoTransfer.phase, 'uploaded');
+        const resume = [
+          'poll',
+          '--resume-from',
+          checkpointPath,
+          '--wait-seconds',
+          '0',
+          '--output',
+          outputPath,
+        ];
+        if (!rejectedBeforeExecution) {
+          await assert.rejects(
+            () => runHostedDomainCommand('media', resume),
+            /Cloud is updating/u,
+          );
+          assert.equal(
+            JSON.parse(await readFile(checkpointPath, 'utf8'))
+              .analysisSubmissionAttempted,
+            true,
+            'a compatibility rejection of status cannot prove the original submit was rejected',
+          );
+        }
+        assert.equal(await runHostedDomainCommand('media', resume), 0);
+        assert.deepEqual(
+          operations,
+          rejectedBeforeExecution
+            ? ['analyze', 'analyze']
+            : ['analyze', 'status', 'status'],
+        );
+        assert.equal(executions, rejectedBeforeExecution ? 1 : 0);
+        assert.equal(await readFile(outputPath, 'utf8'), 'Recovered report.\n');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
+
+  for (const phase of ['resolve-source', 'prepare-upload'] as const) {
+    for (const knownRejection of [true, false]) {
+      it(`video ${phase} recovery distinguishes compatibility rejection from unknown 503: ${knownRejection}`, async () => {
+        const fixture = await tinyVideoFixture();
+        await setLocalSession({
+          accountId: 'account_1',
+          apiBaseUrl: 'https://postplus.test',
+          cliSessionToken: 'cli-session-token',
+          sessionExpiresAt: null,
+          userId: 'user_1',
+        });
+        const originalFetch = globalThis.fetch;
+        const operations: string[] = [];
+        let rejected = 0;
+        const rejectionCount = phase === 'prepare-upload' ? 2 : 1;
+        const outputPath = resolve(fixture.filePath, '..', 'transfer-guard.md');
+        const source =
+          phase === 'resolve-source'
+            ? 'https://www.tiktok.com/@example/video/123'
+            : fixture.filePath;
+        const upload = withGoogleVideoUpload(async (_url, init) => {
+          const body = JSON.parse(String(init?.body));
+          assert.equal(body.operation, 'analyze');
+          return Response.json({
+            output: {
+              data: {
+                id: 'transfer-guard-run',
+                status: 'completed',
+                markdown: 'Transfer recovered.\n',
+              },
+            },
+          });
+        }, fixture);
+        globalThis.fetch = async (url, init) => {
+          if (String(url) === 'https://download.test/source.mp4')
+            return new Response(fixture.bytes, {
+              headers: { 'content-type': 'video/mp4' },
+            });
+          if (
+            String(url) ===
+            'https://postplus.test/api/postplus-cli/hosted/capability'
+          ) {
+            const body = JSON.parse(String(init?.body));
+            operations.push(body.operation);
+            assert.equal(body.operationId, 'transfer-guard-operation');
+            if (body.operation === phase && rejected < rejectionCount) {
+              rejected++;
+              return Response.json(
+                {
+                  code: knownRejection
+                    ? 'postplus_cli_cloud_release_in_progress'
+                    : 'unknown_gateway_failure',
+                  error:
+                    'PostPlus Cloud is updating. Please retry in about one minute.',
+                },
+                { status: 503 },
+              );
+            }
+            if (['resolve-source', 'source-status'].includes(body.operation))
+              return Response.json({
+                output: {
+                  status: 'completed',
+                  source: {
+                    kind: 'video',
+                    videoCandidates: [
+                      { url: 'https://download.test/source.mp4' },
+                    ],
+                  },
+                },
+              });
+          }
+          return upload(url, init);
+        };
+        try {
+          let command = [
+            'analyze',
+            'video-analysis',
+            '--video',
+            source,
+            '--hosted-operation-id',
+            'transfer-guard-operation',
+            '--output',
+            outputPath,
+          ];
+          let checkpointPath = '';
+          for (let attempt = 1; attempt <= rejectionCount; attempt++) {
+            if (knownRejection)
+              await assert.rejects(
+                () => runHostedDomainCommand('media', command),
+                /Cloud is updating/u,
+              );
+            else
+              assert.equal(await runHostedDomainCommand('media', command), 1);
+            const directory = resolve(
+              process.env.POSTPLUS_CONFIG_DIR!,
+              'media-runs',
+            );
+            checkpointPath = resolve(directory, (await readdir(directory))[0]!);
+            const checkpoint = JSON.parse(
+              await readFile(checkpointPath, 'utf8'),
+            );
+            assert.equal(checkpoint.operationId, 'transfer-guard-operation');
+            assert.equal(checkpoint.analysisSubmissionAttempted, undefined);
+            if (phase === 'resolve-source')
+              assert.equal(
+                checkpoint.videoTransfer.sourceSubmissionAttempted,
+                knownRejection ? undefined : true,
+              );
+            else
+              assert.equal(
+                checkpoint.videoTransfer.uploadPreparationAttempts ?? 0,
+                knownRejection ? 0 : attempt,
+              );
+            command = [
+              'poll',
+              '--resume-from',
+              checkpointPath,
+              '--wait-seconds',
+              '0',
+              '--output',
+              outputPath,
+            ];
+          }
+          if (phase === 'prepare-upload' && !knownRejection) {
+            await assert.rejects(() =>
+              runHostedDomainCommand('media', command),
+            );
+            assert.deepEqual(
+              operations,
+              ['prepare-upload', 'prepare-upload'],
+              'unknown preparation outcomes keep their bounded allowance',
+            );
+            const checkpoint = JSON.parse(
+              await readFile(checkpointPath, 'utf8'),
+            );
+            assert.equal(checkpoint.videoTransfer.uploadPreparationAttempts, 2);
+            assert.equal(checkpoint.videoTransfer.uploadToken, undefined);
+          } else {
+            assert.equal(await runHostedDomainCommand('media', command), 0);
+            assert.deepEqual(
+              operations,
+              phase === 'resolve-source'
+                ? [
+                    'resolve-source',
+                    knownRejection ? 'resolve-source' : 'source-status',
+                    'prepare-upload',
+                    'analyze',
+                  ]
+                : [
+                    'prepare-upload',
+                    'prepare-upload',
+                    'prepare-upload',
+                    'analyze',
+                  ],
+            );
+            assert.equal(
+              await readFile(outputPath, 'utf8'),
+              'Transfer recovered.\n',
+            );
+          }
+        } finally {
+          globalThis.fetch = originalFetch;
+        }
+      });
+    }
+  }
+
+  for (const pauseAt of ['submit', 'poll'] as const) {
+    it(`public hosted-lib stops at async video quote on ${pauseAt} and confirms the same operation`, async () => {
+      const originalFetch = globalThis.fetch;
+      const challenge = buildLargeCreditChallenge({
+        requiredTierMillicredits: 100_000,
+      });
+      const paused = {
+        operationId: 'operation-1',
+        output: {
+          data: {
+            id: 'async-quote-run',
+            status: 'processing',
+            error: {
+              code: 'postplus_cli_quote_confirmation_required',
+              quoteConfirmation: challenge,
+            },
+          },
+        },
+      };
+      const bodies: Record<string, unknown>[] = [];
+      let confirmed = false;
+      globalThis.fetch = async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        bodies.push(body);
+        if (body.operation === 'analyze') {
+          assert.equal(body.operationId, 'operation-1');
+          assert.equal(body.input.video, 'https://example.com/video.mp4');
+          if (body.quoteConfirmationToken) {
+            assert.equal(body.quoteConfirmationToken, 'confirmed-token');
+            confirmed = true;
+            return Response.json({
+              output: {
+                data: {
+                  id: 'async-quote-run',
+                  status: 'completed',
+                  markdown: 'Confirmed.',
+                },
+              },
+            });
+          }
+          if (pauseAt === 'poll')
+            return Response.json({
+              output: { data: { id: 'async-quote-run', status: 'accepted' } },
+            });
+        }
+        assert.equal(confirmed, false);
+        return Response.json(paused);
+      };
+      const args = [
+        'analyze',
+        'video-analysis',
+        '--video',
+        'https://example.com/video.mp4',
+        '--hosted-operation-id',
+        'operation-1',
+      ];
+      const auth = {
+        apiBaseUrl: 'https://postplus.test',
+        cliSessionToken: 'cli-session-token',
+      };
+      try {
+        await assert.rejects(
+          runHostedRequest({ domain: 'media', args, auth }),
+          (error: unknown) => {
+            assert.ok(error instanceof HostedQuoteConfirmationRequiredError);
+            assert.deepEqual(
+              error.challenge,
+              readLargeCreditQuoteConfirmationChallenge(challenge),
+            );
+            assert.equal(
+              (error as Error & { handle: string }).handle,
+              'async-quote-run',
+            );
+            return true;
+          },
+        );
+        assert.deepEqual(
+          bodies.map((b) => b.operation),
+          pauseAt === 'submit' ? ['analyze'] : ['analyze', 'status'],
+        );
+        await runHostedRequest({
+          domain: 'media',
+          args: [...args, '--quote-confirmation-token', 'confirmed-token'],
+          auth,
+        });
+        assert.equal(confirmed, true);
+        assert.equal(bodies.filter((b) => b.operation === 'analyze').length, 2);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
+
+  it('async video quote retains the checkpoint and upload through failed and successful confirmation', async () => {
+    const fixture = await tinyVideoFixture();
+    const outputPath = resolve(fixture.filePath, '..', 'async-quote.md');
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 100_000,
+    });
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const originalFetch = globalThis.fetch;
+    const operations: string[] = [];
+    let confirms = 0;
+    let upgradeSeen = false;
+    const paused = {
+      operationId: 'operation-1',
+      output: {
+        data: {
+          id: 'async-quote-run',
+          status: 'processing',
+          error: {
+            code: 'postplus_cli_quote_confirmation_required',
+            quoteConfirmation: challenge,
+          },
+        },
+      },
+    };
+    globalThis.fetch = withGoogleVideoUpload(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      operations.push(body.operation);
+      if (body.operation === 'status') return Response.json(paused);
+      assert.equal(body.operationId, 'operation-1');
+      if (!body.quoteConfirmationToken)
+        return Response.json({
+          output: { data: { id: 'async-quote-run', status: 'accepted' } },
+        });
+      confirms++;
+      if (body.quoteConfirmationToken === 'bad-token')
+        return Response.json({ quoteConfirmation: challenge }, { status: 402 });
+      if (!upgradeSeen) {
+        upgradeSeen = true;
+        return Response.json({
+          code: 'postplus_client_upgrade_required',
+          compatibility: { upgrade: { cli: { required: true } } },
+        }, { status: 426 });
+      }
+      return Response.json({
+        output: {
+          data: {
+            id: 'async-quote-run',
+            status: 'completed',
+            markdown: 'Confirmed report.',
+          },
+        },
+      });
+    }, fixture);
+    const args = [
+      'analyze',
+      'video-analysis',
+      '--video',
+      fixture.filePath,
+      '--output',
+      outputPath,
+      '--hosted-operation-id',
+      'operation-1',
+    ];
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('media', args),
+        /Quote confirmation challenge/u,
+      );
+      const directory = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'media-runs');
+      const checkpointPath = resolve(directory, (await readdir(directory))[0]!);
+      const pausedCheckpoint = JSON.parse(
+        await readFile(checkpointPath, 'utf8'),
+      );
+      assert.equal(pausedCheckpoint.analysisSubmissionAttempted, true);
+      assert.equal(pausedCheckpoint.analysisQuoteRequired, true);
+      assert.equal(pausedCheckpoint.handle, 'async-quote-run');
+      assert.equal(pausedCheckpoint.videoTransfer.phase, 'uploaded');
+      assert.deepEqual(operations, ['analyze', 'status']);
+      await assert.rejects(
+        runHostedDomainCommand('media', [
+          ...args,
+          '--quote-confirmation-token',
+          'bad-token',
+        ]),
+        /Quote confirmation challenge/u,
+      );
+      assert.deepEqual(
+        JSON.parse(await readFile(checkpointPath, 'utf8')),
+        pausedCheckpoint,
+      );
+      let recoveryArgs: string[] | undefined;
+      await assert.rejects(
+        runHostedDomainCommand('media', [...args, '--quote-confirmation-token', 'confirmed-token']),
+        (error: unknown) => {
+          assert.ok(error instanceof PostPlusClientUpgradeRequiredError);
+          recoveryArgs = error.recoveryArgs;
+          assert.deepEqual(recoveryArgs, ['media', ...args, '--quote-confirmation-token', 'confirmed-token']);
+          return true;
+        },
+      );
+      assert.equal(await runHostedDomainCommand('media', recoveryArgs!.slice(1)), 0);
+      const completed = JSON.parse(await readFile(checkpointPath, 'utf8'));
+      assert.equal(completed.analysisSubmissionAttempted, true);
+      assert.equal(completed.handle, 'async-quote-run');
+      assert.equal(completed.analysisQuoteRequired, undefined);
+      assert.equal(confirms, 3);
+      assert.deepEqual(operations, ['analyze', 'status', 'analyze', 'analyze', 'analyze']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('video quote rejection preserves upload and allows one confirmed submission of the same operation', async () => {
+    const fixture = await tinyVideoFixture();
+    const outputPath = resolve(fixture.filePath, '..', 'quote-report.md');
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 100_000,
+    });
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const originalFetch = globalThis.fetch;
+    let analyzes = 0;
+    globalThis.fetch = withGoogleVideoUpload(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      assert.equal(
+        body.operation,
+        'analyze',
+        'a confirmed pre-admission rejection must submit, not poll a nonexistent run',
+      );
+      assert.equal(body.operationId, 'operation-1');
+      analyzes++;
+      if (analyzes === 1)
+        return Response.json(
+          {
+            error: 'Confirmation required.',
+            productErrorCode: 'postplus_cli_quote_confirmation_required',
+            quoteConfirmation: challenge,
+          },
+          { status: 402 },
+        );
+      assert.equal(body.quoteConfirmationToken, 'confirmed-token');
+      return Response.json({
+        output: {
+          data: {
+            id: 'quote-run',
+            status: 'completed',
+            markdown: 'Confirmed report.\n',
+          },
+        },
+      });
+    }, fixture);
+    const args = [
+      'analyze',
+      'video-analysis',
+      '--video',
+      fixture.filePath,
+      '--output',
+      outputPath,
+      '--hosted-operation-id',
+      'operation-1',
+    ];
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('media', args),
+        /Quote confirmation challenge:/u,
+      );
+      const directory = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'media-runs');
+      const checkpointPath = resolve(directory, (await readdir(directory))[0]!);
+      const rejected = JSON.parse(await readFile(checkpointPath, 'utf8'));
+      assert.equal(rejected.analysisSubmissionAttempted, undefined);
+      assert.equal(rejected.videoTransfer.phase, 'uploaded');
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          ...args,
+          '--quote-confirmation-token',
+          'confirmed-token',
+        ]),
+        0,
+      );
+      assert.equal(
+        analyzes,
+        2,
+        'one rejected pre-admission POST and one accepted POST',
+      );
+      assert.equal(await readFile(outputPath, 'utf8'), 'Confirmed report.\n');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('writes quote confirmation challenges beside hosted command outputs', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
     tempDirs.push(requestDir);
@@ -10804,6 +13931,28 @@ describe('account read-only commands', () => {
       assert.match(human, /Finalized: 3\.2 PostPlus credits/u);
       assert.doesNotMatch(human, /Moyu|provider|total_cost|markup/u);
       assert.match(human, /This run is terminal\./u);
+      const pending = formatHostedRunDetailReport({
+        ...report,
+        billingPending: true,
+        finalizedCredits: null,
+        reservedCredits: null,
+      });
+      assert.match(pending, /Billing: pending verification/u);
+      assert.doesNotMatch(pending, /Finalized:|Reserved:|0 PostPlus credits/u);
+      const estimated = formatHostedRunDetailReport({
+        ...report,
+        estimatedOnly: true,
+      });
+      assert.match(
+        estimated,
+        /Finalized: 3\.2 PostPlus credits \(estimated settlement; actual usage unconfirmed\)/u,
+      );
+      const estimatedList = formatHostedRunsListReport({
+        runs: [{ ...report, estimatedOnly: true }],
+        count: 1,
+        filters: { limit: 20, since: null, status: null },
+      });
+      assert.match(estimatedList, /3\.2 credits \(estimated settlement\)/u);
     } finally {
       globalThis.fetch = originalFetch;
     }

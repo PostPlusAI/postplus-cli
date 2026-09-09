@@ -42,6 +42,9 @@ export type PostPlusClientUpgradePayload = {
 
 export class PostPlusClientUpgradeRequiredError extends Error {
   readonly code = 'postplus_client_upgrade_required';
+  // Commands that already own durable work resume that identity after updating.
+  // Absent for requests rejected before work began: their original argv is safe.
+  recoveryArgs?: string[];
 
   constructor(readonly payload: PostPlusClientUpgradePayload) {
     super(formatPostPlusClientUpgradeError(payload));

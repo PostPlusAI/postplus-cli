@@ -4,19 +4,21 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { setTimeout as sleepMs } from 'node:timers/promises';
 
-import { resolveFreshRemoteAuth } from './auth-session.js';
-import {
-  type AuthedCloudRequestAuth,
-  sendAuthedCloudRequest,
-} from './authed-cloud-request.js';
-import {
-  PostPlusClientUpgradeRequiredError,
-  formatPostPlusCompatibilityError,
-  isPostPlusClientUpgradePayload,
-} from './client-compatibility.js';
 import { HOSTED_MEDIA_REFERENCE_URI_PREFIX } from './generated/hosted-field-validation-core.generated.js';
+import {
+  HostedProductRequestError,
+  type HostedRequestContext,
+  assertSuccessfulMediaTerminal,
+  dispatchHostedCommand,
+  isTerminalRunStatus,
+  pollHostedRunUntilSettled,
+  postHostedJson,
+  readHostedUploadOutput,
+  readMediaPollRun,
+  shellQuoteArg,
+  writeResult,
+} from './hosted-command-runtime.js';
 import {
   assertMediaUrlFieldSchemes,
   assertModelledFieldValuesInRange,
@@ -38,16 +40,27 @@ import {
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
 import {
+  acknowledgeMediaRunCheckpoint,
+  buildCheckpointResume,
+  bindMediaCheckpointUpgradeRecovery,
+  prepareMediaRunCheckpoint,
+  readMediaRunCheckpoint,
+} from './media-run-checkpoint.js';
+import {
+  executeVideoAnalysis,
+  pollVideoAnalysis,
+  prepareVideoEvidence,
+  resumeVideoCheckpoint,
+} from './media-video-command.js';
+import { downloadVideoBytes, inspectVideoFile } from './media-video-file.js';
+import {
   fetchWithNetworkDiagnostics,
   formatNetworkErrorChain,
   isNetworkFailure,
   readTargetHost,
 } from './network-diagnostics.js';
-import {
-  type LargeCreditQuoteConfirmationChallenge,
-  readLargeCreditQuoteConfirmationChallenge,
-} from './quote-confirmation.js';
-import { clearUpdateCheckCache } from './update-check.js';
+
+export type { HostedRequestContext } from './hosted-command-runtime.js';
 
 // Manifest-driven verb grammar indexes (SSOT projected from apps/web +
 // public-skill-metadata via the generated manifest). The verb/flag grammar,
@@ -80,25 +93,6 @@ type ParsedFlags = {
   arrays: Map<string, string[]>;
 };
 
-// In-process execution context for the hosted-lib path (src/hosted-lib.ts). When
-// present it makes the SAME resolve/dispatch core run without any disk or
-// filesystem touch: the POST uses the injected `auth` + `skillsReleaseId` instead
-// of `resolveFreshRemoteAuth()`/disk config, the request-json surfaces read the
-// envelope from the injected `requestJson` object instead of a `--request <file>`,
-// and runHostedCommand returns the parsed payload (throwing the structured errors)
-// instead of writing stdout/file/exit-code. When the context is `undefined`
-// (the bin path) every code path keeps its current disk/file/stdout behavior.
-export type HostedRequestContext = {
-  auth: AuthedCloudRequestAuth;
-  skillsReleaseId?: string;
-  /**
-   * The request-json envelope injected in place of a `--request <file>` read.
-   * Surfaces that need a body assert it is present and the right shape (object vs
-   * array) exactly as the file-read path validated the parsed file contents.
-   */
-  requestJson?: Record<string, unknown> | unknown[];
-};
-
 // Reads the request-json body for a surface: from the injected object (lib path)
 // or by reading `--request <file>` (bin path). This is the SINGLE place the two
 // paths diverge on input source; the resolved body then flows through the SAME
@@ -118,41 +112,6 @@ async function resolveRequestBody(
     body: await readJsonFile(requestPath),
     errorInputLabel: requestPath,
   };
-}
-
-class HostedQuoteConfirmationRequiredError extends Error {
-  constructor(
-    message: string,
-    readonly challenge: LargeCreditQuoteConfirmationChallenge,
-  ) {
-    super(message);
-    this.name = 'HostedQuoteConfirmationRequiredError';
-  }
-}
-
-// Structured hosted product error as returned by the Web boundary. The CLI is a
-// pass-through: it must report the stable code, owning layer, and operation id
-// verbatim instead of collapsing the failure to a generic message.
-type HostedProductError = {
-  message: string;
-  code: string | null;
-  layer: string | null;
-  operationId: string | null;
-  userAction?: HostedProductErrorUserAction;
-  userMessageRule: string | null;
-};
-
-type HostedProductErrorUserAction = {
-  label: string;
-  type: 'open_url';
-  url: string;
-};
-
-class HostedProductRequestError extends Error {
-  constructor(readonly productError: HostedProductError) {
-    super(formatHostedProductErrorMessage(productError));
-    this.name = 'HostedProductRequestError';
-  }
 }
 
 export async function runHostedDomainCommand(
@@ -191,6 +150,18 @@ export async function runHostedDomainCommand(
   // It must be checked before the manifest verb dispatch.
   if (domain === 'media' && subcommand === 'poll') {
     return runMediaPoll(rest, context);
+  }
+
+  if (domain === 'media' && subcommand === 'prepare') {
+    if (context)
+      throw new Error('media prepare requires a local CLI filesystem.');
+    return (await import('./media-prepare.js')).runMediaPrepareCommand(rest, {
+      prepareVideo: prepareVideoEvidence,
+      readProductError: (error) =>
+        error instanceof HostedProductRequestError
+          ? { ...error.productError }
+          : undefined,
+    });
   }
 
   // Quote-only dry-run price: `postplus media estimate <endpoint-key> ...`. Takes
@@ -508,10 +479,10 @@ function requireResolvedEndpoint(
   return resolved.endpoint;
 }
 
-// video-analysis verb (normalized flags surface). The agent supplies only the
-// video role and analysis prompt; local media is durably staged by the same
-// Manifest-driven transport as generation. Provider payload construction is a
-// Web concern and never appears in CLI or Skill input.
+// video-analysis verb (normalized flags surface). HTTPS inputs pass through
+// byte-for-byte for one hosted resolve/download; local files use the existing
+// explicit CLI upload transport. Provider payload construction is a Web concern
+// and never appears in CLI or Skill input.
 async function runVideoAnalysisVerb(args: {
   args: string[];
   modelKey: string;
@@ -538,6 +509,8 @@ async function runVideoAnalysisVerb(args: {
     'quote-confirmation-token',
     'prompt',
     'skill',
+    'wait-seconds',
+    'poll-interval-seconds',
     'video-seconds',
     'video',
   ]);
@@ -548,31 +521,35 @@ async function runVideoAnalysisVerb(args: {
   }
 
   const outputPath = flags.values.get('output') ?? null;
-  const prompt = requireFlag(flags, 'prompt');
+  const prompt = flags.values.get('prompt');
+  if (prompt !== undefined && !prompt.trim())
+    throw new Error('--prompt must be non-empty when provided.');
+  const originalSource = requireFlag(flags, 'video');
   let normalizedInput: Record<string, unknown> = {
-    prompt,
-    video: requireFlag(flags, 'video'),
+    ...(prompt !== undefined ? { prompt } : {}),
+    video: originalSource,
   };
-  normalizedInput = await resolveManifestMediaInputs({
-    endpointKey: modelKey,
-    fields: model.fields,
-    request: normalizedInput,
-    stage: context
-      ? null
-      : ({ file, operationId }) =>
-          stageHostedMediaFile({
-            file,
-            operationId,
-            skillName: flags.values.get('skill') ?? resolved.skill,
-          }),
-  });
-  assertMediaUrlFieldSchemes(modelKey, model.fields, normalizedInput);
+  if (context)
+    normalizedInput = await resolveManifestMediaInputs({
+      endpointKey: modelKey,
+      fields: model.fields,
+      request: normalizedInput,
+      stage: context
+        ? null
+        : ({ file, operationId }) =>
+            stageHostedMediaFile({
+              file,
+              operationId,
+              skillName: flags.values.get('skill') ?? resolved.skill,
+            }),
+    });
+  if (context)
+    assertMediaUrlFieldSchemes(modelKey, model.fields, normalizedInput);
 
   // Optional runner-supplied hint: the source video duration. When provided it is
-  // forwarded as estimatedUsage.videoSeconds so the Web boundary's video-analysis
-  // routing/preflight can consider eligible short videos; omitting it leaves the
-  // request on the default route. The CLI does not probe the media itself (no
-  // ffprobe in the open-source runner) — it only passes a value the caller knows.
+  // forwarded as estimatedUsage.videoSeconds for quote and validation metadata.
+  // It never selects another execution route. Local video transfer supplies
+  // probed duration; library callers can provide the duration they already know.
   const videoSecondsFlag = flags.values.get('video-seconds') ?? null;
   let estimatedUsage: { videoSeconds: number } | undefined;
   if (videoSecondsFlag !== null) {
@@ -598,21 +575,21 @@ async function runVideoAnalysisVerb(args: {
       flags.values.get('quote-confirmation-token') ?? undefined,
   };
 
-  return dispatchHostedCommand(
-    {
-      request: () =>
-        postHostedJson({
-          body,
-          pathName: '/api/postplus-cli/hosted/capability',
-          skillName: flags.values.get('skill') ?? resolved.skill,
-          context,
-        }),
-      errorInputLabel: `media-${verb}-${modelKey}`,
-      json: flags.booleans.has('json'),
-      outputPath,
-    },
+  return executeVideoAnalysis({
+    recoveryArgs: [
+      'media', verb, modelKey, ...args.args,
+      ...(flags.values.has('hosted-operation-id') ? [] : ['--hosted-operation-id', body.operationId]),
+    ],
+    body,
+    originalSource,
+    prompt,
+    skillName: flags.values.get('skill') ?? resolved.skill,
+    outputPath,
+    json: flags.booleans.has('json'),
+    errorInputLabel: `media-${verb}-${modelKey}`,
+    wait: resolveHostedSubmitWaitFlags(flags),
     context,
-  );
+  });
 }
 
 // `media-file upload`: an advanced durable pre-staging verb. Normal media
@@ -872,6 +849,17 @@ async function fetchMediaBytesToFile(
   absoluteOutput: string,
   debug: boolean,
 ): Promise<number> {
+  if (/\.(?:mp4|mov|m4v|webm)$/iu.test(absoluteOutput)) {
+    const validatedPath = `${absoluteOutput}.${randomUUID()}.checking`;
+    try {
+      await downloadVideoBytes(url, validatedPath);
+      const metadata = await inspectVideoFile(validatedPath);
+      await rename(validatedPath, absoluteOutput);
+      return metadata.bytes;
+    } finally {
+      await rm(validatedPath, { force: true });
+    }
+  }
   const outputDirectory = path.dirname(absoluteOutput);
   const temporaryOutput = path.join(
     outputDirectory,
@@ -984,16 +972,6 @@ type SignedUpload = {
   requiredHeaders: Record<string, string>;
   url: string;
 };
-
-function readHostedUploadOutput(payload: unknown): Record<string, unknown> {
-  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    const output = (payload as Record<string, unknown>).output;
-    if (output && typeof output === 'object' && !Array.isArray(output)) {
-      return output as Record<string, unknown>;
-    }
-  }
-  throw new Error('Hosted media upload response is missing output.');
-}
 
 function readSignedUpload(output: Record<string, unknown>): SignedUpload {
   const signedUpload = output.signedUpload;
@@ -1134,7 +1112,7 @@ prepare local role files automatically.
 // submit and bill.
 const HOSTED_MEDIA_CREATE_REQUEST_TIMEOUT_MS = 14 * 60_000;
 
-function submitMediaGenerationRequest(params: {
+async function submitMediaGenerationRequest(params: {
   capability: string;
   endpointKey: string;
   errorInputLabel: string;
@@ -1158,6 +1136,13 @@ function submitMediaGenerationRequest(params: {
     operationId: params.operationId,
     quoteConfirmationToken: params.quoteConfirmationToken ?? undefined,
   };
+  const checkpoint = await prepareMediaRunCheckpoint(
+    'media-generation',
+    params.operationId,
+    params.outputPath,
+    params.context,
+  );
+  let accepted = false;
 
   return dispatchHostedCommand(
     {
@@ -1169,43 +1154,55 @@ function submitMediaGenerationRequest(params: {
           context: params.context,
           timeoutMs: HOSTED_MEDIA_CREATE_REQUEST_TIMEOUT_MS,
         });
-        if (!params.wait) {
-          return submitted;
-        }
         const run = readMediaPollRun(submitted);
-        if (!run.status || isTerminalRunStatus(run.status)) {
-          return submitted;
+        accepted = run.id !== null;
+        await acknowledgeMediaRunCheckpoint(checkpoint, run.id);
+        if (!params.wait || !run.status || isTerminalRunStatus(run.status)) {
+          return assertSuccessfulMediaTerminal(submitted);
         }
         if (!run.id) {
           throw new Error(
             `Media submit returned non-terminal status ${run.status} without a resumable run handle.`,
           );
         }
-        return pollHostedRunUntilSettled({
-          pollIntervalMs: params.wait.pollIntervalMs,
-          pollOnce: () =>
-            postHostedJson({
-              body: {
-                capability: 'media-generation',
-                handle: run.id,
-                operation: 'status',
-                operationId: `postplus-cli:media:media-generation:status:${randomUUID()}`,
-              },
-              pathName: '/api/postplus-cli/hosted/capability',
-              skillName: null,
-              context: params.context,
-            }),
-          readStatus: (payload) => readMediaPollRun(payload).status,
-          waitBudgetMs: params.wait.waitBudgetMs,
-        });
+        return assertSuccessfulMediaTerminal(
+          await pollHostedRunUntilSettled({
+            retryTransientErrors: true,
+            pollIntervalMs: params.wait.pollIntervalMs,
+            pollOnce: (timeoutMs) =>
+              postHostedJson({
+                timeoutMs,
+                body: {
+                  capability: 'media-generation',
+                  handle: run.id,
+                  operation: 'status',
+                  operationId: `postplus-cli:media:media-generation:status:${randomUUID()}`,
+                },
+                pathName: '/api/postplus-cli/hosted/capability',
+                skillName: null,
+                context: params.context,
+              }),
+            readStatus: (payload) => readMediaPollRun(payload).status,
+            waitBudgetMs: params.wait.waitBudgetMs,
+          }),
+        );
       },
       errorInputLabel: params.errorInputLabel,
       json: params.json,
       outputPath: params.outputPath,
+      preserveOutputOnProductError: () => accepted,
+      preservedOutputRecovery: () =>
+        checkpoint
+          ? `Check the same operation; do not resubmit: ${checkpoint.resumeCommand}`
+          : null,
       asyncResume: (payload) =>
         extractMediaPollResume(payload, params.outputPath),
     },
     params.context,
+  ).catch((error: unknown) =>
+    bindMediaCheckpointUpgradeRecovery(
+      error, accepted ? checkpoint : null, params.outputPath, params.json,
+    ),
   );
 }
 
@@ -1242,17 +1239,85 @@ async function runMediaPoll(
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
   const flags = parseFlags(args, new Set(['debug', 'json']));
-  const handle = requireFlag(flags, 'handle');
+  const resumePath = flags.values.get('resume-from');
+  if (
+    resumePath &&
+    (flags.values.has('handle') || flags.values.has('capability'))
+  ) {
+    throw new Error(
+      '--resume-from cannot be combined with --handle or --capability.',
+    );
+  }
+  const checkpoint = resumePath
+    ? await readMediaRunCheckpoint(resumePath, context)
+    : null;
+  const handle =
+    checkpoint?.handle ?? (checkpoint ? null : requireFlag(flags, 'handle'));
+  const capability =
+    checkpoint?.capability ??
+    flags.values.get('capability') ??
+    'media-generation';
+  if (capability !== 'media-generation' && capability !== 'video-analysis') {
+    throw new Error('--capability must be media-generation or video-analysis.');
+  }
   const outputPath = flags.values.get('output') ?? null;
+  if (
+    resumePath &&
+    outputPath &&
+    path.resolve(resumePath) === path.resolve(outputPath)
+  ) {
+    throw new Error(
+      'The result output must not replace the media recovery checkpoint.',
+    );
+  }
+  if (checkpoint?.videoRequest && !checkpoint.analysisSubmissionAttempted) {
+    return resumeVideoCheckpoint({
+      checkpoint: {
+        record: checkpoint,
+        filePath: resumePath!,
+        resumeCommand: buildCheckpointResume(resumePath!, outputPath),
+      },
+      outputPath,
+      json: flags.booleans.has('json'),
+      analyze: (args) => {
+        const resolved =
+          MEDIA_VERB_ENDPOINTS.get('analyze')?.get('video-analysis');
+        if (!resolved) throw new Error('Video analysis is not registered.');
+        return runVideoAnalysisVerb({
+          context,
+          resolved,
+          modelKey: 'video-analysis',
+          verb: 'analyze',
+          args,
+        });
+      },
+    });
+  }
   const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
+  if (capability === 'video-analysis') {
+    return pollVideoAnalysis({
+      handle,
+      checkpoint,
+      resumePath,
+      outputPath,
+      context,
+      json: flags.booleans.has('json'),
+      debug: flags.booleans.has('debug'),
+      wait: { pollIntervalMs, waitBudgetMs },
+    });
+  }
+  let terminalObserved = false;
 
-  const pollOnce = () =>
+  const pollOnce = (timeoutMs?: number) =>
     postHostedJson({
+      timeoutMs,
       body: {
-        capability: 'media-generation',
-        handle,
+        capability,
+        ...(handle
+          ? { handle }
+          : { sourceOperationId: checkpoint!.operationId }),
         operation: 'status',
-        operationId: `postplus-cli:media:media-generation:status:${randomUUID()}`,
+        operationId: `postplus-cli:media:${capability}:status:${randomUUID()}`,
       },
       pathName: '/api/postplus-cli/hosted/capability',
       skillName: null,
@@ -1262,46 +1327,29 @@ async function runMediaPoll(
 
   return dispatchHostedCommand(
     {
-      request: () =>
-        pollHostedRunUntilSettled({
+      request: async () => {
+        const settled = await pollHostedRunUntilSettled({
+          retryTransientErrors: true,
           pollIntervalMs,
           pollOnce,
           readStatus: (payload) => readMediaPollRun(payload).status,
           waitBudgetMs,
-        }),
+        });
+        const status = readMediaPollRun(settled).status;
+        terminalObserved = status !== null && isTerminalRunStatus(status);
+        return assertSuccessfulMediaTerminal(settled);
+      },
       errorInputLabel: 'media-poll-handle',
       json: flags.booleans.has('json'),
       outputPath,
+      preserveOutputOnProductError: true,
+      preservedOutputRecovery: resumePath
+        ? () =>
+            `${terminalObserved ? 'Task record' : 'Check the same operation; do not resubmit'}: ${buildCheckpointResume(resumePath, outputPath)}`
+        : undefined,
     },
     context,
   );
-}
-
-// Shared bounded wait loop for every resumable hosted run (`media poll
-// --handle`, `research collect/scrape --run-handle`). One invocation re-checks
-// the read-only status boundary until the run is terminal, the payload stops
-// exposing a readable status (fail safe: return it rather than loop blind), or
-// the wait budget is spent — then returns the latest payload as-is. Every check
-// is an independent short HTTP read; nothing holds a connection open.
-async function pollHostedRunUntilSettled(input: {
-  pollIntervalMs: number;
-  pollOnce: () => Promise<unknown>;
-  readStatus: (payload: unknown) => string | null;
-  waitBudgetMs: number;
-}): Promise<unknown> {
-  const startedAt = Date.now();
-  while (true) {
-    const payload = await input.pollOnce();
-    const status = input.readStatus(payload);
-    if (!status || isTerminalRunStatus(status)) {
-      return payload;
-    }
-    const remainingMs = input.waitBudgetMs - (Date.now() - startedAt);
-    if (remainingMs <= 0) {
-      return payload;
-    }
-    await sleepMs(Math.min(input.pollIntervalMs, remainingMs));
-  }
 }
 
 type ResearchVerb = 'run';
@@ -2659,245 +2707,6 @@ async function runHostedSchema(
   return 0;
 }
 
-async function postHostedJson(input: {
-  body: unknown;
-  debug?: boolean;
-  pathName: string;
-  skillName: string | null;
-  timeoutMs?: number;
-  // When present (the hosted-lib path) the POST uses the injected auth +
-  // skillsReleaseId with NO disk read and NO 401-refresh-retry (the eve runtime
-  // supplies fresh session auth each turn). When absent (the bin path) the auth
-  // is resolved from disk and a single 401 triggers a forced refresh, exactly as
-  // before. Either way the body/URL/headers are built identically.
-  context?: HostedRequestContext;
-}): Promise<unknown> {
-  const response = input.context
-    ? await sendAuthedCloudRequest({
-        auth: input.context.auth,
-        body: input.body,
-        ...(input.debug !== undefined ? { debug: input.debug } : {}),
-        method: 'POST',
-        pathName: input.pathName,
-        skillName: input.skillName,
-        skillsReleaseId: input.context.skillsReleaseId ?? null,
-        timeoutMs: input.timeoutMs ?? 120000,
-      })
-    : await sendAuthedCloudRequest({
-        auth: await resolveFreshRemoteAuth(),
-        body: input.body,
-        ...(input.debug !== undefined ? { debug: input.debug } : {}),
-        method: 'POST',
-        pathName: input.pathName,
-        retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
-        skillName: input.skillName,
-        timeoutMs: input.timeoutMs ?? 120000,
-      });
-
-  const payload = await readJsonResponse(response);
-  if (!response.ok) {
-    const productError = readHostedProductError(payload);
-    const challenge = readLargeCreditQuoteConfirmationChallenge(payload);
-    if (challenge) {
-      throw new HostedQuoteConfirmationRequiredError(
-        productError.message,
-        challenge,
-      );
-    }
-
-    if (isPostPlusClientUpgradePayload(payload)) {
-      await clearUpdateCheckCache();
-      throw new PostPlusClientUpgradeRequiredError(payload);
-    }
-
-    const compatibilityError = formatPostPlusCompatibilityError(payload);
-    if (compatibilityError) {
-      await clearUpdateCheckCache();
-      throw new Error(compatibilityError);
-    }
-    throw new HostedProductRequestError(productError);
-  }
-
-  return payload;
-}
-
-// Single exit path for the BIN hosted command: success writes the result and
-// returns 0; a quote challenge writes the challenge file and rethrows actionable
-// guidance; a structured product error writes the full error envelope to the
-// result JSON and surfaces code/layer/operationId on the terminal, exiting 1.
-async function runHostedCommand(input: {
-  request: () => Promise<unknown>;
-  errorInputLabel: string;
-  json: boolean;
-  outputPath: string | null;
-  // A resume checkpoint is durable input, not an error sink. If a status read
-  // fails, keep the last valid handle on disk so the caller can retry after the
-  // underlying problem is fixed. --json still receives the structured error on
-  // stdout; human mode keeps the existing actionable stderr message.
-  preserveOutputOnProductError?: boolean | (() => boolean);
-  preservedOutputRecovery?: () => string | null;
-  // When an async submit remains pending, render its next safe action. Media
-  // keeps its short literal id; research emits only --resume-from <checkpoint>
-  // so an agent never rewrites a signed opaque handle. stderr is used in both
-  // human and --json modes without changing the server payload on stdout.
-  asyncResume?: (payload: unknown) => string | null;
-}): Promise<number> {
-  let payload: unknown;
-  try {
-    payload = await input.request();
-  } catch (error) {
-    if (error instanceof HostedQuoteConfirmationRequiredError) {
-      const challengePath = await writeQuoteConfirmationChallenge(error, {
-        errorInputLabel: input.errorInputLabel,
-        outputPath: input.outputPath,
-      });
-      throw new Error(
-        [
-          error.message,
-          `Quote confirmation challenge: ${challengePath}`,
-          `Confirm: postplus quote confirm --json --challenge-file "${challengePath}"`,
-          // The confirmation token is server-signed against the challenged
-          // operation id. Re-running without --hosted-operation-id mints a fresh
-          // random operation id (see the operationId flag default), so the token
-          // would no longer match and the confirmation fails. The rerun MUST pin
-          // the same operation id the token is bound to.
-          'Then rerun the hosted command with the same operation id the token is bound to:',
-          `  --hosted-operation-id ${error.challenge.operationId} --quote-confirmation-token <token>`,
-        ].join('\n'),
-      );
-    }
-
-    if (error instanceof HostedProductRequestError) {
-      if (shouldPreserveHostedOutput(input.preserveOutputOnProductError)) {
-        if (input.json) {
-          await writeResult({ error: error.productError }, null, true);
-        }
-        writePreservedOutputRecovery(input.preservedOutputRecovery);
-      } else {
-        await writeResult(
-          { error: error.productError },
-          input.outputPath,
-          input.json,
-        );
-      }
-      process.stderr.write(`${error.message}\n`);
-      return 1;
-    }
-
-    if (shouldPreserveHostedOutput(input.preserveOutputOnProductError)) {
-      writePreservedOutputRecovery(input.preservedOutputRecovery);
-    }
-
-    throw error;
-  }
-
-  await writeResult(payload, input.outputPath, input.json);
-
-  const resumeCommand = input.asyncResume?.(payload) ?? null;
-  if (resumeCommand) {
-    process.stderr.write(`Async run pending — resume: ${resumeCommand}\n`);
-  }
-
-  return 0;
-}
-
-// Single exit path for both BIN and LIB hosted commands. Each dispatch function
-// builds the SAME `request` closure (resolve verb -> build envelope -> POST) and
-// hands it here. The bin path (no `context`) keeps stdout/file/exit-code behavior
-// via runHostedCommand. The lib path (with `context`) returns the parsed payload
-// and rethrows the structured HostedProductRequestError / quote-confirmation error
-// VERBATIM — no stdout, no file writes, no exit code — so the in-process caller
-// surfaces the structured JSON and fails honestly. Because the closure is shared,
-// the wire request (URL + body + headers) is byte-identical across both paths.
-async function dispatchHostedCommand(
-  input: {
-    request: () => Promise<unknown>;
-    errorInputLabel: string;
-    json: boolean;
-    outputPath: string | null;
-    preserveOutputOnProductError?: boolean | (() => boolean);
-    preservedOutputRecovery?: () => string | null;
-    asyncResume?: (payload: unknown) => string | null;
-  },
-  context: HostedRequestContext | undefined,
-): Promise<number | unknown> {
-  if (!context) {
-    return runHostedCommand(input);
-  }
-  return input.request();
-}
-
-function shouldPreserveHostedOutput(
-  value: boolean | (() => boolean) | undefined,
-): boolean {
-  return typeof value === 'function' ? value() : value === true;
-}
-
-function writePreservedOutputRecovery(
-  buildRecovery: (() => string | null) | undefined,
-): void {
-  const recovery = buildRecovery?.() ?? null;
-  if (recovery) {
-    process.stderr.write(`${recovery}\n`);
-  }
-}
-
-// Resume-command extractors (plan E). A media-generation submit returns the run
-// handle as `output.data.id`; a research collect/scrape launch returns it as a
-// top-level `runHandle`. Both may also come back already terminal (small/sync
-// jobs), in which case there is nothing to resume and we stay silent.
-const TERMINAL_RUN_STATUSES = new Set([
-  'completed',
-  'succeeded',
-  'success',
-  'failed',
-  'error',
-  'expired',
-  'canceled',
-  'cancelled',
-]);
-
-function isTerminalRunStatus(status: string): boolean {
-  return TERMINAL_RUN_STATUSES.has(status.toLowerCase());
-}
-
-// Shell-escape an argument value for a copy-pasteable command snippet: wrap in
-// single quotes and escape any embedded single quote, so spaces or shell
-// metacharacters in a run id can't break or unsafely alter a pasted command.
-function shellQuoteArg(value: string): string {
-  return `'${value.replace(/'/gu, "'\\''")}'`;
-}
-
-// Read the `{ id, status }` run projection out of a media-generation payload
-// (`output.data`). Shared by the submit resume hint and the poll wait loop; a
-// payload without the projection yields nulls so callers fail safe (no resume
-// hint, no blind wait loop).
-function readMediaPollRun(payload: unknown): {
-  id: string | null;
-  status: string | null;
-} {
-  const none = { id: null, status: null };
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return none;
-  }
-  const output = (payload as Record<string, unknown>).output;
-  if (!output || typeof output !== 'object' || Array.isArray(output)) {
-    return none;
-  }
-  const data = (output as Record<string, unknown>).data;
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    return none;
-  }
-  const record = data as Record<string, unknown>;
-  return {
-    id: typeof record.id === 'string' && record.id.trim() ? record.id : null,
-    status:
-      typeof record.status === 'string' && record.status.trim()
-        ? record.status
-        : null,
-  };
-}
-
 function extractMediaPollResume(
   payload: unknown,
   outputPath: string | null,
@@ -2931,109 +2740,6 @@ function extractResearchResume(
   )}`;
 }
 
-async function writeQuoteConfirmationChallenge(
-  error: HostedQuoteConfirmationRequiredError,
-  input: { errorInputLabel: string; outputPath: string | null },
-): Promise<string> {
-  const challengePath = path.resolve(
-    input.outputPath
-      ? `${input.outputPath}.quote-confirmation.json`
-      : `${input.errorInputLabel}.quote-confirmation.json`,
-  );
-  await mkdir(path.dirname(challengePath), { recursive: true });
-  await writeFile(
-    challengePath,
-    `${JSON.stringify(error.challenge, null, 2)}\n`,
-    {
-      encoding: 'utf8',
-      mode: 0o600,
-    },
-  );
-
-  return challengePath;
-}
-
-async function readJsonResponse(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text.trim()) {
-    return null;
-  }
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw new Error('PostPlus Cloud returned invalid JSON.');
-  }
-}
-
-function readHostedProductError(payload: unknown): HostedProductError {
-  const record =
-    payload && typeof payload === 'object' && !Array.isArray(payload)
-      ? (payload as Record<string, unknown>)
-      : {};
-
-  const userAction = readHostedProductErrorUserAction(record.userAction);
-
-  return {
-    message:
-      normalizeString(record.error) ??
-      normalizeString(record.message) ??
-      'PostPlus hosted capability request failed.',
-    code:
-      normalizeString(record.code) ?? normalizeString(record.productErrorCode),
-    layer: normalizeString(record.layer),
-    operationId: normalizeString(record.operationId),
-    ...(userAction ? { userAction } : {}),
-    userMessageRule: normalizeString(record.userMessageRule),
-  };
-}
-
-function readHostedProductErrorUserAction(
-  value: unknown,
-): HostedProductErrorUserAction | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const label = normalizeString(record.label);
-  const type = normalizeString(record.type);
-  const url = normalizeString(record.url);
-  if (!label || type !== 'open_url' || !url) {
-    return null;
-  }
-
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-
-  return { label, type: 'open_url', url };
-}
-
-// Terminal message that keeps the stable code, owning layer, and operation id
-// visible next to the human-readable message so a failed run is locatable.
-function formatHostedProductErrorMessage(
-  productError: HostedProductError,
-): string {
-  const locator = [
-    productError.code ? `code=${productError.code}` : null,
-    productError.layer ? `layer=${productError.layer}` : null,
-    productError.operationId ? `operationId=${productError.operationId}` : null,
-  ].filter((part): part is string => part !== null);
-
-  const message =
-    locator.length > 0
-      ? `${productError.message} (${locator.join(' ')})`
-      : productError.message;
-  return productError.userAction
-    ? `${message}\n${productError.userAction.label}: ${productError.userAction.url}`
-    : message;
-}
-
 async function readJsonFile(filePath: string): Promise<unknown> {
   try {
     return JSON.parse(await readFile(filePath, 'utf8')) as unknown;
@@ -3043,35 +2749,6 @@ async function readJsonFile(filePath: string): Promise<unknown> {
         ? `Failed to read JSON file ${filePath}: ${error.message}`
         : `Failed to read JSON file ${filePath}.`,
     );
-  }
-}
-
-async function writeResult(
-  payload: unknown,
-  outputPath: string | null,
-  forceStdout: boolean,
-): Promise<void> {
-  const text = `${JSON.stringify(payload, null, 2)}\n`;
-  if (!outputPath || forceStdout) {
-    process.stdout.write(text);
-  }
-  if (outputPath) {
-    const absoluteOutput = path.resolve(outputPath);
-    const outputDirectory = path.dirname(absoluteOutput);
-    const temporaryOutput = path.join(
-      outputDirectory,
-      `.${path.basename(absoluteOutput)}.postplus-result-${randomUUID()}.tmp`,
-    );
-    await mkdir(outputDirectory, { recursive: true });
-    try {
-      await writeFile(temporaryOutput, text, {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
-      await rename(temporaryOutput, absoluteOutput);
-    } finally {
-      await rm(temporaryOutput, { force: true }).catch(() => {});
-    }
   }
 }
 
@@ -3133,10 +2810,6 @@ function requireFlag(flags: ParsedFlags, key: string): string {
   return value;
 }
 
-function normalizeString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
 function isHelp(value: string): boolean {
   return value === 'help' || value === '--help' || value === '-h';
 }
@@ -3163,7 +2836,8 @@ function printDomainVerbHelp(domain: Exclude<HostedDomain, 'research'>): void {
           )
           .join('') +
         '  postplus media estimate <endpoint-key> --<same flags/--request as matching submit verb> [--json]\n' +
-        '  postplus media poll --handle <run-id> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--debug] [--json] [--output <result.json>]\n' +
+        '  postplus media poll --handle <run-id> [--capability <media-generation|video-analysis>] [--wait-seconds <n>] [--poll-interval-seconds <n>] [--debug] [--json] [--output <result-file>]\n' +
+        '  postplus media poll --resume-from <checkpoint.json> [--wait-seconds <n>] [--output <result-file>]\n' +
         '    (poll waits in-command: re-checks every 8s until terminal or the 45s default budget ends; --wait-seconds 0 = single check)\n'
       : '  postplus publish <operation> --request <input.json> [--json] [--output <result.json>]\n';
 
@@ -3192,14 +2866,20 @@ function printMediaEndpointHelp(
 
   Surface: flags (normalized media intent)
   Usage:
-    postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} [--video-seconds <n>] [--json] [--output <result.json>]
+    postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} [--video-seconds <n>] [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json] [--output <result.md>]
 
-  --video <video>    Local path, PostPlus media reference, or video data URI.
-                    The CLI stages local bytes before the analysis submit.
-  --prompt <text>    The analysis question or requested evidence structure.
-  --video-seconds <n>  Optional source video duration in seconds. Supplying it
-                    helps PostPlus validate and route the request; omit it when
-                    the duration is unknown.
+  --video <video>    Local video path or HTTPS video/social URL. Supported social
+                    sources: TikTok, Instagram, Facebook Reels/Ads and YouTube.
+                    The CLI downloads and validates locally, then uploads directly
+                    to Google Files through a hosted-authorized session.
+                    For X, obtain a video file or direct media URL first.
+                    Existing PostPlus media references use their owned read URL.
+  --prompt <text>    Optional question or format; omitted means the default shot
+                    table and production notes. Custom text replaces that default.
+  --video-seconds <n>  Optional duration hint. Validated local/Google media metadata
+                    takes precedence; omit this hint when duration is unknown.
+  The command polls the same durable run until completion or timeout by default;
+  --wait remains accepted for scripts written against the earlier preview.
   Runner-managed (minted by the CLI; never in the body): operationId, quoteConfirmationToken
 `);
     return;

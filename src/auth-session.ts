@@ -53,6 +53,7 @@ type RemoteAuthRefreshPayload =
 export async function resolveFreshRemoteAuth(
   options: {
     forceRefresh?: boolean;
+    signal?: AbortSignal;
   } = {},
 ): Promise<FreshRemoteAuth> {
   const [apiBaseUrl, apiBaseUrlState, cliSessionTokenState, config] =
@@ -66,6 +67,7 @@ export async function resolveFreshRemoteAuth(
   if (!cliSessionTokenState.present || !cliSessionTokenState.value) {
     throw new Error('Run `postplus auth login` before using PostPlus auth.');
   }
+  options.signal?.throwIfAborted();
 
   const sessionApiBaseUrl = config?.sessionApiBaseUrl ?? config?.apiBaseUrl;
   if (
@@ -82,6 +84,7 @@ export async function resolveFreshRemoteAuth(
       apiBaseUrl,
       cliSessionToken: cliSessionTokenState.value,
       persistApiBaseUrl: apiBaseUrlState.source !== 'env',
+      signal: options.signal,
     });
 
     return {
@@ -104,6 +107,7 @@ export async function refreshRemoteAuthSession(input?: {
   apiBaseUrl?: string;
   cliSessionToken?: string;
   persistApiBaseUrl?: boolean;
+  signal?: AbortSignal;
 }): Promise<RemoteAuthRefreshResult> {
   const [apiBaseUrl, apiBaseUrlState, cliSessionTokenState] = await Promise.all(
     [
@@ -130,6 +134,7 @@ export async function refreshRemoteAuthSession(input?: {
     body: {},
     method: 'POST',
     pathName: '/api/postplus-cli/auth/refresh',
+    signal: input?.signal,
   });
   const payload = (await response.json()) as RemoteAuthRefreshPayload;
 
@@ -151,6 +156,7 @@ export async function refreshRemoteAuthSession(input?: {
   if (!isRemoteAuthRefreshSuccessPayload(payload)) {
     throw new Error('PostPlus auth refresh returned incomplete session data.');
   }
+  input?.signal?.throwIfAborted();
 
   await setLocalSession({
     accountId: payload.accountId,

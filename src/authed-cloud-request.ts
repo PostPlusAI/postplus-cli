@@ -27,6 +27,8 @@ export type AuthedCloudRequestInput = {
    */
   skillsReleaseId?: string | null;
   timeoutMs?: number;
+  /** Optional outer budget shared by a status read and its auth refresh. */
+  signal?: AbortSignal;
   /**
    * Optional once-only 401 refresh. When provided, a `401` response triggers a
    * single retry: `refreshAuth()` returns fresh credentials and the request is
@@ -47,10 +49,14 @@ export type AuthedCloudRequestInput = {
 export async function sendAuthedCloudRequest(
   input: AuthedCloudRequestInput,
 ): Promise<Response> {
+  input.signal?.throwIfAborted();
   let response = await issueAuthedCloudRequest(input.auth, input);
 
   if (response.status === 401 && input.retryOn401) {
+    void response.body?.cancel().catch(() => undefined);
+    input.signal?.throwIfAborted();
     const refreshedAuth = await input.retryOn401();
+    input.signal?.throwIfAborted();
     response = await issueAuthedCloudRequest(refreshedAuth, input);
   }
 
@@ -79,6 +85,10 @@ async function issueAuthedCloudRequest(
   }
 
   const requestUrl = new URL(input.pathName, normalizeBaseUrl(auth.apiBaseUrl));
+  input.signal?.throwIfAborted();
+  const requestTimeout = AbortSignal.timeout(
+    input.timeoutMs ?? DEFAULT_AUTHED_REQUEST_TIMEOUT_MS,
+  );
 
   return fetchWithNetworkDiagnostics(
     requestUrl,
@@ -86,9 +96,9 @@ async function issueAuthedCloudRequest(
       method: input.method ?? 'GET',
       headers,
       ...(hasBody ? { body: JSON.stringify(input.body) } : {}),
-      signal: AbortSignal.timeout(
-        input.timeoutMs ?? DEFAULT_AUTHED_REQUEST_TIMEOUT_MS,
-      ),
+      signal: input.signal
+        ? AbortSignal.any([input.signal, requestTimeout])
+        : requestTimeout,
     },
     {
       ...(input.debug !== undefined ? { debug: input.debug } : {}),

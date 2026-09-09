@@ -112,9 +112,10 @@ export function resolvePostPlusUpdatePlan(
 
 /**
  * Recovers one hosted command rejected by the server-side compatibility gate.
- * That gate runs before billing/provider execution, so one update followed by
- * one retry cannot duplicate a hosted side effect. The child retry carries a
- * process guard: a second compatibility rejection stops instead of looping.
+ * A compatibility rejection proves only that the current request did not run.
+ * Media work already in progress supplies argv pinned to its original operation
+ * or checkpoint; other rejected commands preserve their original argv. The
+ * child carries a process guard so a second rejection stops without looping.
  */
 export async function runPostPlusClientUpgradeRecovery(
   input: {

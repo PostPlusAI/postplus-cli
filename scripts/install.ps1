@@ -8,12 +8,12 @@ function Fail($Message) {
 try {
   $nodeVersionText = (& node -p "process.versions.node") 2>$null
   if (-not $nodeVersionText) {
-    Fail "Node.js >= 20.10.0 is required before installing PostPlus CLI."
+    Fail "Node.js >= 24.5.0 is required before installing PostPlus CLI."
   }
 
   $nodeVersion = [Version]$nodeVersionText
-  if ($nodeVersion.Major -lt 20 -or ($nodeVersion.Major -eq 20 -and $nodeVersion.Minor -lt 10)) {
-    Fail "Node.js >= 20.10.0 is required before installing PostPlus CLI."
+  if ($nodeVersion.Major -lt 24 -or ($nodeVersion.Major -eq 24 -and $nodeVersion.Minor -lt 5)) {
+    Fail "Node.js >= 24.5.0 is required before installing PostPlus CLI."
   }
 
   if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {

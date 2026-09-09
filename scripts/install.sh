@@ -7,12 +7,12 @@ fail() {
 }
 
 if ! command -v node >/dev/null 2>&1; then
-  fail "Node.js >= 20.10.0 is required before installing PostPlus CLI."
+  fail "Node.js >= 24.5.0 is required before installing PostPlus CLI."
 fi
 
-node <<'NODE' || fail "Node.js >= 20.10.0 is required before installing PostPlus CLI."
+node <<'NODE' || fail "Node.js >= 24.5.0 is required before installing PostPlus CLI."
 const [major, minor] = process.versions.node.split('.').map(Number);
-if (major < 20 || (major === 20 && minor < 10)) {
+if (major < 24 || (major === 24 && minor < 5)) {
   process.exit(1);
 }
 NODE

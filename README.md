@@ -28,7 +28,7 @@ PostPlus has three public surfaces that work together:
 
 ## Install
 
-Requires Node.js and npm.
+Requires Node.js >=24.5.0 and npm. This runtime provides the native HTTP(S) proxy support used for media acquisition.
 
 ```bash
 npm install -g @postplus/cli@latest
@@ -70,6 +70,12 @@ Run `postplus update` for maintenance. From a project with PostPlus Skills,
 it updates that project; otherwise it updates global Skills. If both are
 installed, only the current project is updated. `--current-directory` explicitly
 targets the current directory, including a first installation there.
+
+When a cloud command requires a CLI update, PostPlus updates once and resumes
+only if the update succeeds and no agent restart is required. Media work that
+already has a recovery checkpoint continues that same operation, source and
+upload; an unknown analysis result is queried without submitting it again. A
+missing or invalid checkpoint stops recovery instead of creating another task.
 
 Each installation keeps its own verified release record. Switching projects or
 moving a project preserves that installation's record. `postplus status` and

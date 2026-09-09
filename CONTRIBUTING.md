@@ -12,11 +12,18 @@ Thank you for your interest in contributing.
 ## Development setup
 
 ```bash
-node --version   # must be >= 20.10.0
+node --version   # must be >= 24.5.0
 pnpm install
 pnpm build
 pnpm test
+pnpm release:package
+node --test scripts/package-release.test.mjs
 ```
+
+The standalone archive includes the locally installed, lockfile-resolved
+`cross-spawn` dependency closure and its licenses. Packaging does not install
+or update dependencies. The npm artifact retains its normal dependency install
+contract. Package tests exercise both artifacts in temporary directories.
 
 ## Contribution guidelines
 

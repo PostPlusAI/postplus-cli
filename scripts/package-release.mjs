@@ -7,11 +7,13 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, relative, resolve, sep } from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -24,8 +26,13 @@ const versionedArchive = `postplus-cli-v${version}.tar.gz`;
 const stableArchive = 'postplus-cli.tar.gz';
 const packageRoot = resolve(distDir, 'package', 'postplus-cli');
 
-function assertNoRuntimeDependencies() {
-  const dependencyFields = ['dependencies', 'optionalDependencies', 'peerDependencies'];
+function assertSupportedRuntimeDependencies() {
+  // A's cross-platform command runner is the only runtime dependency. Media
+  // acquisition continues to use Node's native HTTP/proxy support.
+  if (JSON.stringify(packageJson.dependencies) !== JSON.stringify({ 'cross-spawn': '7.0.6' })) {
+    throw new Error('Review release packaging before changing runtime dependencies.');
+  }
+  const dependencyFields = ['optionalDependencies', 'peerDependencies'];
   const populatedFields = dependencyFields.filter((field) => {
     const value = packageJson[field];
     return value && Object.keys(value).length > 0;
@@ -33,10 +40,40 @@ function assertNoRuntimeDependencies() {
 
   if (populatedFields.length > 0) {
     throw new Error(
-      `Release packaging does not bundle runtime dependencies yet. Found ${populatedFields.join(
+      `Release packaging does not support ${populatedFields.join(
         ', ',
       )}; add a real bundling strategy before publishing.`,
     );
+  }
+}
+
+function copyRuntimeDependencies() {
+  const installedRoot = realpathSync(resolve(repoRoot, 'node_modules'));
+  function copyDependency(name, fromManifest, targetParent, ancestors = []) {
+    const manifestPath = realpathSync(createRequire(fromManifest).resolve(`${name}/package.json`));
+    if (!manifestPath.startsWith(installedRoot + sep)) {
+      throw new Error(`Dependency ${name} is outside this checkout's installed dependencies.`);
+    }
+    if (ancestors.includes(manifestPath)) throw new Error(`Cyclic runtime dependency: ${name}`);
+    const metadata = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const source = dirname(manifestPath);
+    const target = resolve(targetParent, 'node_modules', name);
+    if (name === 'cross-spawn' && metadata.version !== packageJson.dependencies[name]) {
+      throw new Error('Installed cross-spawn does not match the pinned runtime version.');
+    }
+    // Copy the actual local pnpm-resolved closure, including licenses. Nested
+    // dependencies avoid flattening distinct versions or following global npm.
+    cpSync(source, target, {
+      recursive: true,
+      filter: (entry) => basename(entry) !== 'node_modules',
+    });
+    for (const dependency of Object.keys(metadata.dependencies ?? {})) {
+      copyDependency(dependency, manifestPath, target, [...ancestors, manifestPath]);
+    }
+    process.stdout.write(`Bundled ${name}@${metadata.version} (${relative(packageRoot, target)})\n`);
+  }
+  for (const name of Object.keys(packageJson.dependencies)) {
+    copyDependency(name, packageJsonPath, packageRoot);
   }
 }
 
@@ -99,7 +136,7 @@ function copyReleaseFiles() {
     cpSync(resolve(repoRoot, fileName), targetPath);
   }
 
-  for (const fileName of ['package.json', 'README.md', 'LICENSE']) {
+  for (const fileName of ['package.json', ...packageJson.files.filter((name) => !name.startsWith('build/'))]) {
     cpSync(resolve(repoRoot, fileName), resolve(packageRoot, fileName));
   }
 
@@ -111,13 +148,15 @@ function copyReleaseFiles() {
 
 function getReleaseBuildFiles() {
   return packageJson.files.filter(
-    (fileName) => fileName.startsWith('build/') && fileName.endsWith('.js'),
+    (fileName) => fileName.startsWith('build/'),
   );
 }
 
 function createArchive() {
   execFileSync('tar', ['-czf', resolve(distDir, versionedArchive), '-C', resolve(distDir, 'package'), 'postplus-cli'], {
     cwd: repoRoot,
+    // macOS tar must not add AppleDouble files outside package.json.files.
+    env: { ...process.env, COPYFILE_DISABLE: '1' },
     stdio: 'inherit',
   });
 
@@ -130,10 +169,11 @@ function writeSha256(fileName) {
   writeFileSync(resolve(distDir, `${fileName}.sha256`), `${hash}  ${fileName}\n`);
 }
 
-assertNoRuntimeDependencies();
+assertSupportedRuntimeDependencies();
 assertBuildExists();
 assertBuildOnlyContainsReleaseFiles();
 copyReleaseFiles();
+copyRuntimeDependencies();
 createArchive();
 writeSha256(versionedArchive);
 writeSha256(stableArchive);
