@@ -82,6 +82,63 @@ export async function downloadVideoBytes(
         { signal },
         { label: 'media-download', redirectPolicy: 'follow-https' },
       ));
+  const { response, url, body } = await fetchVideoDownloadResponse(sourceUrl, signal, fetchResponse);
+  const declaredSize = Number(response.headers.get('content-length'));
+  if (declaredSize > VIDEO_MAX_BYTES) {
+    await body.cancel();
+    throw new Error('media_video_too_large');
+  }
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  const temporary = `${outputPath}.${randomUUID()}.part`;
+  let bytes = 0;
+  try {
+    await pipeline(
+      Readable.fromWeb(
+        body as import('node:stream/web').ReadableStream,
+      ),
+      new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          bytes += chunk.length;
+          callback(
+            bytes > VIDEO_MAX_BYTES
+              ? new Error('media_video_too_large')
+              : null,
+            chunk,
+          );
+        },
+      }),
+      createWriteStream(temporary, { flags: 'wx', mode: 0o600 }),
+      { signal },
+    );
+    if (!bytes || (declaredSize > 0 && declaredSize !== bytes))
+      throw new Error('media_video_download_incomplete');
+    await rename(temporary, outputPath);
+    return bytes;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      /^media_video_[a-z_]+$/u.test(error.message)
+    )
+      throw error;
+    throw Object.assign(
+      new Error(
+        `Media download failed (stage=stream-bytes, host=${new URL(url).host}): ${formatNetworkErrorChain(error)}. Retry the same operation to continue.`,
+      ),
+      {
+        code: 'postplus_cli_hosted_media_download_failed',
+        stage: 'stream-bytes',
+      },
+    );
+  } finally {
+    await rm(temporary, { force: true }).catch(() => {});
+  }
+}
+
+export async function fetchVideoDownloadResponse(
+  sourceUrl: string,
+  signal: AbortSignal,
+  fetchResponse: (url: string, signal: AbortSignal) => Promise<Response>,
+) {
   let url = httpsUrl(sourceUrl);
   const visited = new Set<string>();
   for (let redirects = 0; redirects <= 3; redirects += 1) {
@@ -112,58 +169,11 @@ export async function downloadVideoBytes(
       );
       continue;
     }
-    const declaredSize = Number(response.headers.get('content-length'));
-    if (declaredSize > VIDEO_MAX_BYTES) {
-      await response.body.cancel();
-      throw new Error('media_video_too_large');
-    }
-    await mkdir(path.dirname(outputPath), { recursive: true });
-    const temporary = `${outputPath}.${randomUUID()}.part`;
-    let bytes = 0;
-    try {
-      await pipeline(
-        Readable.fromWeb(
-          response.body as import('node:stream/web').ReadableStream,
-        ),
-        new Transform({
-          transform(chunk: Buffer, _encoding, callback) {
-            bytes += chunk.length;
-            callback(
-              bytes > VIDEO_MAX_BYTES
-                ? new Error('media_video_too_large')
-                : null,
-              chunk,
-            );
-          },
-        }),
-        createWriteStream(temporary, { flags: 'wx', mode: 0o600 }),
-        { signal },
-      );
-      if (!bytes || (declaredSize > 0 && declaredSize !== bytes))
-        throw new Error('media_video_download_incomplete');
-      await rename(temporary, outputPath);
-      return bytes;
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        /^media_video_[a-z_]+$/u.test(error.message)
-      )
-        throw error;
-      throw Object.assign(
-        new Error(
-          `Media download failed (stage=stream-bytes, host=${new URL(url).host}): ${formatNetworkErrorChain(error)}. Retry the same operation to continue.`,
-        ),
-        {
-          code: 'postplus_cli_hosted_media_download_failed',
-          stage: 'stream-bytes',
-        },
-      );
-    } finally {
-      await rm(temporary, { force: true }).catch(() => {});
-    }
+    return { response, url, body: response.body };
   }
   throw new Error('media_video_redirect_limit');
 }
+
 
 async function probe(filePath: string, run: CommandRunner) {
   const { stdout } = await run(

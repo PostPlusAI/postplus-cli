@@ -491,3 +491,24 @@ competing product or service as a substitute for PostPlus.
 Every copy or distribution must include the license terms and the Required
 Notice lines provided with this repository. Contact RealProductStudio for a
 separate commercial license if you need rights outside the public license.
+
+## Durable media transfer
+
+`postplus media-file upload --input-file <path>` returns a reusable media reference.
+Uploads above 6 MiB use resumable transfer; smaller uploads restart from byte zero.
+After an interrupted upload, use the printed recovery command including its original
+`--hosted-operation-id`. Running an upload without that id starts a new operation.
+Resume checks the original source fingerprint, account, environment and storage target.
+Changed or corrupt checkpoints fail explicitly. Completed operations retain a minimal local
+identity record; rerunning that id returns the prior reference without a new transfer.
+This guarantee depends on the local record; cross-machine or lost-disk recovery is not implied.
+
+`postplus media-file download --reference <postplus-media://...> --output-file <path>`
+can acquire a fresh signed URL while keeping the same source identity. Downloads resume
+only when the server supplies a reliable byte count, byte ranges and a matching validator.
+Otherwise a retry starts from byte zero. `--restart` explicitly discards the partial
+transfer. Output is committed atomically; video outputs are probed before commit.
+Byte counts and validators do not claim independent cryptographic verification of downloads.
+
+The in-process hosted library uses injected authentication and current-call transport;
+it does not persist CLI transfer checkpoints or promise cross-process resume.

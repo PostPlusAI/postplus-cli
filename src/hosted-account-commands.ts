@@ -152,6 +152,10 @@ export type HostedRunSummary = {
   billingPending?: boolean;
   estimatedOnly?: boolean;
   hasError: boolean;
+  stage?: string | null;
+  progress?: Partial<
+    Record<'bytes' | 'totalBytes' | 'elapsedMs' | 'attempt', number>
+  >;
 };
 
 export type HostedRunsListReport = {
@@ -303,13 +307,32 @@ function normalizeRunSummary(value: unknown): HostedRunSummary {
     finalizedCredits:
       record.billingPending === true
         ? null
-        : (readNumber(record.finalizedCredits) ?? 0),
+        : readNumber(record.finalizedCredits),
     reservedCredits:
       record.billingPending === true
         ? null
-        : (readNumber(record.reservedCredits) ?? 0),
+        : readNumber(record.reservedCredits),
     ...(typeof record.billingPending === 'boolean'
       ? { billingPending: record.billingPending }
+      : {}),
+    ...(Object.hasOwn(record, 'stage')
+      ? { stage: readString(record.stage) }
+      : {}),
+    ...(record.progress &&
+    typeof record.progress === 'object' &&
+    !Array.isArray(record.progress)
+      ? {
+          progress: Object.fromEntries(
+            ['bytes', 'totalBytes', 'elapsedMs', 'attempt'].flatMap((key) => {
+              const value = (record.progress as Record<string, unknown>)[key];
+              return typeof value === 'number' &&
+                Number.isFinite(value) &&
+                value >= 0
+                ? [[key, value]]
+                : [];
+            }),
+          ),
+        }
       : {}),
     hasError: record.hasError === true,
     ...(record.estimatedOnly === true ? { estimatedOnly: true } : {}),
@@ -337,15 +360,26 @@ export function formatHostedRunsListReport(
     const cost = run.billingPending
       ? 'billing pending verification'
       : run.status === 'completed' || (run.finalizedCredits ?? 0) > 0
-        ? `${run.finalizedCredits} credits${run.estimatedOnly ? ' (estimated settlement)' : ''}`
-        : `~${run.reservedCredits} credits reserved`;
+        ? `${run.finalizedCredits ?? 'unknown'} credits${run.estimatedOnly ? ' (estimated settlement)' : ''}`
+        : `~${run.reservedCredits ?? 'unknown'} credits reserved`;
     lines.push(
-      `- ${run.id}  [${run.status}]  ${run.capability}${run.target ? ` ${run.target}` : ''}  ${cost}  ${run.updatedAt}`,
+      `- ${run.id}  [${run.status}]  ${run.capability}${run.target ? ` ${run.target}` : ''}  ${cost}${formatRunProgress(run) ? `  ${formatRunProgress(run)}` : ''}  ${run.updatedAt}`,
     );
   }
   lines.push('');
   lines.push('Resume any run: postplus runs show <run-id>');
   return lines.join('\n');
+}
+
+function formatRunProgress(run: HostedRunSummary): string {
+  return [
+    run.stage ? `stage=${run.stage}` : '',
+    ...Object.entries(run.progress ?? {}).map(
+      ([key, value]) => `${key}=${value}`,
+    ),
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 export function formatHostedRunDetailReport(report: HostedRunDetail): string {
@@ -355,12 +389,13 @@ export function formatHostedRunDetailReport(report: HostedRunDetail): string {
     `PostPlus run ${report.id}`,
     '',
     `Status: ${report.status}`,
+    formatRunProgress(report),
     `Capability: ${report.capability}${report.target ? ` ${report.target}` : ''}`,
     report.billingPending
       ? 'Billing: pending verification; do not submit another analysis.'
       : settled
-        ? `Finalized: ${report.finalizedCredits} PostPlus credits${report.estimatedOnly ? ' (estimated settlement; actual usage unconfirmed)' : ''}`
-        : `Reserved: ${report.reservedCredits} PostPlus credits`,
+        ? `Finalized: ${report.finalizedCredits ?? 'unknown'} PostPlus credits${report.estimatedOnly ? ' (estimated settlement; actual usage unconfirmed)' : ''}`
+        : `Reserved: ${report.reservedCredits ?? 'unknown'} PostPlus credits`,
     `Created: ${report.createdAt}`,
     `Updated: ${report.updatedAt}`,
     report.hasError ? 'Error: see error field (postplus runs show --json)' : '',

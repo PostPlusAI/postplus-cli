@@ -60,6 +60,7 @@ type MediaCacheFile = {
 export type LocalMediaFile = {
   absolutePath: string;
   contentSha256: string;
+  mtimeMs: number;
   mimeType: string;
   name: string;
   sizeBytes: number;
@@ -236,6 +237,7 @@ async function inspectLocalMediaFile(
   return {
     absolutePath,
     contentSha256: await sha256File(absolutePath),
+    mtimeMs: fileStat.mtimeMs,
     mimeType,
     name: path.basename(absolutePath),
     sizeBytes: fileStat.size,

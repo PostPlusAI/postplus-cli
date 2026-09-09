@@ -57,7 +57,8 @@
     "build/media-video-command.js",
     "build/hosted-command-runtime.d.ts",
     "build/quote-confirmation.d.ts",
-    "build/client-compatibility.d.ts"
+    "build/client-compatibility.d.ts",
+    "build/hosted-media-transfer.js"
   ],
   "publishConfig": {
     "access": "public",
