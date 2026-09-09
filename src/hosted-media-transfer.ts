@@ -164,6 +164,8 @@ type UploadCheckpoint = {
   operationId: string;
   uploadUrl: string;
   targetIdentity: string;
+  mediaReference: string;
+  signedUpload: Extract<SignedHostedUpload, { method: 'TUS' }>;
 };
 
 type CompletedUpload = {
@@ -227,6 +229,63 @@ export function buildMediaTransferCheckpointId(input: {
   return createHash('sha256').update(input.operationId).digest('hex');
 }
 
+// CLI-only durable recovery. Invoke before asking the server for another signature.
+export async function resumeHostedMediaUpload(input: {
+  owner: string;
+  absolutePath: string;
+  fingerprint: MediaFileFingerprint;
+  operationId: string;
+  options?: UploadOptions;
+}): Promise<{ mediaReference: string; reusedCompleted: boolean } | null> {
+  const checkpointId = buildMediaTransferCheckpointId(input);
+  const record = await readCheckpointFile(checkpointId);
+  const saved = record.completed ?? record.entries[checkpointId];
+  if (!saved) return null;
+  await assertFingerprintMatches(input.absolutePath, input.fingerprint, true);
+  let identity: unknown;
+  try {
+    identity = JSON.parse(saved.targetIdentity);
+  } catch {
+    throw new Error('Media upload checkpoint target identity is unreadable.');
+  }
+  if (
+    saved.operationId !== input.operationId ||
+    !sameFingerprint(saved.fingerprint, input.fingerprint) ||
+    !Array.isArray(identity) ||
+    identity[0] !== input.owner
+  ) {
+    throw new Error(
+      'Media upload checkpoint does not match the source, operation or account.',
+    );
+  }
+  if (record.completed)
+    return {
+      mediaReference: record.completed.mediaReference,
+      reusedCompleted: true,
+    };
+  const session = record.entries[checkpointId]!;
+  if (session.expiresAt <= Date.now())
+    throw new Error(
+      'Original upload session expired; its result is unknown. Verify the original operation before starting another upload.',
+    );
+  const expected = JSON.stringify([
+    input.owner,
+    new URL(session.signedUpload.url).origin,
+    session.signedUpload.metadata.bucketName,
+    session.signedUpload.metadata.objectName,
+  ]);
+  if (session.targetIdentity !== expected)
+    throw new Error(
+      'Media upload checkpoint does not match its original storage target.',
+    );
+  assertTusSessionUrl(session.uploadUrl, session.signedUpload.url);
+  return uploadHostedMediaFile({
+    ...input,
+    mediaReference: session.mediaReference,
+    signedUpload: session.signedUpload,
+  });
+}
+
 export async function uploadHostedMediaFile(input: {
   owner: string;
   mediaReference: string;
@@ -234,6 +293,7 @@ export async function uploadHostedMediaFile(input: {
   fingerprint: MediaFileFingerprint;
   operationId: string;
   signedUpload: SignedHostedUpload;
+  signedAt?: number;
   options?: UploadOptions;
 }): Promise<{
   checkpointId: string;
@@ -312,6 +372,8 @@ export async function uploadHostedMediaFile(input: {
   }
 
   await uploadWithTus({
+    mediaReference: input.mediaReference,
+    signedAt: input.signedAt ?? Date.now(),
     owner: input.owner,
     absolutePath: input.absolutePath,
     checkpointId,
@@ -453,7 +515,7 @@ export async function downloadHostedMediaFile(input: {
 
   if (!response.ok || !response.body) {
     clearTimeout(timeout);
-    await response.body?.cancel().catch(() => {});
+    void response.body?.cancel().catch(() => {});
     throw downloadError({
       checkpointId,
       code: 'source_rejected',
@@ -477,7 +539,7 @@ export async function downloadHostedMediaFile(input: {
   });
   if ('error' in responseShape) {
     clearTimeout(timeout);
-    await response.body.cancel().catch(() => {});
+    void response.body.cancel().catch(() => {});
     throw downloadError({
       checkpointId,
       code: responseShape.error,
@@ -497,7 +559,7 @@ export async function downloadHostedMediaFile(input: {
     responseShape.totalBytes > DOWNLOAD_LIMIT_BYTES
   ) {
     clearTimeout(timeout);
-    await response.body.cancel().catch(() => {});
+    void response.body.cancel().catch(() => {});
     throw downloadError({
       checkpointId,
       code: 'size_limit',
@@ -530,7 +592,7 @@ export async function downloadHostedMediaFile(input: {
       await writeDownloadCheckpoint(checkpointPath, checkpoint);
     } catch (error) {
       clearTimeout(timeout);
-      await response.body.cancel().catch(() => {});
+      void response.body.cancel().catch(() => {});
       throw error;
     }
   }
@@ -637,6 +699,10 @@ export async function downloadHostedMediaFile(input: {
   }
 
   await input.validate?.(partialOutput);
+  if (checkpoint) {
+    checkpoint.receivedBytes = receivedBytes;
+    await writeDownloadCheckpoint(checkpointPath, checkpoint);
+  }
   await commitDownloadedFile({
     absoluteOutput: input.absoluteOutput,
     checkpointId,
@@ -691,7 +757,7 @@ async function uploadWithPut(input: {
       redirect: 'error',
       signal: controller.signal,
     } as RequestInit & { duplex: 'half' });
-    await response.body?.cancel().catch(() => {});
+    void response.body?.cancel().catch(() => {});
     if (!response.ok) {
       throw transferError({
         checkpointId: input.checkpointId,
@@ -730,6 +796,8 @@ async function uploadWithPut(input: {
 }
 
 async function uploadWithTus(input: {
+  mediaReference: string;
+  signedAt: number;
   owner: string;
   absolutePath: string;
   checkpointId: string;
@@ -772,6 +840,7 @@ async function uploadWithTus(input: {
   if (
     checkpoint &&
     (checkpoint.targetIdentity !== targetIdentity ||
+      checkpoint.mediaReference !== input.mediaReference ||
       !sameFingerprint(checkpoint.fingerprint, input.fingerprint))
   ) {
     throw transferError({
@@ -788,20 +857,21 @@ async function uploadWithTus(input: {
     });
   }
 
-  if (checkpoint && checkpoint.expiresAt <= Date.now()) {
-    delete checkpoints.entries[input.checkpointId];
-    await saveCheckpoint();
-    input.options.onProgress?.({
-      attempt: 1,
+  const unavailableSession = () =>
+    transferError({
       checkpointId: input.checkpointId,
-      stage: 'transferring',
+      code: 'upload_session_expired',
+      message: 'Original upload session is unavailable; its result is unknown.',
+      resumeAvailable: false,
+      retryable: false,
+      targetUrl: input.signedUpload.url,
       totalBytes: input.fingerprint.sizeBytes,
-      transferredBytes: 0,
+      transferredBytes: checkpoint?.confirmedOffset ?? 0,
       userAction:
-        'The previous upload session expired; retransferring from byte zero.',
+        'Verify the original operation before starting another upload.',
     });
-    checkpoint = undefined;
-  }
+  if (checkpoint && checkpoint.expiresAt <= Date.now())
+    throw unavailableSession();
 
   if (checkpoint) {
     assertTusSessionUrl(checkpoint.uploadUrl, input.signedUpload.url);
@@ -813,27 +883,15 @@ async function uploadWithTus(input: {
       signedUpload: input.signedUpload,
       uploadUrl: checkpoint.uploadUrl,
     });
-    if (remoteOffset === null) {
-      delete checkpoints.entries[input.checkpointId];
-      await saveCheckpoint();
-      input.options.onProgress?.({
-        attempt: 1,
-        checkpointId: input.checkpointId,
-        stage: 'transferring',
-        totalBytes: input.fingerprint.sizeBytes,
-        transferredBytes: 0,
-        userAction:
-          'The previous upload session expired; retransferring from byte zero.',
-      });
-      checkpoint = undefined;
-    } else {
-      checkpoint.confirmedOffset = remoteOffset;
-      await saveCheckpoint();
-    }
+    if (remoteOffset === null) throw unavailableSession();
+    checkpoint.confirmedOffset = remoteOffset;
+    await saveCheckpoint();
   }
 
   if (!checkpoint) {
     checkpoint = await createTusSession({
+      mediaReference: input.mediaReference,
+      expiresAt: input.signedAt + input.signedUpload.expiresInSeconds * 1000,
       targetIdentity,
       checkpointId: input.checkpointId,
       connectTimeoutMs,
@@ -902,22 +960,7 @@ async function uploadWithTus(input: {
         signedUpload: input.signedUpload,
         uploadUrl: checkpoint.uploadUrl,
       });
-      if (remoteOffset === null) {
-        delete checkpoints.entries[input.checkpointId];
-        await saveCheckpoint();
-        throw transferError({
-          checkpointId: input.checkpointId,
-          code: 'upload_session_expired',
-          message: 'Hosted media resumable upload session expired.',
-          resumeAvailable: false,
-          retryable: false,
-          targetUrl: checkpoint.uploadUrl,
-          totalBytes: input.fingerprint.sizeBytes,
-          transferredBytes: confirmedOffset,
-          userAction:
-            'Run the same command again; a new session will retransfer from byte zero.',
-        });
-      }
+      if (remoteOffset === null) throw unavailableSession();
       confirmedOffset = remoteOffset;
       checkpoint.confirmedOffset = remoteOffset;
       checkpoints.entries[input.checkpointId] = checkpoint;
@@ -926,8 +969,8 @@ async function uploadWithTus(input: {
   }
 
   await assertFingerprintMatches(input.absolutePath, input.fingerprint, true);
-  delete checkpoints.entries[input.checkpointId];
-  await saveCheckpoint();
+  // Keep the confirmed session until recordCompleted atomically replaces it.
+  // A failed completed write must never expose an empty recovery state.
 }
 
 function assertTusSessionUrl(location: string, endpoint: string) {
@@ -952,6 +995,8 @@ function assertTusSessionUrl(location: string, endpoint: string) {
 }
 
 async function createTusSession(input: {
+  mediaReference: string;
+  expiresAt: number;
   targetIdentity: string;
   checkpointId: string;
   connectTimeoutMs: number;
@@ -981,7 +1026,7 @@ async function createTusSession(input: {
     totalBytes: input.fingerprint.sizeBytes,
     transferredBytes: 0,
   });
-  await response.body?.cancel().catch(() => {});
+  void response.body?.cancel().catch(() => {});
   if (response.status !== 201) {
     throw transferError({
       checkpointId: input.checkpointId,
@@ -1014,7 +1059,9 @@ async function createTusSession(input: {
   }
   return {
     confirmedOffset: 0,
-    expiresAt: Date.now() + input.signedUpload.expiresInSeconds * 1000,
+    expiresAt: input.expiresAt,
+    mediaReference: input.mediaReference,
+    signedUpload: input.signedUpload,
     fingerprint: input.fingerprint,
     operationId: input.operationId,
     uploadUrl: assertTusSessionUrl(location, input.signedUpload.url),
@@ -1045,7 +1092,7 @@ async function readTusOffset(input: {
     totalBytes: input.fingerprint.sizeBytes,
     transferredBytes: 0,
   });
-  await response.body?.cancel().catch(() => {});
+  void response.body?.cancel().catch(() => {});
   if (response.status === 404 || response.status === 410) return null;
   if (!response.ok) {
     throw transferError({
@@ -1148,7 +1195,7 @@ async function patchTusChunk(input: {
       redirect: 'error',
       signal: controller.signal,
     } as RequestInit & { duplex: 'half' });
-    await response.body?.cancel().catch(() => {});
+    void response.body?.cancel().catch(() => {});
     if (response.status >= 500) {
       throw transferError({
         checkpointId: input.checkpointId,
@@ -1494,7 +1541,6 @@ async function commitDownloadedFile(input: {
 }) {
   try {
     await rename(input.partialOutput, input.absoluteOutput);
-    await rm(input.checkpointPath, { force: true });
   } catch (error) {
     throw downloadError({
       cause: error,
@@ -1510,12 +1556,98 @@ async function commitDownloadedFile(input: {
         'Retry the same command to commit the completed partial file.',
     });
   }
+  try {
+    await rm(input.checkpointPath, { force: true });
+  } catch (error) {
+    throw downloadError({
+      cause: error,
+      checkpointId: input.checkpointId,
+      code: 'source_rejected',
+      resumeAvailable: false,
+      retryable: false,
+      stage: 'commit-output',
+      targetUrl: input.targetUrl,
+      totalBytes: input.totalBytes,
+      transferredBytes: input.totalBytes,
+      userAction:
+        'Output is already committed; preserve the output and remove the stale local checkpoint after resolving filesystem permissions. Do not download again.',
+    });
+  }
 }
 
 function downloadError(
   input: ConstructorParameters<typeof HostedMediaDownloadError>[0],
 ) {
   return new HostedMediaDownloadError(input);
+}
+
+function isSafeTransferEndpoint(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'https:' ||
+        (url.protocol === 'http:' &&
+          ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) &&
+      !url.username &&
+      !url.password &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
+}
+function isStoredTargetIdentity(
+  value: string,
+  mediaReference: string,
+): boolean {
+  try {
+    const target = JSON.parse(value);
+    if (
+      !Array.isArray(target) ||
+      ![3, 4].includes(target.length) ||
+      !target.every((v) => typeof v === 'string' && v) ||
+      !isSafeTransferEndpoint(target[1]) ||
+      new URL(target[1]).origin !== target[1]
+    )
+      return false;
+    if (target.length === 3) return target[2] === mediaReference;
+    const reference = new URL(mediaReference);
+    return (
+      reference.protocol === 'postplus-media:' &&
+      reference.hostname === target[2] &&
+      decodeURIComponent(reference.pathname.slice(1)) === target[3]
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isStoredTusDescriptor(
+  value: unknown,
+): value is Extract<SignedHostedUpload, { method: 'TUS' }> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  const strings = (item: unknown): item is Record<string, string> =>
+    Boolean(
+      item &&
+        typeof item === 'object' &&
+        !Array.isArray(item) &&
+        Object.values(item).every((x) => typeof x === 'string'),
+    );
+  if (
+    v.method !== 'TUS' ||
+    typeof v.url !== 'string' ||
+    !strings(v.requiredHeaders) ||
+    !strings(v.metadata) ||
+    !v.metadata.bucketName ||
+    !v.metadata.objectName ||
+    !Number.isSafeInteger(v.chunkSizeBytes) ||
+    Number(v.chunkSizeBytes) <= 0 ||
+    !Number.isFinite(v.expiresInSeconds) ||
+    Number(v.expiresInSeconds) <= 0
+  )
+    return false;
+  return isSafeTransferEndpoint(v.url);
 }
 
 async function readCheckpointFile(
@@ -1546,6 +1678,10 @@ async function readCheckpointFile(
             key ||
           typeof entry.uploadUrl !== 'string' ||
           typeof entry.targetIdentity !== 'string' ||
+          typeof entry.mediaReference !== 'string' ||
+          !entry.mediaReference.startsWith('postplus-media://') ||
+          !isStoredTargetIdentity(entry.targetIdentity, entry.mediaReference) ||
+          !isStoredTusDescriptor(entry.signedUpload) ||
           !Number.isFinite(entry.expiresAt) ||
           !Number.isSafeInteger(entry.confirmedOffset) ||
           entry.confirmedOffset < 0 ||
@@ -1570,6 +1706,7 @@ async function readCheckpointFile(
         typeof c.targetIdentity !== 'string' ||
         typeof c.mediaReference !== 'string' ||
         !c.mediaReference.startsWith('postplus-media://') ||
+        !isStoredTargetIdentity(c.targetIdentity, c.mediaReference) ||
         !c.fingerprint ||
         !/^[a-f0-9]{64}$/u.test(c.fingerprint.contentSha256) ||
         !Number.isFinite(c.fingerprint.mtimeMs) ||
@@ -1599,7 +1736,8 @@ async function writeCheckpointFile(
 ) {
   const target = checkpointFilePath(checkpointId);
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
-  await mkdir(path.dirname(target), { recursive: true });
+  await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+  await chmod(path.dirname(target), 0o700);
   try {
     await writeFile(temporary, `${JSON.stringify(checkpoints, null, 2)}\n`, {
       encoding: 'utf8',

@@ -500,8 +500,11 @@ After an interrupted upload, use the printed recovery command including its orig
 `--hosted-operation-id`. Running an upload without that id starts a new operation.
 Resume checks the original source fingerprint, account, environment and storage target.
 Changed or corrupt checkpoints fail explicitly. Completed operations retain a minimal local
-identity record; rerunning that id returns the prior reference without a new transfer.
+identity record; rerunning that id returns the prior reference before signing or transferring.
 This guarantee depends on the local record; cross-machine or lost-disk recovery is not implied.
+An unfinished TUS checkpoint keeps the original short-lived session in protected local
+storage. Reentry queries that session before signing. Expired, missing-session or incomplete
+checkpoints stop with an unknown result; they never silently create a replacement session.
 
 `postplus media-file download --reference <postplus-media://...> --output-file <path>`
 can acquire a fresh signed URL while keeping the same source identity. Downloads resume

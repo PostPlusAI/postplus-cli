@@ -40,7 +40,7 @@ import {
 import {
   HostedMediaDownloadError, HostedMediaTransferError,
   type HostedMediaTransferProgress, type MediaFileFingerprint, type SignedHostedUpload,
-  createMediaFileFingerprint, downloadHostedMediaFile, uploadHostedMediaFile,
+  createMediaFileFingerprint, downloadHostedMediaFile, uploadHostedMediaFile, resumeHostedMediaUpload,
 } from './hosted-media-transfer.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import { buildHostedRequestSchemaReport } from './hosted-request-schemas.js';
@@ -707,6 +707,15 @@ async function runMediaFileUpload(
   return dispatchHostedCommand(
     {
       request: async () => {
+        const owner = await resolveTransferOwner(context);
+        if (!context) {
+          const recovered = await resumeHostedMediaUpload({ owner, absolutePath, fingerprint, operationId: body.operationId, options: { onProgress: createTransferProgressReporter() } });
+          if (recovered) {
+            process.stderr.write(recovered.reusedCompleted ? 'The original upload is already complete; no bytes transferred.\n' : 'The original upload session was recovered without requesting a new signature.\n');
+            return buildDurableUploadResult({ output: {} }, recovered.mediaReference);
+          }
+        }
+        const signedAt = Date.now();
         const payload = await postHostedJson({
           body,
           pathName: '/api/postplus-cli/hosted/capability',
@@ -718,7 +727,8 @@ async function runMediaFileUpload(
         const mediaReference = readMediaReferenceValue(output);
         const transfer = await uploadHostedMediaFile({
           mediaReference,
-          owner: await resolveTransferOwner(context),
+          owner,
+          signedAt,
           absolutePath,
           fingerprint,
           operationId: body.operationId,
@@ -997,6 +1007,13 @@ async function stageHostedMediaFile(input: {
   operationId: string;
   skillName: string;
 }): Promise<string> {
+  const owner = await resolveTransferOwner(undefined);
+  const recovered = await resumeHostedMediaUpload({ owner, absolutePath: input.file.absolutePath, fingerprint: toMediaFileFingerprint(input.file), operationId: input.operationId, options: { onProgress: createTransferProgressReporter() } });
+  if (recovered) {
+    process.stderr.write(recovered.reusedCompleted ? 'The original upload is already complete; no bytes transferred.\n' : 'The original upload session was recovered without requesting a new signature.\n');
+    return recovered.mediaReference;
+  }
+  const signedAt = Date.now();
   const payload = await postHostedJson({
     body: {
       capability: 'media-file',
@@ -1015,7 +1032,8 @@ async function stageHostedMediaFile(input: {
   const output = readHostedUploadOutput(payload);
   const transfer = await uploadHostedMediaFile({
     mediaReference: readMediaReferenceValue(output),
-    owner: await resolveTransferOwner(undefined),
+    owner,
+    signedAt,
     absolutePath: input.file.absolutePath,
     fingerprint: toMediaFileFingerprint(input.file),
     operationId: input.operationId,
