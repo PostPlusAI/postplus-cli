@@ -28,7 +28,7 @@ PostPlus has three public surfaces that work together:
 
 ## Install
 
-Requires Node.js and npm.
+Requires Node.js >=24.5.0 and npm. This runtime provides the native HTTP(S) proxy support used for media acquisition.
 
 ```bash
 npm install -g @postplus/cli@latest

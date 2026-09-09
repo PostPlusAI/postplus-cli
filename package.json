@@ -62,7 +62,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "engines": {
-    "node": ">=20.10.0"
+    "node": ">=24.5.0"
   },
   "bin": {
     "postplus": "build/index.js"

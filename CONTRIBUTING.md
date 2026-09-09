@@ -12,7 +12,7 @@ Thank you for your interest in contributing.
 ## Development setup
 
 ```bash
-node --version   # must be >= 20.10.0
+node --version   # must be >= 24.5.0
 pnpm install
 pnpm build
 pnpm test

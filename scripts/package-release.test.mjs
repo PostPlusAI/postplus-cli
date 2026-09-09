@@ -47,9 +47,18 @@ function script(root, name) {
 }
 
 test('actual release archive contains exactly the declared files and install envelope', () => {
-  const archiveEntries = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n');
-  assert.equal(archiveEntries.some(name => name.split('/').some(part => part.startsWith('._'))), false,
-    'tar must not contain macOS metadata outside the release manifest');
+  const archiveEntries = execFileSync('tar', ['-tzf', archive], {
+    encoding: 'utf8',
+  })
+    .trim()
+    .split('\n');
+  assert.equal(
+    archiveEntries.some((name) =>
+      name.split('/').some((part) => part.startsWith('._')),
+    ),
+    false,
+    'tar must not contain macOS metadata outside the release manifest',
+  );
   const expected = [
     ...releaseFiles,
     'package.json',
@@ -157,4 +166,26 @@ const result: Promise<unknown> = runHostedRequest(input);
     { cwd: consumer, encoding: 'utf8' },
   );
   assert.equal(types.status, 0, types.stdout + types.stderr);
+});
+
+test('unpacked CLI rejects unsupported Node before command or network work', () => {
+  for (const version of ['20.10.0', '22.21.0', '24.4.9']) {
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--import',
+        'data:text/javascript,' +
+          encodeURIComponent(
+            `Object.defineProperty(process.versions, 'node', {value: '${version}'}); globalThis.fetch=()=>{throw new Error('Network forbidden')}`,
+          ),
+        join(packageRoot, 'build', 'index.js'),
+        '--version',
+      ],
+      { cwd: extracted, encoding: 'utf8' },
+    );
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /requires Node.js >=24\.5\.0/);
+    assert.match(result.stderr, /Upgrade Node.js/);
+    assert.equal(result.stdout, '');
+  }
 });

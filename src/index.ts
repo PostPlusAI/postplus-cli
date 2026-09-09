@@ -533,6 +533,20 @@ async function runAuthValidate(json: boolean): Promise<number> {
 }
 
 async function main(): Promise<void> {
+  const manifest = JSON.parse(
+    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  );
+  const minimum = /^>=(\d+)\.(\d+)\.(\d+)$/.exec(manifest.engines.node);
+  if (!minimum) throw new Error('Invalid CLI Node runtime requirement.');
+  const actual = process.versions.node.split('.').map(Number);
+  const required = minimum.slice(1).map(Number);
+  const difference = actual
+    .map((part, index) => part - required[index]!)
+    .find((part) => part !== 0);
+  if (difference !== undefined && difference < 0)
+    throw new Error(
+      `PostPlus CLI requires Node.js ${manifest.engines.node}; found ${process.versions.node}. Upgrade Node.js before running this command.`,
+    );
   const [command, ...rest] = process.argv.slice(2);
   await assertConfigFilePermissions();
   const json = rest.includes('--json');
