@@ -347,12 +347,49 @@ test('hosted-lib upload uses current-call retries without reading or writing CLI
   });
   assert.deepEqual(await readdir(process.env.POSTPLUS_CONFIG_DIR!), before);
 });
-function interruptedBytes() {
+function partialDownloadPath(outputPath: string) {
+  return path.join(
+    path.dirname(outputPath),
+    `.${path.basename(outputPath)}.postplus-download.part`,
+  );
+}
+async function waitForDurablePartialBytes(partialPath: string, size: number) {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    const partial = await stat(partialPath).catch(() => null);
+    if ((partial?.size ?? 0) >= size) return;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `test fixture observed no durable transfer at ${partialPath} (expected ${size} bytes); the download never confirmed the bytes it received`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+// The CLI derives its recovery checkpoint from the partial file's size, so the
+// interruption has to happen after those bytes are durably written. Failing the
+// body on a wall-clock timer (or before the consumer reads it) races that write
+// and intermittently rewinds the checkpoint to byte zero under CPU load, which
+// makes a resume assertion on `bytes=4-` fail for a reason the product cannot
+// control. Deliver the four bytes first, then fail once they are on disk.
+async function interruptedBytes(partialPath: string) {
+  let delivered = false;
   return new Response(
     new ReadableStream({
-      start(controller) {
-        controller.enqueue(Buffer.from('0123'));
-        setTimeout(() => controller.error(new Error('interrupted')), 5);
+      async pull(controller) {
+        if (!delivered) {
+          delivered = true;
+          controller.enqueue(Buffer.from('0123'));
+          return;
+        }
+
+        try {
+          await waitForDurablePartialBytes(partialPath, 4);
+        } catch (error) {
+          controller.error(error);
+          return;
+        }
+        controller.error(new Error('interrupted'));
       },
     }),
     {
@@ -376,7 +413,7 @@ test('CLI reference download accepts fresh signatures but rejects another refere
       });
     }
     downloads++;
-    if (downloads === 1) return interruptedBytes();
+    if (downloads === 1) return interruptedBytes(partialDownloadPath(output));
     assert.equal(new Headers(init?.headers).get('range'), 'bytes=4-');
     return new Response('456789', {
       status: 206,
@@ -573,7 +610,7 @@ test('PUT completed identity prevents retransmission and cross-account reuse', a
 });
 test('hosted-lib failed download leaves no persistent recovery checkpoint', async () => {
   const output = path.join(directory, 'library.bin');
-  globalThis.fetch = async () => interruptedBytes();
+  globalThis.fetch = async () => interruptedBytes(partialDownloadPath(output));
   await assert.rejects(
     runMediaFileCommand(
       [
