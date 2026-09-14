@@ -7,20 +7,24 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
   writeFile,
 } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { after, beforeEach, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
+import { refreshRemoteAuth, revokeRemoteAuth } from './auth-lifecycle.js';
 import {
+  CLI_AUTH_BROWSER_OPEN_TIMEOUT_MS,
   CLI_AUTH_LOGIN_POLL_BUDGET_MS,
   formatCloudAuthLoginPrompt,
-  openCloudAuthVerificationUrlIfConfigured,
   pollCloudAuthLogin,
+  resolveCloudAuthBrowserCommand,
   startCloudAuthLogin,
 } from './auth-login.js';
 import {
@@ -91,7 +95,6 @@ import {
 } from './skill-management.js';
 import {
   formatStatusReport,
-  generateStatusReport,
   generateStatusReportWithDependencies,
 } from './status.js';
 import { resolveStudioRoot } from './studio.js';
@@ -556,6 +559,46 @@ async function withMockedSubscriptionStatusCloud<T>(
   }
 }
 
+async function selfUpdateInstallationFixture() {
+  const installationRoot = resolve(
+    await realpath(process.env.POSTPLUS_CONFIG_DIR!),
+    'node_modules',
+  );
+  const currentCliEntryPath = resolve(
+    installationRoot,
+    '@postplus/cli/build/index.js',
+  );
+  await mkdir(resolve(installationRoot, '@postplus/cli/build'), {
+    recursive: true,
+  });
+  await writeFile(currentCliEntryPath, '// isolated package entry fixture\n');
+  await writeFile(
+    resolve(installationRoot, '@postplus/cli/package.json'),
+    JSON.stringify({ version: CURRENT_CLI_VERSION }),
+  );
+  return {
+    currentCliEntryPath,
+    runCommand: async (_command: string, args: string[]) => ({
+      stdout:
+        args[0] === 'view' ? JSON.stringify(NEXT_CLI_VERSION) : installationRoot,
+      stderr: '',
+    }),
+  };
+}
+
+async function generateFixtureUpdateStatus(input: { force?: boolean } = {}) {
+  return generateUpdateStatusReport(input, {
+    fetchFn: globalThis.fetch,
+    runCommand: async (_command, args) => ({
+      stdout:
+        args[0] === 'view'
+          ? JSON.stringify(CURRENT_CLI_VERSION)
+          : 'https://registry.fixture.invalid/',
+      stderr: '',
+    }),
+  });
+}
+
 beforeEach(async () => {
   process.env = { ...originalEnv };
   const configDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-test-'));
@@ -761,13 +804,6 @@ process.exit(1);
     globalThis.fetch = async (input, init) => {
       const url = String(input);
 
-      if (url.includes('registry.npmjs.org')) {
-        return new Response(JSON.stringify({ version: '0.1.35' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
-
       if (isPublicCatalogUrl(url)) {
         return new Response(
           JSON.stringify({
@@ -843,7 +879,9 @@ process.exit(1);
     };
 
     try {
-      const status = await generateStatusReport();
+      const status = await generateStatusReportWithDependencies({
+        generateUpdateStatus: generateFixtureUpdateStatus,
+      });
 
       assert.equal(status.ok, true);
       assert.equal(status.skills.managedSkillsReleaseId, 'catalog-2');
@@ -2329,6 +2367,172 @@ process.exit(1);
 });
 
 describe('cloud auth handoff', () => {
+  async function runLoginAgainstMockServer(
+    options: {
+      args?: string[];
+      browser?: 'success' | 'failure' | 'timeout';
+      terminal?: 'cancelled' | 'expired' | 'malformed' | 'invalid-session';
+      verificationUrl?: string;
+    } = {},
+  ) {
+    const fixtureDir = await mkdtemp(
+      resolve(tmpdir(), 'postplus-auth-browser-'),
+    );
+    tempDirs.push(fixtureDir);
+    const openerLog = resolve(fixtureDir, 'opened.json');
+    const preloadPath = resolve(fixtureDir, 'browser.mjs');
+    // Intercept only the OS opener. Start, poll and whoami still use real HTTP
+    // in the CLI child, and timeout exercises a real bounded child process.
+    await writeFile(
+      preloadPath,
+      `
+import childProcess from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const originalSpawn = childProcess.spawn;
+childProcess.spawn = (command, args, options) => {
+  if (command !== 'postplus-test-browser') {
+    return originalSpawn(command, args, options);
+  }
+  writeFileSync(process.env.POSTPLUS_TEST_OPENER_LOG, JSON.stringify({ command, args, options }));
+  const mode = process.env.POSTPLUS_TEST_OPENER_MODE;
+  const source = mode === 'timeout'
+    ? 'setInterval(() => {}, 1000)'
+    : mode === 'failure' ? 'process.exit(1)' : '';
+  return originalSpawn(process.execPath, ['-e', source], options);
+};
+syncBuiltinESMExports();
+`,
+    );
+
+    const requests: { path: string; body: string; authorization?: string }[] =
+      [];
+    const account = {
+      accountId: 'account-1',
+      accountName: 'Personal Workspace',
+      accountSlug: null,
+      accountType: 'personal',
+      sessionExpiresAt: 1_900_000_000,
+      subscriptionStatus: 'active',
+      userEmail: 'user@example.com',
+      userId: 'user-1',
+    };
+    let baseUrl: string;
+    let pollCount = 0;
+    const server = createServer(async (request, response) => {
+      let body = '';
+      for await (const chunk of request) body += chunk;
+      requests.push({
+        path: request.url ?? '',
+        body,
+        authorization: request.headers.authorization,
+      });
+      const reply = (status: number, payload: unknown) => {
+        response.writeHead(status, { 'content-type': 'application/json' });
+        response.end(JSON.stringify(payload));
+      };
+      switch (request.url) {
+        case '/api/postplus-cli/auth/login/start':
+          reply(200, {
+            expiresAt: new Date(Date.now() + 30_000).toISOString(),
+            pollIntervalSeconds: 1,
+            pollSecret: 'poll-secret',
+            requestId: 'request-1',
+            userCode: '123456',
+            verificationUrl:
+              options.verificationUrl ??
+              `${baseUrl}/auth/cli-login?requestId=request-1&userCode=123456`,
+          });
+          break;
+        case '/api/postplus-cli/auth/login/poll':
+          pollCount += 1;
+          if (
+            options.terminal === 'cancelled' ||
+            options.terminal === 'expired'
+          ) {
+            reply(410, { error: `Login request ${options.terminal}.` });
+          } else if (options.terminal === 'malformed') {
+            reply(200, { status: 'completed' });
+          } else if (pollCount === 1) {
+            reply(202, { status: 'pending' });
+          } else {
+            reply(200, {
+              ...account,
+              status: 'completed',
+              cliSessionToken: 'cli-session-token-value',
+            });
+          }
+          break;
+        case '/api/postplus-cli/auth/whoami':
+          if (options.terminal === 'invalid-session') {
+            reply(401, { error: 'Session validation failed.' });
+          } else {
+            reply(200, account);
+          }
+          break;
+        default:
+          reply(404, { error: 'Unexpected request.' });
+      }
+    });
+    await new Promise<void>((resolveListen) =>
+      server.listen(0, '127.0.0.1', resolveListen),
+    );
+    const address = server.address();
+    assert.ok(address && typeof address === 'object');
+    baseUrl = `http://127.0.0.1:${address.port}`;
+
+    let stdout = '';
+    let stderr = '';
+    let exitCode = 0;
+    try {
+      ({ stdout, stderr } = await execFileAsync(
+        process.execPath,
+        [
+          '--import',
+          pathToFileURL(preloadPath).href,
+          '--import',
+          'tsx',
+          'src/index.ts',
+          'auth',
+          'login',
+          ...(options.args ?? []),
+        ],
+        {
+          env: {
+            ...process.env,
+            POSTPLUS_API_BASE_URL: baseUrl,
+            POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND: 'postplus-test-browser',
+            POSTPLUS_TEST_OPENER_LOG: openerLog,
+            POSTPLUS_TEST_OPENER_MODE: options.browser ?? 'success',
+            NO_PROXY: '*',
+          },
+          timeout: 20_000,
+        },
+      ));
+    } catch (error) {
+      const failed = error as Error & {
+        code?: number;
+        stdout: string;
+        stderr: string;
+      };
+      if (typeof failed.code !== 'number') throw error;
+      exitCode = failed.code;
+      stdout = failed.stdout;
+      stderr = failed.stderr;
+    } finally {
+      await new Promise<void>((resolveClose, reject) =>
+        server.close((error) => (error ? reject(error) : resolveClose())),
+      );
+    }
+    const opener = await readFile(openerLog, 'utf8')
+      .then(JSON.parse)
+      .catch((error) => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      });
+    return { stdout, stderr, exitCode, opener, requests, baseUrl };
+  }
+
   it('keeps the CLI login fallback poll budget at 30 minutes', () => {
     assert.equal(CLI_AUTH_LOGIN_POLL_BUDGET_MS, 30 * 60 * 1000);
   });
@@ -2345,7 +2549,8 @@ describe('cloud auth handoff', () => {
 
     assert.match(stdout, /postplus auth login/u);
     assert.doesNotMatch(stdout, /auth\/cli-login/u);
-    assert.doesNotMatch(stdout, /Waiting for browser sign-in/u);
+    assert.doesNotMatch(stdout, /Waiting for approval/u);
+    assert.match(stdout, /--no-browser/u);
   });
 
   it('starts a cloud sign-in request without binding a local bridge', async () => {
@@ -2385,53 +2590,184 @@ describe('cloud auth handoff', () => {
     }
   });
 
-  it('renders the real cloud sign-in URL and code before polling', () => {
+  it('renders the real cloud sign-in URL without a separate code challenge', () => {
     assert.equal(
       formatCloudAuthLoginPrompt({
-        userCode: '123456',
         verificationUrl:
           'https://postplus.example.com/auth/cli-login?requestId=request-1&userCode=123456',
       }),
       [
-        'PostPlus CLI login',
-        '',
-        'Open this URL in your browser to continue:',
+        'Opening browser for authentication...',
+        'If browser does not open, visit:',
         'https://postplus.example.com/auth/cli-login?requestId=request-1&userCode=123456',
-        '',
-        'Code: 123456',
-        '',
-        'Waiting for browser sign-in...',
         '',
       ].join('\n'),
     );
   });
 
-  it('opens the cloud sign-in URL only when an opener command is configured', () => {
-    const originalCommand = process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND;
-
-    try {
-      delete process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND;
-      assert.equal(
-        openCloudAuthVerificationUrlIfConfigured(
-          'https://postplus.example.com/auth/cli-login',
-        ),
-        false,
-      );
-
-      process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND = 'true';
-      assert.equal(
-        openCloudAuthVerificationUrlIfConfigured(
-          'https://postplus.example.com/auth/cli-login',
-        ),
-        true,
-      );
-    } finally {
-      if (originalCommand === undefined) {
-        delete process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND;
-      } else {
-        process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND = originalCommand;
-      }
+  it('uses the native browser opener on macOS, Windows, and desktop Linux', () => {
+    const url =
+      'https://postplus.example.com/auth/cli-login?requestId=1&userCode=123456';
+    assert.deepEqual(resolveCloudAuthBrowserCommand(url, 'darwin', {}), {
+      command: 'open',
+      args: [url],
+    });
+    assert.deepEqual(resolveCloudAuthBrowserCommand(url, 'win32', {}), {
+      command: 'rundll32.exe',
+      args: ['url.dll,FileProtocolHandler', url],
+    });
+    for (const env of [{ DISPLAY: ':0' }, { WAYLAND_DISPLAY: 'wayland-0' }]) {
+      assert.deepEqual(resolveCloudAuthBrowserCommand(url, 'linux', env), {
+        command: 'xdg-open',
+        args: [url],
+      });
     }
+    assert.equal(resolveCloudAuthBrowserCommand(url, 'linux', {}), null);
+    assert.equal(resolveCloudAuthBrowserCommand(url, 'aix', {}), null);
+    assert.deepEqual(
+      resolveCloudAuthBrowserCommand(url, 'linux', {
+        POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND: 'custom-browser',
+      }),
+      { command: 'custom-browser', args: [url] },
+    );
+  });
+
+  it('rejects non-web protocols and control characters before opening a browser', () => {
+    for (const url of [
+      'file:///tmp/file',
+      'javascript:alert(1)',
+      'not a URL',
+      'https://example.com/\n',
+    ]) {
+      assert.throws(
+        () => resolveCloudAuthBrowserCommand(url, 'darwin', {}),
+        /invalid browser URL/u,
+      );
+    }
+  });
+
+  it('opens the browser, waits for approval, validates and saves the session before success', async () => {
+    const result = await runLoginAgainstMockServer();
+    const url = `${result.baseUrl}/auth/cli-login?requestId=request-1&userCode=123456`;
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr, '');
+    assert.equal(
+      result.stdout,
+      [
+        'Opening browser for authentication...',
+        'If browser does not open, visit:',
+        url,
+        'Waiting for approval...',
+        'Successfully authenticated.',
+        '',
+      ].join('\n'),
+    );
+    assert.deepEqual(result.opener.args, [url]);
+    assert.equal(result.opener.options.shell, false);
+    assert.equal(result.opener.options.stdio, 'ignore');
+    assert.equal(
+      result.opener.options.timeout,
+      CLI_AUTH_BROWSER_OPEN_TIMEOUT_MS,
+    );
+    assert.deepEqual(
+      result.requests.map((r) => r.path),
+      [
+        '/api/postplus-cli/auth/login/start',
+        '/api/postplus-cli/auth/login/poll',
+        '/api/postplus-cli/auth/login/poll',
+        '/api/postplus-cli/auth/whoami',
+      ],
+    );
+    assert.deepEqual(JSON.parse(result.requests[1]!.body), {
+      pollSecret: 'poll-secret',
+      requestId: 'request-1',
+    });
+    assert.equal(
+      result.requests[3]!.authorization,
+      'Bearer cli-session-token-value',
+    );
+    assert.equal(
+      (await readLocalConfig())?.cliSessionToken,
+      'cli-session-token-value',
+    );
+    assert.doesNotMatch(result.stdout, /Code:|poll-secret|cli-session-token/u);
+  });
+
+  for (const browser of ['failure', 'timeout'] as const) {
+    it(`keeps cloud polling usable after browser ${browser}`, async () => {
+      const result = await runLoginAgainstMockServer({ browser });
+      assert.equal(result.exitCode, 0);
+      assert.match(result.stdout, /Could not open a browser automatically/u);
+      assert.ok(
+        result.stdout.includes(
+          `${result.baseUrl}/auth/cli-login?requestId=request-1&userCode=123456`,
+        ),
+      );
+      assert.match(
+        result.stdout,
+        /Waiting for approval\.\.\.\nSuccessfully authenticated\.\n$/u,
+      );
+      assert.equal(
+        (await readLocalConfig())?.cliSessionToken,
+        'cli-session-token-value',
+      );
+    });
+  }
+
+  it('prints the link and completes authorization without an opener when --no-browser is set', async () => {
+    const result = await runLoginAgainstMockServer({ args: ['--no-browser'] });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.opener, null);
+    assert.match(
+      result.stdout,
+      /^Open this URL in your browser to connect PostPlus:/u,
+    );
+    assert.ok(
+      result.stdout.includes(
+        `${result.baseUrl}/auth/cli-login?requestId=request-1&userCode=123456`,
+      ),
+    );
+    assert.doesNotMatch(result.stdout, /Opening browser|Could not open/u);
+    assert.match(result.stdout, /Successfully authenticated/u);
+  });
+
+  for (const terminal of [
+    'cancelled',
+    'expired',
+    'malformed',
+    'invalid-session',
+  ] as const) {
+    it(`does not report success or save a session for a ${terminal} login`, async () => {
+      const result = await runLoginAgainstMockServer({ terminal });
+      assert.equal(result.exitCode, 1);
+      assert.match(result.stdout, /Waiting for approval/u);
+      assert.doesNotMatch(result.stdout, /Successfully authenticated/u);
+      assert.ok(result.stderr.trim().length > 0);
+      assert.equal((await readLocalConfig())?.cliSessionToken ?? null, null);
+    });
+  }
+
+  it('rejects unsafe server login URLs even when --no-browser is used', async () => {
+    const result = await runLoginAgainstMockServer({
+      args: ['--no-browser'],
+      verificationUrl: 'file:///tmp/browser',
+    });
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /invalid browser URL/u);
+    assert.equal(result.requests.length, 1);
+    assert.equal(result.opener, null);
+    assert.equal(await readLocalConfig(), null);
+  });
+
+  it('continues rejecting unknown login flags before starting auth', async () => {
+    const result = await runLoginAgainstMockServer({
+      args: ['--no-browser', '--json'],
+    });
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /Unknown auth login option: --json/u);
+    assert.equal(result.requests.length, 0);
+    assert.equal(result.opener, null);
   });
 
   it('polls a completed cloud sign-in request', async () => {
@@ -3017,6 +3353,131 @@ describe('update checks', () => {
     await assert.rejects(() => readFile(lockPath, 'utf8'), { code: 'ENOENT' });
   });
 
+  for (const staleOwnerFile of ['owner.json', 'owner-1234-abcd.json']) {
+    it(`preserves the new lock when two processes reclaim stale ${staleOwnerFile}`, async () => {
+      const configDir = process.env.POSTPLUS_CONFIG_DIR!;
+      const lockPath = resolve(configDir, 'update.lock');
+      await mkdir(lockPath);
+      await writeFile(
+        resolve(lockPath, staleOwnerFile),
+        JSON.stringify({ pid: 2_147_483_647 }),
+      );
+      const results = await Promise.allSettled(
+        ['first', 'second'].map((role) =>
+          promisify(execFile)(
+            process.execPath,
+            [
+              '--import',
+              'tsx',
+              resolve('src/fixtures/update-lock-race.mjs'),
+              role,
+              pathToFileURL(resolve('src/local-state.ts')).href,
+              staleOwnerFile,
+            ],
+            { env: { ...process.env }, timeout: 10_000 },
+          ),
+        ),
+      );
+      for (const [index, result] of results.entries()) {
+        assert.equal(
+          result.status,
+          'fulfilled',
+          result.status === 'rejected' ? String(result.reason) : undefined,
+        );
+        if (result.status !== 'fulfilled') continue;
+        assert.match(result.value.stdout, /observed-dead-owner/u);
+        assert.match(result.value.stdout, /exit=0/u);
+        if (index === 0)
+          assert.match(result.value.stdout, /new-owner-preserved/u);
+        else
+          assert.match(result.value.stdout, /stale-cleanup-after-new-owner/u);
+        process.stdout.write(result.value.stdout);
+      }
+      await assert.rejects(() => readdir(lockPath), { code: 'ENOENT' });
+      assert.deepEqual(
+        (await readdir(configDir)).filter((name) =>
+          name.startsWith('.update-'),
+        ),
+        [],
+      );
+    });
+  }
+
+  it('keeps a live update lock and removes only the timed-out contender staging directory', async () => {
+    const configDir = process.env.POSTPLUS_CONFIG_DIR!;
+    await withPostPlusUpdateLock(async () => {
+      const ownerFiles = await readdir(resolve(configDir, 'update.lock'));
+      await assert.rejects(
+        withPostPlusUpdateLock(
+          async () => {
+            assert.fail('a live owner must exclude a second update');
+          },
+          { pollMs: 1, timeoutMs: 10 },
+        ),
+        /Another PostPlus update is still running/u,
+      );
+      assert.deepEqual(
+        await readdir(resolve(configDir, 'update.lock')),
+        ownerFiles,
+      );
+      assert.deepEqual(
+        (await readdir(configDir)).filter((name) =>
+          name.startsWith('.update-'),
+        ),
+        [],
+      );
+    });
+  });
+
+  it('releases the update lock when the mutation fails', async () => {
+    await assert.rejects(
+      withPostPlusUpdateLock(async () => {
+        throw new Error('update failed');
+      }),
+      /update failed/u,
+    );
+    await withPostPlusUpdateLock(async () => {});
+  });
+
+  it('waits for an active old-format owner instead of replacing its lock', async () => {
+    const configDir = process.env.POSTPLUS_CONFIG_DIR!;
+    const lockPath = resolve(configDir, 'update.lock');
+    await mkdir(lockPath);
+    const owner = JSON.stringify({ pid: process.pid });
+    await writeFile(resolve(lockPath, 'owner.json'), owner);
+    await assert.rejects(
+      withPostPlusUpdateLock(
+        async () => {
+          assert.fail(
+            'a running old-version update still owns the installation',
+          );
+        },
+        { pollMs: 1, timeoutMs: 10 },
+      ),
+      /Another PostPlus update is still running/u,
+    );
+    assert.equal(
+      await readFile(resolve(lockPath, 'owner.json'), 'utf8'),
+      owner,
+    );
+  });
+
+  it('does not remove unexpected files from the shared update lock', async () => {
+    const lockPath = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'update.lock');
+    await mkdir(lockPath);
+    await writeFile(resolve(lockPath, 'unrelated.json'), 'keep');
+    await assert.rejects(
+      withPostPlusUpdateLock(async () => {
+        assert.fail('unknown lock contents must not be destroyed');
+      }),
+      /unexpected contents/u,
+    );
+    assert.equal(
+      await readFile(resolve(lockPath, 'unrelated.json'), 'utf8'),
+      'keep',
+    );
+  });
+
   it('updates and retries the rejected command once without asking the user', async () => {
     const calls: Array<{
       args: string[];
@@ -3075,7 +3536,7 @@ describe('update checks', () => {
     ]);
     assert.match(
       output.join(''),
-      /updating and will continue the current task/u,
+      /updating\. The current task can resume only if the update succeeds/u,
     );
     assert.doesNotMatch(output.join(''), /Retrying the original command/u);
   });
@@ -3118,7 +3579,7 @@ describe('update checks', () => {
     assert.equal(result.exitCode, 0);
   });
 
-  it('updates but does not replay when refreshed skills require a new agent session', async () => {
+  it('updates but does not replay when the compatibility change requires a new agent session', async () => {
     const calls: string[][] = [];
     const errors: string[] = [];
     const result = await runPostPlusClientUpgradeRecovery(
@@ -3151,7 +3612,7 @@ describe('update checks', () => {
       restartAgentSessionRequired: true,
       updateExitCode: 0,
     });
-    assert.match(errors.join(''), /require a new agent session/u);
+    assert.match(errors.join(''), /requires a new agent session/u);
   });
 
   it('stops a second compatibility recovery attempt without looping', async () => {
@@ -3213,12 +3674,7 @@ describe('update checks', () => {
   it('propagates the updated CLI continuation exit code', async () => {
     let callCount = 0;
     const result = await runCliSelfUpdateIfOutdated({
-      currentCliEntryPath: '/tmp/postplus-build-index.js',
-      fetchFn: async () =>
-        new Response(JSON.stringify({ version: NEXT_CLI_VERSION }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
+      ...(await selfUpdateInstallationFixture()),
       runInteractiveCommand: async () => {
         callCount += 1;
         return callCount === 1 ? 0 : 17;
@@ -3231,6 +3687,7 @@ describe('update checks', () => {
   });
 
   it('self-updates the CLI before any skills catalog read when npm latest is newer', async () => {
+    const installation = await selfUpdateInstallationFixture();
     const calls: {
       args: string[];
       command: string;
@@ -3239,19 +3696,19 @@ describe('update checks', () => {
     const output: string[] = [];
     const result = await runCliSelfUpdateIfOutdated({
       continuationArgs: ['--current-directory'],
-      currentCliEntryPath: '/tmp/postplus-build-index.js',
+      ...installation,
       environment: {
         PATH: '/tmp/postplus-test-bin',
       },
-      fetchFn: async (input) => {
-        const url = String(input);
-
-        assert.match(url, /registry\.npmjs\.org/);
-
-        return new Response(JSON.stringify({ version: NEXT_CLI_VERSION }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
+      runCommand: async (command, args, options) => {
+        assert.equal(command, 'npm');
+        assert.deepEqual(options?.env, { PATH: '/tmp/postplus-test-bin' });
+        if (args[0] === 'view') {
+          assert.deepEqual(args, [
+            'view', '--global', '@postplus/cli@latest', 'version', '--json',
+          ]);
+        }
+        return installation.runCommand(command, args);
       },
       runInteractiveCommand: async (command, args, options = {}) => {
         calls.push({ command, args, env: options.env });
@@ -3270,19 +3727,27 @@ describe('update checks', () => {
     assert.deepEqual(calls, [
       {
         command: 'npm',
-        args: ['install', '-g', '@postplus/cli@latest'],
-        env: undefined,
+        args: ['install', '-g', `@postplus/cli@${NEXT_CLI_VERSION}`],
+        env: { PATH: '/tmp/postplus-test-bin' },
       },
       {
         command: process.execPath,
-        args: ['/tmp/postplus-build-index.js', 'update', '--current-directory'],
+        args: [
+          installation.currentCliEntryPath,
+          'update',
+          '--current-directory',
+        ],
         env: {
           PATH: '/tmp/postplus-test-bin',
           POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION: NEXT_CLI_VERSION,
         },
       },
     ]);
-    assert.match(output.join(''), /Continuing with the updated CLI/);
+    assert.match(
+      output.join(''),
+      /Verifying the installed CLI before continuing/,
+    );
+    assert.doesNotMatch(output.join(''), /updated to/);
     assert.doesNotMatch(output.join(''), /Re-run `postplus update`/);
   });
 
@@ -3293,7 +3758,7 @@ describe('update checks', () => {
       environment: {
         POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION: CURRENT_CLI_VERSION,
       },
-      fetchFn: async () => {
+      runCommand: async () => {
         fetchCalled = true;
         throw new Error('continuation must not check npm');
       },
@@ -3319,7 +3784,7 @@ describe('update checks', () => {
           environment: {
             POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION: NEXT_CLI_VERSION,
           },
-          fetchFn: async () => {
+          runCommand: async () => {
             throw new Error('continuation must not check npm');
           },
           writeOutput: () => {},
@@ -3333,11 +3798,7 @@ describe('update checks', () => {
   it('continues without npm install when the CLI is already latest', async () => {
     const calls: string[][] = [];
     const result = await runCliSelfUpdateIfOutdated({
-      fetchFn: async () =>
-        new Response(JSON.stringify({ version: '0.1.32' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
+      runCommand: async () => ({ stdout: '"0.1.32"', stderr: '' }),
       runInteractiveCommand: async (command, args) => {
         calls.push([command, ...args]);
         return 0;
@@ -3359,13 +3820,6 @@ describe('update checks', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input) => {
       const url = String(input);
-
-      if (url.includes('registry.npmjs.org')) {
-        return new Response(JSON.stringify({ version: '0.1.18' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
 
       if (isPublicCatalogUrl(url)) {
         return new Response(
@@ -3395,7 +3849,7 @@ describe('update checks', () => {
     };
 
     try {
-      const report = await generateUpdateStatusReport({ force: true });
+      const report = await generateFixtureUpdateStatus({ force: true });
 
       assert.equal(report.cli.updateCommand, POSTPLUS_UPDATE_COMMAND);
       assert.equal(report.skills.currentReleaseId, 'catalog-1');
@@ -3424,13 +3878,6 @@ describe('update checks', () => {
 
     globalThis.fetch = async (input) => {
       const url = String(input);
-
-      if (url.includes('registry.npmjs.org')) {
-        return new Response(JSON.stringify({ version: '0.1.32' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
 
       if (isPublicCatalogUrl(url)) {
         return new Response(
@@ -3464,13 +3911,14 @@ describe('update checks', () => {
         releaseId: 'catalog-1',
         skillNames: ['demo-skill'],
       });
-      await generateUpdateStatusReport({ force: true });
+      await generateFixtureUpdateStatus({ force: true });
       catalogReleaseId = 'catalog-2';
 
       const verify = await runPostPlusSkillVerify({
         runCommand: listInstalled,
       });
       const status = await generateStatusReportWithDependencies({
+        generateUpdateStatus: generateFixtureUpdateStatus,
         generateAuthStatus: async () => ({
           ok: true,
           apiBaseUrl: {
@@ -4290,6 +4738,77 @@ describe('skill management commands', () => {
       assert.deepEqual(successMessages, [
         'PostPlus Skills updated: Fewer interruptions. Routine recoverable errors no longer stop the task.',
       ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('repairs a current baseline only after typed installation drift', async () => {
+    await writeManagedSkillBaseline({
+      releaseId: 'catalog-1',
+      skillNames: ['demo-skill'],
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => createPublicCatalogResponse();
+    let inspections = 0;
+    let installs = 0;
+    const messages: string[] = [];
+    try {
+      const exitCode = await runPostPlusSkillUpdate({
+        reportSuccess: (message) => messages.push(message),
+        runCommand: async () => ({
+          stderr: '',
+          stdout: JSON.stringify(
+            ++inspections === 1
+              ? []
+              : [
+                  {
+                    agents: ['Codex'],
+                    name: 'demo-skill',
+                    path: '/tmp/demo-skill',
+                    scope: 'global',
+                  },
+                ],
+          ),
+        }),
+        runInteractiveCommand: async () => {
+          installs++;
+          return 0;
+        },
+      });
+      assert.equal(exitCode, 0);
+      assert.equal(installs, POSTPLUS_SKILLS_AGENT_TARGETS.length);
+      assert.match(messages.join('\n'), /repaired and verified/u);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not infer repair permission from an unrelated error with matching English text', async () => {
+    await writeManagedSkillBaseline({
+      releaseId: 'catalog-1',
+      skillNames: ['demo-skill'],
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => createPublicCatalogResponse();
+    const failure = new Error(
+      'PostPlus skills update did not converge because the installer could not be inspected.',
+    );
+    let installs = 0;
+    try {
+      await assert.rejects(
+        runPostPlusSkillUpdate({
+          runCommand: async () => {
+            throw failure;
+          },
+          runInteractiveCommand: async () => {
+            installs++;
+            return 0;
+          },
+        }),
+        (error) => error === failure,
+      );
+      assert.equal(installs, 0);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -9785,6 +10304,107 @@ describe('hosted domain commands', () => {
 });
 
 describe('account read-only commands', () => {
+  for (const command of [
+    { name: 'balance', run: () => fetchHostedBalance() },
+    {
+      name: 'runs list',
+      run: () =>
+        fetchHostedRunsList({
+          status: null,
+          since: null,
+          limit: null,
+          json: true,
+        }),
+    },
+    { name: 'runs show', run: () => fetchHostedRunDetail('run-1') },
+    { name: 'auth validate', run: () => validateRemoteAuth() },
+    { name: 'auth refresh', run: () => refreshRemoteAuth() },
+    { name: 'auth revoke', run: () => revokeRemoteAuth() },
+  ]) {
+    it(`preserves the typed update preflight rejection from ${command.name}`, async () => {
+      await setLocalSession({
+        accountId: 'account_1',
+        accountName: 'Acme',
+        accountType: 'personal',
+        apiBaseUrl: 'https://postplus.test',
+        cliSessionToken: 'test-session',
+        sessionExpiresAt: null,
+        userEmail: 'agent@example.com',
+        userId: 'user_1',
+      });
+      const payload = {
+        code: 'postplus_client_upgrade_required',
+        error: 'Please update the client.',
+        compatibility: {
+          upgrade: {
+            cli: { required: true },
+            skills: { required: false },
+            restartAgentSession: false,
+          },
+        },
+      };
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () =>
+        new Response(JSON.stringify(payload), { status: 426 });
+      try {
+        await assert.rejects(command.run(), (error) => {
+          assert.ok(error instanceof PostPlusClientUpgradeRequiredError);
+          assert.deepEqual(error.payload, payload);
+          return true;
+        });
+        assert.equal(
+          (await readLocalConfig())?.cliSessionToken,
+          'test-session',
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
+
+  it('does not turn cloud release-in-progress or matching prose into client recovery', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Acme',
+      accountType: 'personal',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'test-session',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const code of [
+        'postplus_cli_cloud_release_in_progress',
+        'unrelated_error',
+      ]) {
+        globalThis.fetch = async () =>
+          new Response(
+            JSON.stringify({
+              code,
+              error: 'Your PostPlus CLI or PostPlus skills are out of date.',
+            }),
+            { status: 503 },
+          );
+        await assert.rejects(fetchHostedBalance(), (error) => {
+          assert.ok(error instanceof Error);
+          assert.equal(
+            error instanceof PostPlusClientUpgradeRequiredError,
+            false,
+          );
+          assert.equal(
+            error.message,
+            'Your PostPlus CLI or PostPlus skills are out of date.',
+          );
+          return true;
+        });
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('reads the hosted balance projection with a GET and normalizes it', async () => {
     await setLocalSession({
       accountId: 'account_1',

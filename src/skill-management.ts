@@ -176,7 +176,7 @@ async function reconcilePostPlusSkills(
       });
       return 0;
     } catch (error) {
-      if (!isSkillReconciliationError(error)) {
+      if (!(error instanceof SkillReconciliationError)) {
         throw error;
       }
     }
@@ -302,11 +302,8 @@ function reportPostPlusSkillReconcileSuccess(input: {
   }
 }
 
-function isSkillReconciliationError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    /^PostPlus skills update did not converge /u.test(error.message)
-  );
+class SkillReconciliationError extends Error {
+  readonly code = 'postplus_skill_reconciliation_failed';
 }
 
 export async function runPostPlusSkillUninstall(
@@ -984,7 +981,7 @@ async function verifyPostPlusSkillUpdate(input: {
     return;
   }
 
-  throw new Error(
+  throw new SkillReconciliationError(
     formatSkillReconciliationError({
       action: 'update',
       missingSkills,
@@ -1019,7 +1016,7 @@ async function verifyPostPlusSkillUninstall(input: {
     return;
   }
 
-  throw new Error(
+  throw new SkillReconciliationError(
     formatSkillReconciliationError({
       action: 'uninstall',
       missingSkills: [],

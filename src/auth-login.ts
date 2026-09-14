@@ -1,13 +1,17 @@
-import { execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
 import {
   buildPostPlusClientCompatibilityHeaders,
   formatPostPlusCompatibilityError,
-  writeCurrentCliVersionToLocalConfig,
+  readCurrentCliVersion,
 } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
-import { resolveApiBaseUrlState, setLocalSession } from './local-state.js';
+import {
+  assertLocalConfigWritable,
+  resolveApiBaseUrlState,
+  setLocalSession,
+} from './local-state.js';
 
 // Fallback TOTAL POLLING BUDGET for the browser-login handoff loop — how long
 // `waitForCloudAuthLogin` keeps polling when the server's `expiresAt` cannot be
@@ -15,6 +19,7 @@ import { resolveApiBaseUrlState, setLocalSession } from './local-state.js';
 // authed-request default); the old *_TIMEOUT_MS name misread as one
 // (2026-07-13 timeout audit rename).
 export const CLI_AUTH_LOGIN_POLL_BUDGET_MS = 30 * 60 * 1000;
+export const CLI_AUTH_BROWSER_OPEN_TIMEOUT_MS = 5_000;
 
 export type AuthLoginReport = {
   accountId: string;
@@ -76,21 +81,29 @@ type SessionWhoAmIErrorPayload = {
   error?: string;
 };
 
-export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
+export async function loginWithCloudHandoff(
+  options: { browser?: boolean } = {},
+): Promise<AuthLoginReport> {
+  await assertLocalConfigWritable();
+  const cliVersion = await readCurrentCliVersion();
   const [baseUrl, apiBaseUrlState] = await Promise.all([
     requireHostedBaseUrl(),
     resolveApiBaseUrlState(),
   ]);
   const started = await startCloudAuthLogin(baseUrl);
 
-  process.stdout.write(formatCloudAuthLoginPrompt(started));
-  const didOpen = openCloudAuthVerificationUrlIfConfigured(
-    started.verificationUrl,
+  process.stdout.write(
+    formatCloudAuthLoginPrompt({ ...started, browser: options.browser }),
   );
-
-  if (didOpen) {
-    process.stdout.write('Browser opened for sign-in.\n\n');
+  if (options.browser !== false) {
+    const didOpen = await openCloudAuthVerificationUrl(started.verificationUrl);
+    if (!didOpen) {
+      process.stdout.write(
+        'Could not open a browser automatically. Open the URL above to continue.\n',
+      );
+    }
   }
+  process.stdout.write('Waiting for approval...\n');
 
   const handoffPayload = await waitForCloudAuthLogin({
     apiBaseUrl: baseUrl,
@@ -105,6 +118,7 @@ export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
   });
 
   await setLocalSession({
+    cliVersion,
     accountId: validated.accountId,
     accountName: validated.accountName,
     accountSlug: validated.accountSlug,
@@ -117,7 +131,6 @@ export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
     userId: validated.userId,
     persistApiBaseUrl: apiBaseUrlState.source !== 'env',
   });
-  await writeCurrentCliVersionToLocalConfig();
 
   return {
     accountId: validated.accountId,
@@ -132,18 +145,17 @@ export async function loginWithCloudHandoff(): Promise<AuthLoginReport> {
 }
 
 export function formatCloudAuthLoginPrompt(input: {
-  userCode: string;
+  browser?: boolean;
   verificationUrl: string;
 }): string {
   return [
-    'PostPlus CLI login',
-    '',
-    'Open this URL in your browser to continue:',
+    ...(input.browser === false
+      ? ['Open this URL in your browser to connect PostPlus:']
+      : [
+          'Opening browser for authentication...',
+          'If browser does not open, visit:',
+        ]),
     input.verificationUrl,
-    '',
-    `Code: ${input.userCode}`,
-    '',
-    'Waiting for browser sign-in...',
     '',
   ].join('\n');
 }
@@ -171,23 +183,73 @@ export async function startCloudAuthLogin(apiBaseUrl: string) {
     throw new Error('PostPlus CLI sign-in start returned incomplete data.');
   }
 
+  assertCloudAuthVerificationUrl(payload.verificationUrl);
   return payload;
 }
 
-export function openCloudAuthVerificationUrlIfConfigured(
+export function resolveCloudAuthBrowserCommand(
   verificationUrl: string,
-): boolean {
-  const command = process.env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND?.trim();
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): { command: string; args: string[] } | null {
+  assertCloudAuthVerificationUrl(verificationUrl);
+  const command = env.POSTPLUS_CLI_AUTH_OPEN_URL_COMMAND?.trim();
 
-  if (!command) {
+  if (command) {
+    return { command, args: [verificationUrl] };
+  }
+
+  switch (platform) {
+    case 'darwin':
+      return { command: 'open', args: [verificationUrl] };
+    case 'win32':
+      return {
+        command: 'rundll32.exe',
+        args: ['url.dll,FileProtocolHandler', verificationUrl],
+      };
+    case 'linux':
+      return env.DISPLAY || env.WAYLAND_DISPLAY
+        ? { command: 'xdg-open', args: [verificationUrl] }
+        : null;
+    default:
+      return null;
+  }
+}
+
+export async function openCloudAuthVerificationUrl(
+  verificationUrl: string,
+): Promise<boolean> {
+  const opener = resolveCloudAuthBrowserCommand(verificationUrl);
+  if (!opener) {
     return false;
   }
 
-  execFileSync(command, [verificationUrl], {
-    stdio: 'ignore',
-  });
+  return new Promise<boolean>((resolve) => {
+    spawn(opener.command, opener.args, {
+      shell: false,
+      stdio: 'ignore',
+      timeout: CLI_AUTH_BROWSER_OPEN_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+      windowsHide: true,
+    })
+      .once('error', () => resolve(false))
+      .once('exit', (code) => resolve(code === 0));
+  }).catch(() => false);
+}
 
-  return true;
+function assertCloudAuthVerificationUrl(value: string): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('PostPlus CLI sign-in returned an invalid browser URL.');
+  }
+  if (
+    !['https:', 'http:'].includes(url.protocol) ||
+    /[\u0000-\u0020\u007f]/u.test(value)
+  ) {
+    throw new Error('PostPlus CLI sign-in returned an invalid browser URL.');
+  }
 }
 
 async function waitForCloudAuthLogin(input: {
