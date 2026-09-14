@@ -112,6 +112,20 @@ const DEFAULT_SKILL_MUTATION_OPTIONS: SkillMutationOptions = {
   scope: 'global',
 };
 
+async function withPostPlusSkillsMutationLock<T>(
+  scope: PostPlusSkillsInstallScope,
+  operation: () => Promise<T>,
+): Promise<T> {
+  // Config, profile and installer state overrides do not change this scope.
+  const installationRoot = await realpath(
+    scope === 'global' ? homedir() : process.cwd(),
+  );
+  return withPostPlusUpdateLock(operation, {
+    installationRoot,
+    lockName: '.postplus-skills-update.lock',
+  });
+}
+
 export async function runPostPlusSkillUpdate(
   dependencies: SkillMutationDependencies = {
     confirmModifiedSkillBackup: confirmModifiedSkillBackup,
@@ -122,7 +136,7 @@ export async function runPostPlusSkillUpdate(
   },
   options: SkillMutationOptions = DEFAULT_SKILL_MUTATION_OPTIONS,
 ): Promise<number> {
-  return withPostPlusUpdateLock(() =>
+  return withPostPlusSkillsMutationLock(options.scope, () =>
     reconcilePostPlusSkills(dependencies, options),
   );
 }
@@ -176,7 +190,7 @@ async function reconcilePostPlusSkills(
       });
       return 0;
     } catch (error) {
-      if (!isSkillReconciliationError(error)) {
+      if (!(error instanceof SkillReconciliationError)) {
         throw error;
       }
     }
@@ -302,11 +316,8 @@ function reportPostPlusSkillReconcileSuccess(input: {
   }
 }
 
-function isSkillReconciliationError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    /^PostPlus skills update did not converge /u.test(error.message)
-  );
+class SkillReconciliationError extends Error {
+  readonly code = 'postplus_skill_reconciliation_failed';
 }
 
 export async function runPostPlusSkillUninstall(
@@ -318,6 +329,15 @@ export async function runPostPlusSkillUninstall(
     runInteractiveCommand,
   },
   options: SkillMutationOptions = DEFAULT_SKILL_MUTATION_OPTIONS,
+): Promise<number> {
+  return withPostPlusSkillsMutationLock(options.scope, () =>
+    uninstallPostPlusSkills(dependencies, options),
+  );
+}
+
+async function uninstallPostPlusSkills(
+  dependencies: SkillMutationDependencies,
+  options: SkillMutationOptions,
 ): Promise<number> {
   const catalog = await loadPublicSkillCatalog();
   const skillNames = catalog.skills.map((skill) => skill.skillId);
@@ -984,7 +1004,7 @@ async function verifyPostPlusSkillUpdate(input: {
     return;
   }
 
-  throw new Error(
+  throw new SkillReconciliationError(
     formatSkillReconciliationError({
       action: 'update',
       missingSkills,
@@ -1019,7 +1039,7 @@ async function verifyPostPlusSkillUninstall(input: {
     return;
   }
 
-  throw new Error(
+  throw new SkillReconciliationError(
     formatSkillReconciliationError({
       action: 'uninstall',
       missingSkills: [],

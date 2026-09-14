@@ -129,7 +129,12 @@ export function formatAuthStatusReport(report: AuthStatusReport): string {
         : 'unknown'
     }`,
   );
-  lines.push('', report.ok ? 'Auth status OK.' : 'Auth status incomplete.');
+  lines.push(
+    '',
+    report.ok
+      ? 'Local credentials are configured. Run `postplus auth validate` to confirm cloud access.'
+      : 'Auth status incomplete.',
+  );
 
   return lines.join('\n');
 }
