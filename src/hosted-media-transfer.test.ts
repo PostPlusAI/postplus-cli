@@ -1141,3 +1141,59 @@ test('expired or incomplete original TUS descriptors stop before signing or stor
     /checkpoint file is unreadable/,
   );
 });
+
+for (const mutation of ['same-size', 'legacy', 'invalid-digest'] as const) {
+  test(`download refuses ${mutation} partial before requesting more bytes and preserves it`, async () => {
+    const output = path.join(directory, 'digest.bin');
+    const partial = partialDownloadPath(output);
+    let requests = 0;
+    const input = {
+      absoluteOutput: output, debug: false, operationId: 'digest-op',
+      sourceIdentity: 'https://download.test/source', url: 'https://download.test/source',
+      request: async () => { requests++; return interruptedBytes(partial); },
+    };
+    await assert.rejects(downloadHostedMediaFile(input), /resumeAvailable=true/);
+    const checkpointPath = `${partial}.json`;
+    const checkpoint = JSON.parse(await readFile(checkpointPath, 'utf8'));
+    assert.equal(checkpoint.contentSha256, createHash('sha256').update('0123').digest('hex'));
+    if (mutation === 'same-size') await writeFile(partial, 'xxxx');
+    else {
+      if (mutation === 'legacy') delete checkpoint.contentSha256;
+      else checkpoint.contentSha256 = 'invalid';
+      await writeFile(checkpointPath, JSON.stringify(checkpoint));
+    }
+    const originalPartial = await readFile(partial);
+    const originalCheckpoint = await readFile(checkpointPath);
+    await assert.rejects(downloadHostedMediaFile(input), /integrity_mismatch.*resumeAvailable=false.*--restart/);
+    assert.equal(requests, 1);
+    assert.deepEqual(await readFile(partial), originalPartial);
+    assert.deepEqual(await readFile(checkpointPath), originalCheckpoint);
+    await downloadHostedMediaFile({ ...input, restart: true, request: async () => {
+      requests++;
+      return new Response('new', { headers: { 'content-length': '3' } });
+    } });
+    assert.equal(requests, 2);
+    assert.equal(await readFile(output, 'utf8'), 'new');
+  });
+}
+
+test('complete partial altered after failed commit is rejected without fetching or replacing output', async () => {
+  const output = path.join(directory, 'complete-digest.bin');
+  await mkdir(output);
+  let requests = 0;
+  const input = {
+    absoluteOutput: output, debug: false, operationId: 'complete-digest',
+    sourceIdentity: 'https://download.test/source', url: 'https://download.test/source',
+    request: async () => {
+      requests++;
+      return new Response('0123', { headers: { 'content-length': '4', 'accept-ranges': 'bytes', etag: '"stable"' } });
+    },
+  };
+  await assert.rejects(downloadHostedMediaFile(input), /commit-output/);
+  const partial = partialDownloadPath(output);
+  await writeFile(partial, 'xxxx');
+  await assert.rejects(downloadHostedMediaFile(input), /integrity_mismatch.*--restart/);
+  assert.equal(requests, 1);
+  assert.equal((await stat(output)).isDirectory(), true);
+  assert.equal(await readFile(partial, 'utf8'), 'xxxx');
+});

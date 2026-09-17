@@ -16,11 +16,11 @@ import {
   prepareImageSequence,
 } from './media-image-download.js';
 
-test('CLI media preparation does not add runtime dependencies or drop shipped entry files', async () => {
+test('CLI media preparation ships only audited runtime dependencies and entry files', async () => {
   const pkg = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   );
-  assert.deepEqual(pkg.dependencies, { 'cross-spawn': '7.0.6' });
+  assert.deepEqual(pkg.dependencies, { 'cross-spawn': '7.0.6', undici: '7.29.1' });
   for (const field of [
     'optionalDependencies',
     'peerDependencies',

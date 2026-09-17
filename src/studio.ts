@@ -1,3 +1,4 @@
+import { diagnosticFetch } from './network-diagnostics.js';
 import { spawn } from 'node:child_process';
 import {
   access,
@@ -404,7 +405,7 @@ async function waitForStudioServer(baseUrl: string, logPath: string): Promise<vo
 
 async function canFetchStudioServer(baseUrl: string): Promise<boolean> {
   try {
-    const response = await fetch(`${baseUrl.replace(/\/$/u, '')}/api/health`, {
+    const response = await diagnosticFetch(`${baseUrl.replace(/\/$/u, '')}/api/health`, {
       signal: AbortSignal.timeout(1200),
     });
     return response.ok;

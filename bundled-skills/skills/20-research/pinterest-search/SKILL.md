@@ -1,0 +1,100 @@
+---
+name: pinterest-search
+description: Route and run bounded public Pinterest image search that turns a keyword into normalized image, pin, and title records for moodboards, visual references, and creative inspiration.
+metadata:
+  postplus:
+    familyId: pinterest
+    familyName: Pinterest
+---
+
+# Pinterest Search
+
+Use this skill when the user wants public Pinterest image evidence — image
+addresses, moodboard source lists, or visual inspiration links — starting from a
+keyword.
+
+Apply shared rulebook and user-guidance rules from `postplus-shared`.
+When a supported command completes but evidence is empty, sparse, noisy,
+off-topic, or the wrong record type, apply the `postplus-shared` reference
+`research-quality-recovery.md`; hard execution errors still fail fast.
+Apply `references/shared-contract.md` first, then `references/search.md` for the
+keyword discovery workflow.
+
+## Job
+
+Turn one keyword into a bounded set of Pinterest images. Return each result
+normalized to `{ image_url, pin_url, title }`, deduplicated by image address.
+Run the smallest first pass that can answer the request, then stop and report
+scope, count, strongest results, and next action.
+
+## Reference Index
+
+| User asks for | Apply |
+| --- | --- |
+| Any Pinterest image search from a keyword | `references/shared-contract.md`, then `references/search.md` |
+| Broader pass: more results, filter variation, or a second keyword | `references/search.md` |
+| Board scrape, profile scrape, pin-URL scrape, shopping/product fields, engagement metrics | Not supported on the current public surface. Say so and stop |
+| Non-Pinterest image sources | Hand off; run only the Pinterest lane here |
+
+## First Question
+
+Ask one question only when the answer changes the route, first-pass scope, or
+output shape.
+
+| Missing | Ask |
+| --- | --- |
+| Keyword | `What keyword should I search Pinterest for?` |
+| Too broad | `Which one keyword matters most for the first pass?` |
+| Filter intent | `Should I include all pins, or only video pins?` |
+
+Do not ask the user for credentials, implementation choice, schema fields,
+hidden filters, or retry strategy.
+
+## Run Discipline
+
+1. Apply `references/shared-contract.md`.
+2. Apply `references/search.md`.
+3. Run the narrowest collection that can answer the first pass; start at the
+   minimum limit of 20.
+4. Normalize output to `{ image_url, pin_url, title }` and deduplicate by image
+   address.
+5. Stop after the first pass and report scope, count, strongest results, limits,
+   and next action.
+
+The result record shape for the route is documented in the
+`postplus-shared` reference `dataset-item-schemas.md`; consult it before
+writing result-processing code, and probe a single record only to verify.
+
+Do not present a bounded first pass as the full Pinterest catalog. Use only the
+public filters shown by the route.
+
+## Public Command Boundary
+
+- Run `postplus research run pinterest-search --query <keyword> --kind
+  <all|videos> --limit <n> --wait --output <result.json>`; the minimum limit is
+  20.
+- Readiness diagnostics: `postplus doctor --skill pinterest-search`.
+- If the owned CLI command still fails after any bounded recovery allowed by the executing PostPlus skill, report the exact error and stop. Do not bypass
+  the failure with metadata-only answers, readiness probing, local payload
+  rewrites, alternate services, or unpublished tools.
+- Inspect flags with `postplus research run pinterest-search --help` only when
+  needed.
+- Keep the first pass bounded; expand only after inspecting the first result.
+- If the CLI returns a quote-confirmation challenge, run
+  `postplus quote confirm --json --challenge-file <challenge.json>` and retry
+  with the returned token.
+
+<!-- BEGIN GENERATED EXECUTION EXAMPLE -->
+```bash
+postplus research run pinterest-search \
+  --query "example topic" \
+  --wait \
+  --output ./result.json
+```
+
+**Bounded recovery:** Current PostPlus CLIs handle a compatible update and retry the command once when no agent-session restart is required. If an older CLI only reports that an update is required, run `postplus update` and retry once under the same condition. For a missing or invalid CLI session, run `postplus auth login` yourself; it opens the browser by default. Immediately share its exact URL as a clickable link for the user to **Connect**, then retry the original command once only after the CLI confirms success. Never ask the user to run the command or enter/compare a code, approve the connection for them, or automatically restart a cancelled/expired login. For a local usage rejection before remote work starts, use that command's `--help` to make one unambiguous correction from existing user input and retry once.
+
+If PostPlus returns `postplus_cli_balance_required` with an `open_url` user action, give the user its exact label and URL and stop for account action. Do not invent a checkout link, claim whether provider work or charging occurred, or blindly resubmit after payment; continue from the command's documented status or checkpoint once the user confirms credits are available.
+
+Otherwise stop and report the exact error. Never expose login polling secrets, resubmit an operation when remote work may have started, change user intent, bypass approval, switch providers, rewrite payloads, or make a second recovery attempt. After success, briefly say that PostPlus updated, using only the official update details PostPlus reported.
+<!-- END GENERATED EXECUTION EXAMPLE -->

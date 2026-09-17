@@ -5,6 +5,7 @@ import {
 } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import {
+  assertLocalAuthUnchanged,
   readLocalConfig,
   resolveApiBaseUrlState,
   resolveCliSessionTokenState,
@@ -109,12 +110,16 @@ export async function refreshRemoteAuthSession(input?: {
   persistApiBaseUrl?: boolean;
   signal?: AbortSignal;
 }): Promise<RemoteAuthRefreshResult> {
+  const expectedAuthConfig = await readLocalConfig();
+  if (input?.cliSessionToken !== undefined) {
+    assertLocalAuthUnchanged(expectedAuthConfig, { ...expectedAuthConfig, cliSessionToken: input.cliSessionToken });
+  }
   const [apiBaseUrl, apiBaseUrlState, cliSessionTokenState] = await Promise.all(
     [
       input?.apiBaseUrl ?? requireHostedBaseUrl(),
       resolveApiBaseUrlState(),
       input?.cliSessionToken === undefined
-        ? resolveCliSessionTokenState()
+        ? { value: expectedAuthConfig?.cliSessionToken?.trim() ?? null }
         : null,
     ],
   );
@@ -159,6 +164,7 @@ export async function refreshRemoteAuthSession(input?: {
   input?.signal?.throwIfAborted();
 
   await setLocalSession({
+    expectedAuthConfig,
     accountId: payload.accountId,
     accountName: payload.accountName,
     accountSlug: payload.accountSlug,

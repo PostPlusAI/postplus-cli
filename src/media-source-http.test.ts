@@ -1,3 +1,4 @@
+import { fetchWithNetworkDiagnostics } from './network-diagnostics.js';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import dns from 'node:dns/promises';
@@ -45,7 +46,7 @@ function resolveTo(t: TestContext, addresses: LookupAddress[]) {
   return lookup;
 }
 
-// Keep the native HTTPS Agent's proxy/NO_PROXY decision. Intercept only its
+// Keep the Undici dispatcher's proxy/NO_PROXY decision. Intercept only its
 // direct TLS boundary so no test can dial a public address. Invoke the supplied
 // lookup exactly as a connection would and inspect the addresses it binds.
 function directConnection(t: TestContext, all = true) {
@@ -137,7 +138,7 @@ for (const [host, noProxy] of [
   [target, undefined],
   ['scontent.cdninstagram.com', 'unrelated.example'],
 ] as const) {
-  test(`native CONNECT uses ${host} without target DNS, NO_PROXY=${noProxy}`, async (t) => {
+  test(`Undici CONNECT uses ${host} without target DNS, NO_PROXY=${noProxy}`, async (t) => {
     environment(t);
     const fixture = await proxy(t);
     process.env.HTTPS_PROXY = fixture.url;
@@ -242,14 +243,18 @@ test('proxy failure never falls back to direct TLS or target DNS', async (t) => 
   assert.equal(connection.connect.mock.callCount(), 0);
 });
 
-test('native proxy TLS rejects an untrusted certificate and keeps its error category', async (t) => {
+test('proxy TLS rejects an untrusted certificate and keeps its error category', async (t) => {
   environment(t);
   const fixture = await proxy(t);
   process.env.HTTPS_PROXY = fixture.url;
   const lookup = resolveTo(t, publicAddresses);
   const fetch = await createImageSourceFetcher();
-  await assert.rejects(fetch(`https://${target}/photo`, signal()), {
-    message: 'media_source_tls_failed',
+  await assert.rejects(fetch(`https://${target}/photo`, signal()), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal(error.message, 'media_source_tls_failed');
+    assert.equal((error as Error & { retryable: boolean }).retryable, false);
+    assert.equal((error.cause as NodeJS.ErrnoException).code, 'DEPTH_ZERO_SELF_SIGNED_CERT');
+    return true;
   });
   assert.equal(lookup.mock.callCount(), 0);
   assert.equal(fixture.requests.length, 0);
@@ -298,22 +303,13 @@ test('cancellation during a proxied response retains timeout category', async (t
   assert.equal(lookup.mock.callCount(), 0);
 });
 
-test('request retains its 30 second socket timeout and timeout category', async (t) => {
+test('request cancellation retains timeout category', async (t) => {
   environment(t);
   t.mock.method(dns, 'lookup', () => new Promise(() => {}));
   syncBuiltinESMExports();
   directConnection(t);
-  t.mock.method(
-    http.ClientRequest.prototype,
-    'setTimeout',
-    function (milliseconds, callback) {
-      assert.equal(milliseconds, 30000);
-      setImmediate(callback);
-      return this;
-    },
-  );
   const fetch = await createImageSourceFetcher();
-  await assert.rejects(fetch(`https://${target}/photo`, signal()), {
+  await assert.rejects(fetch(`https://${target}/photo`, AbortSignal.timeout(30)), {
     message: 'media_source_timeout',
   });
 });
@@ -339,7 +335,7 @@ test('invalid URL and already-cancelled calls cannot open a connection', async (
   assert.equal(connection.connect.mock.callCount(), 0);
 });
 
-test('only explicit HTTP(S) proxy URLs are accepted with native precedence', async (t) => {
+test('only explicit HTTP(S) proxy URLs are accepted with documented precedence', async (t) => {
   environment(t);
   for (const value of [
     'socks5://localhost:1080',
@@ -351,16 +347,14 @@ test('only explicit HTTP(S) proxy URLs are accepted with native precedence', asy
   ]) {
     process.env = { HTTPS_PROXY: value };
     await assert.rejects(readMediaProxyEnvironment(), {
-      message: 'media_source_proxy_configuration_unsupported',
+      code: 'postplus_proxy_configuration_unsupported',
     });
     await assert.rejects(createImageSourceFetcher(), {
-      message: 'media_source_proxy_configuration_unsupported',
+      code: 'postplus_proxy_configuration_unsupported',
     });
   }
   process.env = { ALL_PROXY: 'socks5://localhost:1080' };
-  await assert.rejects(readMediaProxyEnvironment(), {
-    message: 'media_source_proxy_configuration_unsupported',
-  });
+  await assert.rejects(readMediaProxyEnvironment(), {code:'postplus_proxy_configuration_unsupported'});
   for (const value of ['http://localhost:8080', 'https://localhost:8443']) {
     process.env = {
       https_proxy: value,
@@ -375,7 +369,7 @@ test('only explicit HTTP(S) proxy URLs are accepted with native precedence', asy
   }
 });
 
-test('macOS rejects automatic/SOCKS-only proxies and prefers enabled HTTPS', async (t) => {
+test('macOS rejects automatic/SOCKS proxies and reads enabled HTTPS', async (t) => {
   environment(t);
   Object.defineProperty(process, 'platform', { value: 'darwin' });
   let stdout = '';
@@ -396,7 +390,7 @@ test('macOS rejects automatic/SOCKS-only proxies and prefers enabled HTTPS', asy
   ]) {
     stdout = `<dictionary> {\n  ${name} : 1\n}`;
     await assert.rejects(readMediaProxyEnvironment(), {
-      message: 'media_source_proxy_configuration_unsupported',
+      code: 'postplus_proxy_configuration_unsupported',
     });
   }
   stdout =
@@ -406,9 +400,53 @@ test('macOS rejects automatic/SOCKS-only proxies and prefers enabled HTTPS', asy
   });
   stdout =
     '<dictionary> {\n  HTTPSEnable : 1\n  HTTPSProxy : localhost\n  HTTPSPort : 8080\n  SOCKSEnable : 1\n}';
-  assert.deepEqual(await readMediaProxyEnvironment(), {
-    HTTPS_PROXY: 'http://localhost:8080',
+  await assert.rejects(readMediaProxyEnvironment(), {code:'postplus_proxy_configuration_unsupported'});
+});
+
+for (const systemProxy of [false,true]) {
+  test(`generic fetch and media share real CONNECT routing, system=${systemProxy}`,async(t)=>{
+    environment(t);
+    const fixture=await proxy(t);
+    if (systemProxy) {
+      process.env.NO_PROXY='localhost';
+      Object.defineProperty(process,'platform',{value:'darwin'});
+      const port=new URL(fixture.url).port;
+      const previous=childProcess.execFile;
+      childProcess.execFile=Object.assign(()=>{}, {[promisify.custom]:async()=>({stdout:`<dictionary> {\nHTTPSEnable : 1\nHTTPSProxy : 127.0.0.1\nHTTPSPort : ${port}\n}`,stderr:''})}) as typeof childProcess.execFile;
+      syncBuiltinESMExports();
+      t.after(()=>{childProcess.execFile=previous;syncBuiltinESMExports();});
+    } else process.env.HTTPS_PROXY=fixture.url;
+    const connect=tls.connect;
+    t.mock.method(tls,'connect',(options,callback)=>connect({...options,ca:cert},callback));
+    const generic=await fetchWithNetworkDiagnostics(`https://${target}/generic`,{signal:signal()},{label:'test',redirectPolicy:'manual'});
+    assert.equal(generic.status,302); await generic.text();
+    const media=await (await createImageSourceFetcher())(`https://${target}/media`,signal());
+    assert.equal(media.status,302); await media.text();
+    assert.deepEqual(fixture.tunnels,[`${target}:443`,`${target}:443`]);
   });
+}
+test('generic proxy rejection never falls back to direct target DNS',async(t)=>{
+  environment(t);
+  const fixture=await proxy(t,502);
+  process.env.HTTPS_PROXY=fixture.url;
+  const lookup=resolveTo(t,publicAddresses);
+  await assert.rejects(fetchWithNetworkDiagnostics(`https://${target}/generic`,{signal:signal()},{label:'test',redirectPolicy:'manual'}));
+  assert.equal(lookup.mock.callCount(),0);
+  assert.deepEqual(fixture.tunnels,[`${target}:443`]);
+});
+
+test('generic NO_PROXY bypass reaches only the direct loopback endpoint',async(t)=>{
+  environment(t);
+  const fixture=await proxy(t,502);
+  const server=http.createServer((_request,response)=>response.end('direct'));
+  server.listen(0,'127.0.0.1'); await once(server,'listening');
+  t.after(()=>new Promise<void>((resolve)=>server.close(()=>resolve())));
+  const address=server.address(); assert.ok(address && typeof address==='object');
+  process.env.HTTP_PROXY=fixture.url;
+  process.env.NO_PROXY=`127.0.0.1:${address.port}`;
+  const response=await fetchWithNetworkDiagnostics(`http://127.0.0.1:${address.port}`,{signal:signal()},{label:'test',redirectPolicy:'manual'});
+  assert.equal(await response.text(),'direct');
+  assert.deepEqual(fixture.tunnels,[]);
 });
 
 // Public test-only self-signed credentials; never used outside loopback fixtures.

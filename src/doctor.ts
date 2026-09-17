@@ -1,10 +1,11 @@
+import { PostPlusFailure, withResponseMetadata, toFailureFact, type FailureFact } from './failure-contract.js';
 import { formatAccountBindingName } from './account-binding-display.js';
 import {
   type FreshRemoteAuth,
   resolveFreshRemoteAuth,
 } from './auth-session.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
-import { formatPostPlusCompatibilityError } from './client-compatibility.js';
+import { formatPostPlusCompatibilityError, readPostPlusCompatibilityError } from './client-compatibility.js';
 import { resolveHostedBaseUrl } from './hosted-release.js';
 import {
   formatLocalDependencyReport,
@@ -34,6 +35,7 @@ export type DoctorCheck = {
   severity: 'required' | 'task_specific';
   detail: string;
   fix?: string;
+  failure?: FailureFact;
   metadata?: DoctorCheckMetadata;
 };
 
@@ -86,6 +88,7 @@ function createFail(
   detail: string,
   fix?: string,
   input: {
+    failure?: FailureFact;
     severity?: DoctorCheck['severity'];
     metadata?: DoctorCheckMetadata;
   } = {},
@@ -98,6 +101,7 @@ function createFail(
     detail,
     fix,
     metadata: input.metadata,
+    ...(input.failure ? { failure: input.failure } : {}),
   };
 }
 
@@ -171,6 +175,7 @@ export async function generateDoctorReport(
         'Remote auth',
         message,
         'Run `postplus auth login`.',
+        { failure: toFailureFact(error, { stage: 'remote_auth', service: 'postplus-cloud' }) },
       ),
     );
 
@@ -265,6 +270,7 @@ async function checkLocalDependencies(
       error instanceof Error
         ? error.message
         : 'Failed to check local dependencies.',
+      undefined, { failure: toFailureFact(error, { stage: 'local_dependencies', service: 'local' }) },
     );
   }
 }
@@ -308,7 +314,7 @@ async function checkRemoteAuth(input: FreshRemoteAuth): Promise<DoctorCheck> {
     };
 
     if (!response.ok) {
-      const compatibilityCheck = createClientCompatibilityFailure(payload);
+      const compatibilityCheck = createClientCompatibilityFailure(payload, response);
 
       if (compatibilityCheck) {
         return compatibilityCheck;
@@ -319,6 +325,7 @@ async function checkRemoteAuth(input: FreshRemoteAuth): Promise<DoctorCheck> {
         'Remote auth',
         readErrorMessage(payload, 'PostPlus Cloud rejected the CLI session.'),
         'Run `postplus auth login`.',
+        { failure: toFailureFact(withResponseMetadata(new PostPlusFailure(readErrorMessage(payload, 'Cloud rejected the session.'), { code: 'postplus_auth_rejected', stage: 'remote_auth', service: 'postplus-cloud', retryable: response.status >= 500, action: 'Run postplus auth login.' }), response)) },
       );
     }
 
@@ -355,6 +362,7 @@ async function checkRemoteAuth(input: FreshRemoteAuth): Promise<DoctorCheck> {
         ? error.message
         : 'Failed to validate PostPlus Cloud auth.',
       'Run `postplus auth validate` after confirming network access.',
+      { failure: toFailureFact(error, { stage: 'remote_auth', service: 'postplus-cloud' }) },
     );
   }
 }
@@ -379,7 +387,7 @@ async function checkHostedCapabilities(
     };
 
     if (!response.ok) {
-      const compatibilityCheck = createClientCompatibilityFailure(payload);
+      const compatibilityCheck = createClientCompatibilityFailure(payload, response);
 
       if (compatibilityCheck) {
         return compatibilityCheck;
@@ -392,6 +400,7 @@ async function checkHostedCapabilities(
           payload,
           'PostPlus Cloud hosted readiness check failed.',
         ),
+        undefined, { failure: toFailureFact(withResponseMetadata(new PostPlusFailure(readErrorMessage(payload, 'Cloud readiness failed.'), { code: 'postplus_readiness_rejected', stage: 'hosted_capabilities', service: 'postplus-cloud', retryable: response.status >= 500 }), response)) },
       );
     }
 
@@ -470,12 +479,14 @@ async function checkHostedCapabilities(
       error instanceof Error
         ? error.message
         : 'Failed to check hosted capability readiness.',
+      undefined, { failure: toFailureFact(error, { stage: 'hosted_capabilities', service: 'postplus-cloud' }) },
     );
   }
 }
 
 function createClientCompatibilityFailure(
   payload: unknown,
+  response: Response,
 ): DoctorCheck | null {
   const compatibilityError = formatPostPlusCompatibilityError(payload);
 
@@ -487,6 +498,7 @@ function createClientCompatibilityFailure(
     'client_compatibility',
     'Client compatibility',
     compatibilityError,
+    undefined, { failure: toFailureFact(withResponseMetadata(readPostPlusCompatibilityError(payload)!, response), { stage: 'compatibility', service: 'postplus-cloud' }) },
   );
 }
 

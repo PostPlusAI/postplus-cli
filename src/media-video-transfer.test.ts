@@ -587,7 +587,7 @@ test('epoch upload expiry returned by hosted preparation survives the checkpoint
   assert.equal(h.state().expiresAt, Date.parse('2099-01-01T00:00:00Z'));
 });
 
-test('local video uploads use the shared proxy preflight before any Google request', async (t) => {
+test('local video uploads use the shared unsupported-proxy preflight before any Google request', async (t) => {
   const h = await setup(t);
   const originalEnv = { ...process.env };
   const originalFetch = globalThis.fetch;
@@ -595,7 +595,8 @@ test('local video uploads use the shared proxy preflight before any Google reque
     process.env = originalEnv;
     globalThis.fetch = originalFetch;
   });
-  process.env.HTTPS_PROXY = 'http://127.0.0.1:9';
+  process.env.HTTPS_PROXY = 'socks5://127.0.0.1:9';
+  delete process.env.https_proxy;
   delete process.env.NODE_USE_ENV_PROXY;
   delete process.env.NO_PROXY;
   delete process.env.no_proxy;
@@ -613,7 +614,7 @@ test('local video uploads use the shared proxy preflight before any Google reque
       };
       assert.equal(failure.code, 'postplus_cli_cloud_transport_failed');
       assert.equal(failure.method, 'PREFLIGHT');
-      assert.match(failure.message, /NODE_USE_ENV_PROXY=1/);
+      assert.match(failure.message, /proxy format/);
       assert.doesNotMatch(failure.message, /secret-session|signed-ticket/);
       return true;
     },

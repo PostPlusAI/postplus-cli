@@ -1,3 +1,5 @@
+import { PostPlusFailure, sanitizeFailureText, toFailureFact, type FailureFact } from './failure-contract.js';
+import { diagnosticFetch } from './network-diagnostics.js';
 import { createHash } from 'node:crypto';
 import {
   mkdir,
@@ -16,6 +18,7 @@ import {
   readCurrentCliVersion,
 } from './client-compatibility.js';
 import {
+  CommandExecutionError,
   runCommand as runDefaultCommand,
   runInteractiveCommand as runDefaultInteractiveCommand,
 } from './command-runner.js';
@@ -62,6 +65,7 @@ export type UpdateStatusReport = {
     updateCommand: string;
   };
   warning: string | null;
+  failure?: FailureFact;
 };
 
 type UpdateCheckCache = {
@@ -83,6 +87,7 @@ type UpdateCheckDependencies = {
 };
 
 export type CliSelfUpdateResult = {
+  failure?: FailureFact;
   command: typeof POSTPLUS_CLI_UPDATE_COMMAND;
   currentVersion: string;
   exitCode: number | null;
@@ -160,10 +165,36 @@ export async function runPostPlusClientUpgradeRecovery(
     'PostPlus is updating. The current task can resume only if the update succeeds and no agent restart is required.\n',
   );
 
-  const updateExitCode = await runInteractiveCommand('postplus', ['update'], {
-    env: recoveryEnvironment,
-    stdout: 'stderr',
-  });
+  let updateExitCode: number;
+  let updateOutput = '';
+  try {
+    updateExitCode = await runInteractiveCommand('postplus', ['update', '--json'], {
+      env: recoveryEnvironment, stdout: 'capture', stdin: 'ignore', timeoutMs: 300_000,
+      onCapturedOutput: (result) => { updateOutput = result.stdout; },
+    });
+  } catch (error) {
+    if (!(error instanceof CommandExecutionError)) throw error;
+    let fact: FailureFact;
+    try {
+      const envelope = JSON.parse(error.stdout);
+      fact = envelope.error;
+      if (envelope.ok !== false || !fact ||
+          !['code', 'stage', 'service', 'message', 'action'].every((key) => typeof fact[key as keyof FailureFact] === 'string') ||
+          typeof fact.retryable !== 'boolean' || !Array.isArray(fact.cause)) throw new Error('Invalid failure envelope.');
+    } catch {
+      throw new PostPlusFailure('PostPlus update returned an invalid failure response.', {
+        code: 'postplus_update_response_invalid', stage: 'compatibility-recovery', service: 'cli', retryable: false,
+        action: 'Inspect postplus update --json before resuming this task.',
+      }, { cause: error });
+    }
+    let cause: Error | undefined;
+    const causes = fact.cause[0]?.code === fact.code && fact.cause[0]?.message === fact.message ? fact.cause.slice(1) : fact.cause;
+    for (const item of [...causes].reverse()) {
+      if (!item || typeof item.message !== 'string') continue;
+      cause = Object.assign(new Error(item.message, { cause }), { name: item.name, code: item.code });
+    }
+    throw new PostPlusFailure(fact.message, fact, { cause });
+  }
   if (updateExitCode !== 0) {
     writeError(
       `PostPlus automatic update failed with exit code ${updateExitCode}. The original command was not retried.\n`,
@@ -174,6 +205,25 @@ export async function runPostPlusClientUpgradeRecovery(
       restartAgentSessionRequired: false,
       updateExitCode,
     };
+  }
+
+  let session: { newSessionRequired: boolean; action: string | null } | undefined;
+  try {
+    const result = JSON.parse(updateOutput);
+    if (result?.ok !== true) throw new Error('Expected a successful update envelope.');
+    if (result.session !== undefined) {
+      if (!result.session || typeof result.session.newSessionRequired !== 'boolean' ||
+          (result.session.newSessionRequired ? typeof result.session.action !== 'string' : result.session.action !== null && typeof result.session.action !== 'string')) throw new Error('Invalid update session metadata.');
+      session = result.session;
+    }
+  } catch {
+    throw new PostPlusFailure('PostPlus update returned an invalid success response.', {
+      code: 'postplus_update_response_invalid', stage: 'compatibility-recovery', service: 'cli', retryable: false,
+      action: 'Inspect postplus update --json before resuming this task.',
+    });
+  }
+  if (session?.newSessionRequired && input.payload.compatibility?.upgrade?.restartAgentSession !== true) {
+    writeError(`Updated skills need a new agent session for subsequent skill work. ${sanitizeFailureText(session.action ?? '')}\n`);
   }
 
   if (input.payload.compatibility?.upgrade?.restartAgentSession === true) {
@@ -191,7 +241,7 @@ export async function runPostPlusClientUpgradeRecovery(
   const retryExitCode = await runInteractiveCommand(
     'postplus',
     input.originalArgs,
-    { env: recoveryEnvironment },
+    { env: recoveryEnvironment, stdin: 'ignore', timeoutMs: 300_000 },
   );
 
   return {
@@ -223,7 +273,7 @@ export async function generateUpdateStatusReport(
     force?: boolean;
   } = {},
   dependencies: UpdateCheckDependencies = {
-    fetchFn: fetch,
+    fetchFn: diagnosticFetch,
   },
 ): Promise<UpdateStatusReport> {
   const currentVersion = await readCurrentCliVersion();
@@ -295,6 +345,7 @@ export async function generateUpdateStatusReport(
           source: 'cache',
         }),
         warning,
+        failure: toFailureFact(error, { stage: 'update-check' }),
       };
     }
 
@@ -315,6 +366,7 @@ export async function generateUpdateStatusReport(
         updateCommand: POSTPLUS_UPDATE_COMMAND,
       },
       warning,
+      failure: toFailureFact(error, { stage: 'update-check' }),
     };
   }
 }
@@ -345,7 +397,7 @@ export async function runCliSelfUpdateIfOutdated(
   const runInteractiveCommand =
     dependencies.runInteractiveCommand ?? runDefaultInteractiveCommand;
   const writeOutput =
-    dependencies.writeOutput ?? ((message) => process.stdout.write(message));
+    dependencies.writeOutput ?? ((message) => (dependencies.quiet ? process.stderr : process.stdout).write(message));
   const environment = dependencies.environment ?? process.env;
   const quiet = dependencies.quiet === true;
   const currentVersion = await readCurrentCliVersion();
@@ -424,8 +476,15 @@ export async function runCliSelfUpdateIfOutdated(
             ['install', '-g', `${NPM_PACKAGE_NAME}@${latestVersion}`],
             {
               env: environment,
+              stdout: 'capture', stdin: 'ignore', timeoutMs: 300_000,
             },
-          )
+          ).catch((cause: unknown) => {
+            if (!(cause instanceof CommandExecutionError)) throw cause;
+            throw new PostPlusFailure('PostPlus could not install the CLI update.', {
+              code: 'postplus_cli_update_failed', stage: 'npm-install', service: 'npm', retryable: false,
+              action: 'Resolve the npm installation error, then run postplus update.',
+            }, { cause });
+          })
         : 0;
       if (exitCode !== 0) {
         writeOutput(
@@ -433,6 +492,7 @@ export async function runCliSelfUpdateIfOutdated(
         );
         return {
           command: POSTPLUS_CLI_UPDATE_COMMAND,
+          failure: toFailureFact(new PostPlusFailure('PostPlus could not install the CLI update.', { code: 'postplus_cli_update_failed', stage: 'npm-install', service: 'npm', retryable: false, action: 'Resolve the npm installation error, then run postplus update.' }, { cause: new Error(`npm install exited with code ${exitCode}.`) })),
           currentVersion,
           exitCode,
           latestVersion,
@@ -675,6 +735,7 @@ async function fetchLatestSkillReleaseId(
       `Failed to check latest ${POSTPLUS_SKILLS_REPO} releaseId: ${
         error instanceof Error ? error.message : String(error)
       }`,
+      { cause: error },
     );
   }
 }
@@ -683,6 +744,9 @@ async function readUpdateCheckCache(): Promise<UpdateCheckCache | null> {
   try {
     const raw = await readFile(getUpdateCheckCachePath(), 'utf8');
     const parsed = JSON.parse(raw) as UpdateCheckCache;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new SyntaxError('Update cache must contain an object.');
+    }
 
     if (
       typeof parsed.checkedAt !== 'string' ||
@@ -700,7 +764,18 @@ async function readUpdateCheckCache(): Promise<UpdateCheckCache | null> {
     if (nodeError.code === 'ENOENT') {
       return null;
     }
-    throw error;
+    const invalid = error instanceof SyntaxError;
+    throw new PostPlusFailure(
+      invalid ? 'The local update cache is invalid.' : 'The local update cache could not be read.',
+      {
+        code: invalid ? 'postplus_update_cache_invalid' : 'postplus_update_cache_read_failed',
+        stage: 'update-cache-read',
+        service: 'filesystem',
+        retryable: false,
+        action: 'Preserve update-check.json and restore a known-good copy or contact PostPlus support before retrying.',
+      },
+      { cause: invalid ? new SyntaxError('Invalid or truncated JSON in update-check.json.') : error },
+    );
   }
 }
 

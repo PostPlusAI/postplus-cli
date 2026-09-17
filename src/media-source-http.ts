@@ -1,9 +1,10 @@
-import { execFile } from 'node:child_process';
+import { isTlsFailure, TLS_FAILURE_ACTION } from './network-diagnostics.js';
+import { resolveProxyConfiguration } from './proxy-configuration.js';
+import { EnvHttpProxyAgent, request } from 'undici';
+import type { LookupAddress } from 'node:dns';
 import { lookup } from 'node:dns/promises';
-import { Agent, request } from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import { Readable } from 'node:stream';
-import { promisify } from 'node:util';
 
 // Only the public platforms and original-image CDNs used by this operation.
 // No arbitrary URL fetcher, account cookies, redirects, or environment writes.
@@ -56,145 +57,44 @@ export function isPublicImageSourceAddress(address: string) {
   );
 }
 
-export async function readMediaProxyEnvironment(): Promise<
-  Record<string, string>
-> {
-  const proxy =
-    process.env.https_proxy ??
-    process.env.HTTPS_PROXY ??
-    process.env.http_proxy ??
-    process.env.HTTP_PROXY;
-  const noProxy = process.env.no_proxy ?? process.env.NO_PROXY;
-  if (proxy) {
-    let url: URL;
-    try {
-      url = new URL(proxy);
-    } catch {
-      throw new Error('media_source_proxy_configuration_unsupported');
-    }
-    if (url.protocol !== 'http:' && url.protocol !== 'https:')
-      throw new Error('media_source_proxy_configuration_unsupported');
-    return { HTTPS_PROXY: proxy, ...(noProxy ? { NO_PROXY: noProxy } : {}) };
-  }
-  if (process.env.ALL_PROXY || process.env.all_proxy)
-    throw new Error('media_source_proxy_configuration_unsupported');
-  if (process.platform !== 'darwin') return {};
-  const { stdout } = await promisify(execFile)(
-    '/usr/sbin/scutil',
-    ['--proxy'],
-    {
-      timeout: 3000,
-      maxBuffer: 64 * 1024,
-    },
-  );
-  const field = (name: string) =>
-    new RegExp(`^\\s*${name}\\s*:\\s*(.+)$`, 'mu').exec(stdout)?.[1]?.trim();
-  if (
-    ['ProxyAutoConfigEnable', 'ProxyAutoDiscoveryEnable'].some(
-      (name) => field(name) === '1',
-    )
-  )
-    throw new Error('media_source_proxy_configuration_unsupported');
-  if (field('HTTPSEnable') !== '1') {
-    if (field('SOCKSEnable') === '1')
-      throw new Error('media_source_proxy_configuration_unsupported');
-    return {};
-  }
-  const host = field('HTTPSProxy');
-  const port = field('HTTPSPort');
-  if (
-    !host ||
-    !/^[a-zA-Z0-9.\-]+$/u.test(host) ||
-    !port ||
-    !/^\d+$/u.test(port)
-  )
-    throw new Error('media_source_proxy_configuration_unsupported');
-  return { HTTPS_PROXY: `http://${host}:${port}` };
+export async function readMediaProxyEnvironment(): Promise<Record<string,string>> {
+  const config=await resolveProxyConfiguration();
+  return {...(config.httpProxy ? {HTTP_PROXY:config.httpProxy}:{}),...(config.httpsProxy ? {HTTPS_PROXY:config.httpsProxy}:{}),...(config.noProxy ? {NO_PROXY:config.noProxy}:{})};
 }
 
 export async function createImageSourceFetcher() {
-  const proxyEnv = await readMediaProxyEnvironment();
-  const [major = 0, minor = 0] = process.versions.node.split('.').map(Number);
-  if (
-    Object.keys(proxyEnv).length &&
-    (major < 24 || (major === 24 && minor < 5))
-  )
-    throw new Error('media_source_proxy_runtime_unsupported');
-  const agent = new Agent({ keepAlive: false, proxyEnv });
-  return async (
-    value: string,
-    signal: AbortSignal,
-    headers: Record<string, string> = {},
-  ): Promise<Response> => {
-    const url = assertImageSourceUrl(value);
+  const config=await resolveProxyConfiguration();
+  return async (value:string, signal:AbortSignal, headers:Record<string,string>={}):Promise<Response> => {
+    const url=assertImageSourceUrl(value);
     signal.throwIfAborted();
-    return new Promise<Response>((resolve, reject) => {
-      const req = request(
-        url,
-        {
-          agent,
-          signal,
-          method: 'GET',
-          headers: { ...headers, 'Accept-Encoding': 'identity' },
-          // Node invokes this only for direct connections, including NO_PROXY.
-          // A trusted configured proxy resolves the CONNECT hostname itself.
-          lookup: (host, options, callback) => {
-            lookup(host, { all: true }).then(
-              (addresses) => {
-                if (signal.aborted) return;
-                if (
-                  !addresses.length ||
-                  addresses.some(
-                    ({ address }) => !isPublicImageSourceAddress(address),
-                  )
-                ) {
-                  callback(new Error('media_source_non_public_address'), '', 4);
-                  return;
-                }
-                const first = addresses[0]!;
-                if (typeof options === 'object' && options?.all)
-                  callback(null, addresses);
-                else callback(null, first.address, first.family);
-              },
-              () => callback(new Error('media_source_network_failed'), '', 4),
-            );
-          },
-        },
-        (incoming) => {
-          const responseHeaders = new Headers();
-          for (const [key, value] of Object.entries(incoming.headers))
-            for (const item of Array.isArray(value) ? value : [value])
-              if (item !== undefined) responseHeaders.append(key, item);
-          const status = incoming.statusCode ?? 502;
-          resolve(
-            new Response(
-              [204, 304].includes(status)
-                ? null
-                : (Readable.toWeb(incoming) as ReadableStream<Uint8Array>),
-              { status, headers: responseHeaders },
-            ),
-          );
-        },
-      );
-      req.on('error', (error: NodeJS.ErrnoException) =>
-        reject(
-          new Error(
-            signal.aborted || error.message === 'media_source_timeout'
-              ? 'media_source_timeout'
-              : error.message === 'media_source_non_public_address'
-                ? 'media_source_non_public_address'
-                : /^(?:ERR_TLS|CERT_|ERR_SSL|DEPTH_ZERO_SELF_SIGNED_CERT|UNABLE_TO_VERIFY)/u.test(
-                      error.code ?? '',
-                    )
-                  ? 'media_source_tls_failed'
-                  : 'media_source_network_failed',
-          ),
-        ),
-      );
-      req.setTimeout(30000, () =>
-        req.destroy(new Error('media_source_timeout')),
-      );
-      req.end();
-    });
+    const dispatcher=new EnvHttpProxyAgent({...config,...(!config.httpsProxy ? {httpProxy:''}:{}),connect:{
+      lookup: (host, options, callback) => {
+        let settled=false;
+        const finish=(error:Error | null, addresses:LookupAddress[] = []) => {
+          if (settled) return; settled=true; signal.removeEventListener('abort',abort);
+          if (error) { callback(error,'',4); return; }
+          const first=addresses[0]!;
+          if (typeof options === 'object' && options?.all) callback(null,addresses);
+          else callback(null,first.address,first.family);
+        };
+        const abort=()=>finish(new Error('media_source_timeout'));
+        signal.addEventListener('abort',abort,{once:true});
+        if (signal.aborted) { abort(); return; }
+        lookup(host,{all:true}).then((addresses) => {
+          if (!addresses.length || addresses.some(({address}) => !isPublicImageSourceAddress(address))) finish(new Error('media_source_non_public_address'));
+          else finish(null,addresses);
+        }, (cause) => finish(new Error('media_source_network_failed',{cause})));
+      },
+    }});
+    try {
+      const incoming=await request(url,{dispatcher,signal,method:'GET',headers:{...headers,'Accept-Encoding':'identity'},headersTimeout:30000,bodyTimeout:30000});
+      const responseHeaders=new Headers();
+      for (const [key,value] of Object.entries(incoming.headers))
+        for (const item of Array.isArray(value)?value:[value]) if(item!==undefined) responseHeaders.append(key,item);
+      return new Response([204,304].includes(incoming.statusCode)?null:Readable.toWeb(incoming.body) as ReadableStream<Uint8Array>,{status:incoming.statusCode,headers:responseHeaders});
+    } catch(error) {
+      throw Object.assign(new Error(signal.aborted || ['UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT'].includes((error as {code?:string}).code ?? '') || error instanceof Error && error.message==='media_source_timeout' ? 'media_source_timeout' : error instanceof Error && error.message==='media_source_non_public_address' ? 'media_source_non_public_address' : isTlsFailure(error) ? 'media_source_tls_failed' : 'media_source_network_failed',{cause:error}),
+        isTlsFailure(error)?{code:'media_source_tls_failed',stage:'request',service:'external-http',retryable:false,action:TLS_FAILURE_ACTION}:{});
+    } finally { void dispatcher.close().catch(() => dispatcher.destroy()); }
   };
 }

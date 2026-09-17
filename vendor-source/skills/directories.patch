@@ -1,0 +1,76 @@
+--- a/dist/cli.mjs
++++ b/dist/cli.mjs
+@@ -6210,6 +6210,55 @@
+ 	}
+ 	return options;
+ }
++// Read-only ABI: retain every physical entry instead of collapsing by skill name.
++// Agent paths remain owned by the installer's existing registry and resolver.
++async function listInstalledSkillDirectories(global, cwd, agentFilter) {
++	const roots = new Map();
++	for (const [id, agent] of Object.entries(agents)) {
++		if (agentFilter && !agentFilter.includes(id)) continue;
++		if (global && agent.globalSkillsDir === void 0) continue;
++		for (const root of new Set([
++			getAgentBaseDir(id, global, cwd),
++			global ? agent.globalSkillsDir : join(cwd, agent.skillsDir),
++			...(id === "eve" && !global ? getEveSubagents(cwd).map((name) => getEveSubagentSkillsDir(name, cwd)) : [])
++		])) {
++			if (!roots.has(root)) roots.set(root, new Set());
++			roots.get(root).add(id);
++		}
++	}
++	const records = [];
++	for (const [root, agentIds] of roots) {
++		let entries;
++		try { entries = await readdir(root, { withFileTypes: true }); }
++		catch (error) { if (error.code === "ENOENT") continue; throw error; }
++		for (const entry of entries) {
++			const entryPath = join(root, entry.name);
++			if (!isPathSafe$2(root, entryPath)) continue;
++			let realPath = null;
++			try { realPath = await realpath(entryPath); }
++			catch (error) { if (error.code !== "ENOENT") throw error; }
++			const isDirectory = await isDirEntryOrSymlinkToDir(entry, entryPath);
++			const skillMdPath = join(entryPath, "SKILL.md");
++			let skill = null;
++			let metadataError = realPath === null ? "dangling-link" : !isDirectory ? "occupied-file" : null;
++			if (!metadataError) {
++				try { await stat(skillMdPath); skill = await parseSkillMd(skillMdPath); }
++				catch (error) { if (error.code !== "ENOENT") throw error; metadataError = "missing-skill-file"; }
++			}
++			if (!skill && !metadataError) metadataError = "invalid-skill-metadata";
++			records.push({
++				name: entry.name,
++				directoryName: entry.name,
++				metadataName: skill?.name ?? null,
++				metadataError,
++				path: entryPath,
++				realPath,
++				agentIds: [...agentIds].sort()
++			});
++		}
++	}
++	return records;
++}
+ async function runList(args) {
+ 	const options = parseListOptions(args);
+ 	const scope = options.global === true ? true : false;
+@@ -6233,11 +6282,17 @@
+ 	const lockEntriesBySanitizedName = new Map(Object.entries(lockedSkills).map(([name, entry]) => [sanitizeName(name), entry]));
+ 	const getLockEntry = (skillName) => lockedSkills[skillName] ?? lockEntriesBySanitizedName.get(sanitizeName(skillName));
+ 	if (options.json) {
++		const directories = await listInstalledSkillDirectories(scope, cwd, agentFilter);
++		for (const entry of directories) if (!installedSkills.some((skill) => sanitizeName(skill.name) === entry.directoryName)) {
++			installedSkills.push({name: entry.directoryName, canonicalPath: entry.path, scope: scope ? "global" : "project", agents: []});
++		}
+ 		const jsonOutput = installedSkills.map((skill) => {
+ 			const lockEntry = getLockEntry(skill.name);
+ 			return {
+ 				name: skill.name,
+ 				path: skill.canonicalPath,
++				directories: directories.filter((entry) => entry.directoryName === sanitizeName(skill.name))
++					.map(({ name, ...entry }) => entry),
+ 				scope: skill.scope,
+ 				agents: skill.agents.map((a) => agents[a].displayName),
+ 				source: lockEntry?.source ?? null,

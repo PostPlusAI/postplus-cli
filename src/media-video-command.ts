@@ -21,6 +21,7 @@ import {
   writeResult,
 } from './hosted-command-runtime.js';
 import { getPostPlusConfigDir } from './local-state.js';
+import { withMediaEvidence } from './media-evidence-retention.js';
 import {
   type MediaRunCheckpoint,
   type PreparedMediaCheckpoint,
@@ -163,7 +164,8 @@ export async function executeVideoAnalysis(input: {
   let terminalObserved = false;
   let transferProductError = false;
   let recoveryCommand: string | null = checkpoint?.resumeCommand ?? null;
-  return dispatchHostedCommand(
+  return withMediaEvidence(checkpoint?.filePath ?? null, async (markTerminal) => {
+    try { return await dispatchHostedCommand(
     {
       request: async () => {
         const submissionAttempted =
@@ -217,7 +219,7 @@ export async function executeVideoAnalysis(input: {
           body.estimatedUsage = {
             videoSeconds: prepared.metadata.durationSeconds,
           };
-          process.stderr.write(`Local video evidence: ${prepared.filePath}\n`);
+          process.stderr.write(`Local video evidence: ${prepared.filePath}${prepared.filePath.startsWith(path.join(getPostPlusConfigDir(), 'media-evidence') + path.sep) ? ' (temporary cache retained for 30 days after last PostPlus use once the task finishes; copy it to keep it longer)' : ''}\n`);
           checkpoint.record.analysisSubmissionAttempted = true;
           await writeResult(checkpoint.record, checkpoint.filePath, false);
         }
@@ -368,6 +370,8 @@ export async function executeVideoAnalysis(input: {
   ).catch((error: unknown) =>
     bindMediaCheckpointUpgradeRecovery(error, checkpoint, outputPath, json, input.recoveryArgs),
   );
+    } finally { if (terminalObserved) markTerminal(); }
+  }, { outputPath });
 }
 
 async function requestVideoTransfer(
@@ -434,6 +438,7 @@ export async function prepareVideoEvidence(
   };
   await writeResult(checkpoint.record, checkpoint.filePath, false);
   process.stderr.write(`Resume: ${checkpoint.resumeCommand}\n`);
+  return withMediaEvidence(checkpoint.filePath, async (markTerminal) => {
   const prepared = await prepareVideoAnalysisInput({
     ...videoTransferErrors,
     source,
@@ -454,7 +459,9 @@ export async function prepareVideoEvidence(
   }).catch((error: unknown) =>
     bindMediaCheckpointUpgradeRecovery(error, checkpoint, null, true),
   );
+  markTerminal();
   return {
+    ...(prepared.filePath.startsWith(path.join(getPostPlusConfigDir(), 'media-evidence') + path.sep) ? { cacheRetentionDays: 30 } : {}),
     kind: 'video',
     filePath: prepared.filePath,
     metadata: prepared.metadata,
@@ -462,6 +469,7 @@ export async function prepareVideoEvidence(
     operationId,
     resumeCommand: checkpoint.resumeCommand,
   };
+  });
 }
 
 function emitVideoAnalysisProgress(
@@ -612,7 +620,8 @@ export async function pollVideoAnalysis(input: {
     return payload;
   };
 
-  return dispatchHostedCommand(
+  return withMediaEvidence(resumePath ?? null, async (markTerminal) => {
+    try { return await dispatchHostedCommand(
     {
       request: async () => {
         const settled = await pollHostedRunUntilSettled({
@@ -646,4 +655,6 @@ export async function pollVideoAnalysis(input: {
     },
     context,
   );
+    } finally { if (terminalObserved) markTerminal(); }
+  }, { outputPath });
 }

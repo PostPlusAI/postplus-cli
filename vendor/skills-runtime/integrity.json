@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "upstream": "skills@1.5.26",
+  "builder": "esbuild@0.28.1",
+  "packages": [
+    {
+      "name": "@isaacs/fs-minipass",
+      "version": "4.0.1",
+      "url": "https://registry.npmjs.org/@isaacs/fs-minipass/-/fs-minipass-4.0.1.tgz",
+      "integrity": "sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w==",
+      "archive": "@isaacs-fs-minipass.tgz"
+    },
+    {
+      "name": "chownr",
+      "version": "3.0.0",
+      "url": "https://registry.npmjs.org/chownr/-/chownr-3.0.0.tgz",
+      "integrity": "sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g==",
+      "archive": "chownr.tgz"
+    },
+    {
+      "name": "minipass",
+      "version": "7.1.3",
+      "url": "https://registry.npmjs.org/minipass/-/minipass-7.1.3.tgz",
+      "integrity": "sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A==",
+      "archive": "minipass.tgz"
+    },
+    {
+      "name": "minizlib",
+      "version": "3.1.0",
+      "url": "https://registry.npmjs.org/minizlib/-/minizlib-3.1.0.tgz",
+      "integrity": "sha512-KZxYo1BUkWD2TVFLr0MQoM8vUUigWD3LlD83a/75BqC+4qE0Hb1Vo5v1FgcfaNXvfXzr+5EhQ6ing/CaBijTlw==",
+      "archive": "minizlib.tgz"
+    },
+    {
+      "name": "skills",
+      "version": "1.5.26",
+      "url": "https://registry.npmjs.org/skills/-/skills-1.5.26.tgz",
+      "integrity": "sha512-D5jnWoMPDRQ3fJM3RpQH8SBrAS9tmVlTC7OdOB2tk7D6nORbRnw8RLwjVj81IIGlxwWuBthEgUChM7SOZGvTHQ==",
+      "archive": "skills.tgz"
+    },
+    {
+      "name": "tar",
+      "version": "7.5.22",
+      "url": "https://registry.npmjs.org/tar/-/tar-7.5.22.tgz",
+      "integrity": "sha512-MFO/QzvtAOmJbkhOaCTvbGcFN9L9b+JunIsDwaKljSOdcLMea3NJ1k9Usz/rjdfSXTq4dfzfeS7W4p4YOAAHeA==",
+      "archive": "tar.tgz"
+    },
+    {
+      "name": "yallist",
+      "version": "5.0.0",
+      "url": "https://registry.npmjs.org/yallist/-/yallist-5.0.0.tgz",
+      "integrity": "sha512-YgvUTfwqyc7UXVMrB+SImsVYSmTS8X/tSrtdNZMImM+n7+QTriRXyXim0mBrTXNeqzVF0KWGgHPeiyViFFrNDw==",
+      "archive": "yallist.tgz"
+    },
+    {
+      "name": "yaml",
+      "version": "2.9.1",
+      "url": "https://registry.npmjs.org/yaml/-/yaml-2.9.1.tgz",
+      "integrity": "sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==",
+      "archive": "yaml.tgz"
+    }
+  ],
+  "patchSha256": "7dab5e280ea9d35c5480c137812fcd376809e4df7a21125d061a76328fb167e8",
+  "files": {
+    "cli.mjs": "bfa0655e66f3a757d7268a1e4cac127391a0860e19d90a8150863fdea3671b1c",
+    "dist/cli.mjs": "ce2c22d76b54c8f985ebbfce5a7a412c44f99ac7a6de94b2424b4d882d50ce92",
+    "licenses/@isaacs-fs-minipass/LICENSE": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
+    "licenses/chownr/LICENSE.md": "a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09",
+    "licenses/minipass/LICENSE.md": "8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004",
+    "licenses/minizlib/LICENSE": "df05697a04b8997c79d423930534e59cc18828f6e22d0c8c2d62fcbea1c4f50b",
+    "licenses/skills/LICENSE": "661142e53c313d2bb5e1b055f5c0a39001450ff1b5e27b89dc4bc7de9a6352ca",
+    "licenses/skills/ThirdPartyNoticeText.txt": "ad017718e485f2d634341e32e91c4e48feee89db01f04b17e4db6c4c912339a6",
+    "licenses/tar/LICENSE.md": "8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004",
+    "licenses/yallist/LICENSE.md": "a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09",
+    "licenses/yaml/LICENSE": "5bba27375d93e9119f76c1015f7672cf9ad5f70952296e0842fb2243d6376869",
+    "package.json": "f470abd6c10566893cd17b20f41ff48436c5cf92a70f9af617b7340034a3f8a1"
+  }
+}

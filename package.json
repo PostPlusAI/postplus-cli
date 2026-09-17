@@ -58,7 +58,13 @@
     "build/hosted-command-runtime.d.ts",
     "build/quote-confirmation.d.ts",
     "build/client-compatibility.d.ts",
-    "build/hosted-media-transfer.js"
+    "build/hosted-media-transfer.js",
+    "bundled-skills",
+    "build/skills-bundle.js",
+    "build/failure-contract.js",
+    "vendor/skills-runtime",
+    "build/media-evidence-retention.js",
+    "build/proxy-configuration.js"
   ],
   "publishConfig": {
     "access": "public",
@@ -84,14 +90,20 @@
     "start": "tsx src/index.ts",
     "test:acceptance": "node ./scripts/acceptance.mjs",
     "test": "tsx --test src/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepack": "node ./scripts/finalize-build.mjs",
+    "vendor:skills:build": "node scripts/build-skills-runtime.mjs",
+    "vendor:skills:check": "node scripts/check-skills-runtime.mjs",
+    "vendor:skills:test": "node --test scripts/vendor-skills-runtime.test.mjs"
   },
   "dependencies": {
-    "cross-spawn": "7.0.6"
+    "cross-spawn": "7.0.6",
+    "undici": "7.29.1"
   },
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",
     "@types/node": "^24.6.2",
+    "esbuild": "^0.28.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },

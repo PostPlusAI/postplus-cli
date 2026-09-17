@@ -1,3 +1,6 @@
+import { serializeInstallerEntries } from './fixtures/skills-bundle-fixture.test.js';
+import { INSTALLER_LABELS, writeFixtureBundle, writeInstalledFixture } from './fixtures/skills-bundle-fixture.test.js';
+import { hashSkillDirectory } from './skills-bundle.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -89,6 +92,7 @@ import {
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
 import {
+  SKILLS_INSTALLER_ENTRY,
   buildPostPlusSkillUninstallArgs,
   buildPostPlusSkillUpdateArgs,
   formatSkillBaselineVerifyReport,
@@ -161,7 +165,7 @@ function createPublicCatalogResponse(): Response {
   return new Response(
     JSON.stringify({
       schemaVersion: 2,
-      releaseId: 'catalog-1',
+      releaseId: 'skills-2026-09-01.1',
       source: 'PostPlusAI/postplus-skills',
       skills: [
         {
@@ -195,7 +199,7 @@ function createVideoAnalysisCatalogResponse(): Response {
   return new Response(
     JSON.stringify({
       schemaVersion: 2,
-      releaseId: 'catalog-1',
+      releaseId: 'skills-2026-09-01.1',
       source: 'PostPlusAI/postplus-skills',
       skills: [
         {
@@ -231,7 +235,7 @@ function createSocialPublishingCatalogResponse(): Response {
   return new Response(
     JSON.stringify({
       schemaVersion: 2,
-      releaseId: 'catalog-1',
+      releaseId: 'skills-2026-09-01.1',
       source: 'PostPlusAI/postplus-skills',
       skills: [
         {
@@ -383,7 +387,7 @@ function createYoutubeResearchCatalogResponse(): Response {
   return new Response(
     JSON.stringify({
       schemaVersion: 2,
-      releaseId: 'catalog-1',
+      releaseId: 'skills-2026-09-01.1',
       source: 'PostPlusAI/postplus-skills',
       skills: [
         {
@@ -713,6 +717,9 @@ beforeEach(async () => {
   // the explicit transport preflight contract.
   process.env.NODE_USE_ENV_PROXY = '1';
   process.env.XDG_STATE_HOME = stateDir;
+  // These protocol fixtures explicitly exercise the remote catalog override.
+  process.env.POSTPLUS_SKILLS_CATALOG_URL = 'https://raw.githubusercontent.com/PostPlusAI/postplus-skills/main/skills/catalog.json';
+  process.env.POSTPLUS_SKILLS_SOURCE = 'PostPlusAI/postplus-skills';
 });
 
 after(async () => {
@@ -820,7 +827,7 @@ describe('doctor and status', () => {
           error: null,
           installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
           installedCount: 2,
-          managedSkillsReleaseId: 'catalog-1',
+          managedSkillsReleaseId: 'skills-2026-09-01.1',
           missingSkills: [],
           requiredCount: 2,
           retiredManagedSkills: [],
@@ -869,38 +876,15 @@ describe('doctor and status', () => {
       accountId: 'account-1',
       cliSessionToken: 'cli-session-token-value',
       managedSkills: {
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         skillNames: ['demo-skill'],
       },
       sessionExpiresAt: 1_900_000_000,
       userEmail: 'user@example.com',
       userId: 'user-1',
     });
-    const fakeBinDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-bin-'));
-    tempDirs.push(fakeBinDir);
-    await mkdir(fakeBinDir, { recursive: true });
-    const fakeNpxPath = resolve(fakeBinDir, 'npx');
-    await writeFile(
-      fakeNpxPath,
-      `#!/usr/bin/env node
-const args = process.argv.slice(2).join(' ');
-if (args === '-y skills list --json') {
-  console.log(JSON.stringify([{ agents: ['Codex'], name: 'demo-skill', path: '/project/demo-skill', scope: 'project' }]));
-  process.exit(0);
-}
-if (args === '-y skills list --json --global') {
-  console.log(JSON.stringify([{ agents: ['Codex'], name: 'demo-skill', path: '/global/demo-skill', scope: 'global' }]));
-  process.exit(0);
-}
-console.error('Unexpected npx args: ' + args);
-process.exit(1);
-`,
-      {
-        encoding: 'utf8',
-        mode: 0o755,
-      },
-    );
-    process.env.PATH = `${fakeBinDir}:${process.env.PATH ?? ''}`;
+    const installedPath = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'installed-demo');
+    await writeInstalledFixture(installedPath);
 
     const originalFetch = globalThis.fetch;
     const hostedSkillsReleaseIds: (string | undefined)[] = [];
@@ -911,7 +895,7 @@ process.exit(1);
         return new Response(
           JSON.stringify({
             schemaVersion: 2,
-            releaseId: 'catalog-2',
+            releaseId: 'skills-2026-09-02.1',
             source: 'PostPlusAI/postplus-skills',
             skills: [
               {
@@ -941,7 +925,7 @@ process.exit(1);
           headers[POSTPLUS_CLIENT_COMPATIBILITY_HEADERS.skillsReleaseId];
         hostedSkillsReleaseIds.push(skillsReleaseId);
 
-        if (skillsReleaseId !== 'catalog-2') {
+        if (skillsReleaseId !== 'skills-2026-09-02.1') {
           return new Response(
             JSON.stringify({
               code: 'postplus_client_upgrade_required',
@@ -984,13 +968,18 @@ process.exit(1);
     try {
       const status = await generateStatusReportWithDependencies({
         generateUpdateStatus: generateFixtureUpdateStatus,
+        generateSkillStatus: () => generateSkillInstallStatusReport({ runCommand: async (command, args) => {
+          assert.equal(command, process.execPath);
+          assert.equal(args[0], SKILLS_INSTALLER_ENTRY);
+          return { stderr: '', stdout: serializeInstallerEntries([{ name: 'demo-skill', path: installedPath, agents: ['Codex'], scope: 'global' }]) };
+        } }),
       });
 
       assert.equal(status.ok, false);
       assert.equal(status.skills.managedSkillsReleaseId, null);
       assert.deepEqual(status.skills.scopes, ['global']);
       assert.equal(status.updates.skills.currentReleaseId, null);
-      assert.equal(status.updates.skills.latestReleaseId, 'catalog-2');
+      assert.equal(status.updates.skills.latestReleaseId, 'skills-2026-09-02.1');
       assert.equal(status.updates.skills.updateAvailable, true);
       assert.deepEqual(hostedSkillsReleaseIds, [undefined]);
       assert.equal(
@@ -1082,7 +1071,7 @@ process.exit(1);
           error: null,
           installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
           installedCount: 2,
-          managedSkillsReleaseId: 'catalog-1',
+          managedSkillsReleaseId: 'skills-2026-09-01.1',
           missingSkills: [],
           requiredCount: 2,
           retiredManagedSkills: [],
@@ -1162,7 +1151,7 @@ process.exit(1);
             error: null,
             installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
             installedCount: 1,
-            managedSkillsReleaseId: 'catalog-1',
+            managedSkillsReleaseId: 'skills-2026-09-01.1',
             missingSkills: [],
             requiredCount: 1,
             retiredManagedSkills: [],
@@ -1182,8 +1171,8 @@ process.exit(1);
               updateCommand: 'npm install -g @postplus/cli@latest',
             },
             skills: {
-              currentReleaseId: 'catalog-1',
-              latestReleaseId: 'catalog-1',
+              currentReleaseId: 'skills-2026-09-01.1',
+              latestReleaseId: 'skills-2026-09-01.1',
               updateAvailable: false,
               updateCommand: 'postplus update',
             },
@@ -1309,7 +1298,7 @@ process.exit(1);
           error: null,
           installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
           installedCount: 1,
-          managedSkillsReleaseId: 'catalog-1',
+          managedSkillsReleaseId: 'skills-2026-09-01.1',
           missingSkills: [],
           requiredCount: 1,
           retiredManagedSkills: [],
@@ -1329,8 +1318,8 @@ process.exit(1);
             updateCommand: 'npm install -g @postplus/cli@latest',
           },
           skills: {
-            currentReleaseId: 'catalog-1',
-            latestReleaseId: 'catalog-1',
+            currentReleaseId: 'skills-2026-09-01.1',
+            latestReleaseId: 'skills-2026-09-01.1',
             updateAvailable: false,
             updateCommand: 'postplus update',
           },
@@ -1403,7 +1392,7 @@ process.exit(1);
           error: null,
           installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
           installedCount: 1,
-          managedSkillsReleaseId: 'catalog-1',
+          managedSkillsReleaseId: 'skills-2026-09-01.1',
           missingSkills: [],
           requiredCount: 1,
           retiredManagedSkills: [],
@@ -1423,8 +1412,8 @@ process.exit(1);
             updateCommand: 'npm install -g @postplus/cli@latest',
           },
           skills: {
-            currentReleaseId: 'catalog-1',
-            latestReleaseId: 'catalog-1',
+            currentReleaseId: 'skills-2026-09-01.1',
+            latestReleaseId: 'skills-2026-09-01.1',
             updateAvailable: false,
             updateCommand: 'postplus update',
           },
@@ -1584,7 +1573,7 @@ process.exit(1);
         error: null,
         installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
         installedCount: 1,
-        managedSkillsReleaseId: 'catalog-1',
+        managedSkillsReleaseId: 'skills-2026-09-01.1',
         missingSkills: [],
         requiredCount: 1,
         retiredManagedSkills: [],
@@ -1604,8 +1593,8 @@ process.exit(1);
           updateCommand: 'npm install -g @postplus/cli@latest',
         },
         skills: {
-          currentReleaseId: 'catalog-1',
-          latestReleaseId: 'catalog-1',
+          currentReleaseId: 'skills-2026-09-01.1',
+          latestReleaseId: 'skills-2026-09-01.1',
           updateAvailable: false,
           updateCommand: 'postplus update',
         },
@@ -2004,7 +1993,7 @@ process.exit(1);
           error: null,
           installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
           installedCount: 2,
-          managedSkillsReleaseId: 'catalog-1',
+          managedSkillsReleaseId: 'skills-2026-09-01.1',
           missingSkills: [],
           requiredCount: 2,
           retiredManagedSkills: [],
@@ -2024,8 +2013,8 @@ process.exit(1);
             updateCommand: 'npm install -g @postplus/cli@latest',
           },
           skills: {
-            currentReleaseId: 'catalog-1',
-            latestReleaseId: 'catalog-1',
+            currentReleaseId: 'skills-2026-09-01.1',
+            latestReleaseId: 'skills-2026-09-01.1',
             updateAvailable: false,
             updateCommand: 'postplus update',
           },
@@ -2190,7 +2179,7 @@ process.exit(1);
     );
   });
 
-  it('fails immediately when proxy variables exist but Node environment proxy support is disabled', async () => {
+  it('rejects unsupported explicit proxy configuration before fetching', async () => {
     await setLocalSession({
       accountId: 'account-1',
       accountName: 'Account',
@@ -2204,7 +2193,7 @@ process.exit(1);
     });
     // Keep this contract hermetic: hosted runners can define NO_PROXY entries
     // that would otherwise (correctly) exempt the synthetic test origin.
-    process.env.HTTPS_PROXY = 'http://127.0.0.1:7897';
+    process.env.HTTPS_PROXY = 'socks5://127.0.0.1:7897';
     delete process.env.https_proxy;
     delete process.env.ALL_PROXY;
     delete process.env.all_proxy;
@@ -2220,7 +2209,7 @@ process.exit(1);
       return new Response(null, { status: 200 });
     };
     try {
-      await assert.rejects(() => validateRemoteAuth(), /NODE_USE_ENV_PROXY=1/u);
+      await assert.rejects(() => validateRemoteAuth(), {code:'postplus_cli_cloud_transport_failed',method:'PREFLIGHT'});
       assert.equal(fetchCalls, 0);
     } finally {
       globalThis.fetch = originalFetch;
@@ -3104,10 +3093,10 @@ describe('public skill catalog', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-1',
+          releaseId: 'skills-2026-09-01.1',
           releaseNotes: {
             schemaVersion: 1,
-            releaseId: 'catalog-1',
+            releaseId: 'skills-2026-09-01.1',
             title: 'A smoother PostPlus update',
             summary: 'Agents can continue routine work after updating.',
             highlights: ['One bounded retry after a safe update.'],
@@ -3144,10 +3133,10 @@ describe('public skill catalog', () => {
       const catalog = await loadPublicSkillCatalog();
 
       assert.equal(catalog.source, 'PostPlusAI/postplus-skills');
-      assert.equal(catalog.releaseId, 'catalog-1');
+      assert.equal(catalog.releaseId, 'skills-2026-09-01.1');
       assert.deepEqual(catalog.releaseNotes, {
         schemaVersion: 1,
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         title: 'A smoother PostPlus update',
         summary: 'Agents can continue routine work after updating.',
         highlights: ['One bounded retry after a safe update.'],
@@ -3364,7 +3353,7 @@ describe('public skill catalog', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-1',
+          releaseId: 'skills-2026-09-01.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [],
         }),
@@ -3392,7 +3381,7 @@ describe('public skill catalog', () => {
     process.env[POSTPLUS_SKILLS_SOURCE_ENV] =
       'PostPlusAI/postplus-skills#fde913331ef113e3a3eb1065b45faff614136608';
     globalThis.fetch = async (url) => {
-      assert.equal(url, stagedCatalogUrl);
+      assert.equal(String(url), stagedCatalogUrl);
 
       return new Response(
         JSON.stringify({
@@ -3422,10 +3411,7 @@ describe('public skill catalog', () => {
         catalog.source,
         'PostPlusAI/postplus-skills#fde913331ef113e3a3eb1065b45faff614136608',
       );
-      assert.match(
-        catalog.installCommand,
-        /PostPlusAI\/postplus-skills#fde913331ef113e3a3eb1065b45faff614136608/,
-      );
+      assert.equal(catalog.installCommand, 'postplus install');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -3440,7 +3426,7 @@ describe('local dependency diagnostics', () => {
         catalogUrl: 'https://example.com/skills/catalog.json',
         installCommand: POSTPLUS_SKILLS_INSTALL_COMMAND,
         listCommand: 'npx -y skills add PostPlusAI/postplus-skills --list',
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         source: 'PostPlusAI/postplus-skills',
         skills: [
           {
@@ -3774,6 +3760,7 @@ describe('update checks', () => {
         environment: { PATH: '/tmp/postplus-bin' },
         runInteractiveCommand: async (command, args, options = {}) => {
           calls.push({ command, args, env: options.env });
+          options.onCapturedOutput?.({ stdout: JSON.stringify({ok:true}), stderr: '' });
           return 0;
         },
         writeError: (message) => output.push(message),
@@ -3793,7 +3780,7 @@ describe('update checks', () => {
       updateExitCode: 0,
     });
     assert.deepEqual(calls, [
-      { command: 'postplus', args: ['update'], env: recoveryEnv },
+      { command: 'postplus', args: ['update', '--json'], env: recoveryEnv },
       { command: 'postplus', args: originalArgs, env: recoveryEnv },
     ]);
     assert.match(
@@ -3821,6 +3808,7 @@ describe('update checks', () => {
         environment: {},
         runInteractiveCommand: async (_command, args, options = {}) => {
           calls.push({ args, env: options.env });
+          options.onCapturedOutput?.({ stdout: JSON.stringify({ok:true}), stderr: '' });
           return 0;
         },
         writeError: () => {},
@@ -3858,8 +3846,9 @@ describe('update checks', () => {
         },
       },
       {
-        runInteractiveCommand: async (command, args) => {
+        runInteractiveCommand: async (command, args, options = {}) => {
           calls.push([command, ...args]);
+          options.onCapturedOutput?.({ stdout: JSON.stringify({ok:true}), stderr: '' });
           return 0;
         },
         writeError: (message) => errors.push(message),
@@ -3867,7 +3856,7 @@ describe('update checks', () => {
       },
     );
 
-    assert.deepEqual(calls, [['postplus', 'update']]);
+    assert.deepEqual(calls, [['postplus', 'update', '--json']]);
     assert.deepEqual(result, {
       attempted: true,
       exitCode: 1,
@@ -3890,6 +3879,7 @@ describe('update checks', () => {
         environment: { [POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV]: '1' },
         runInteractiveCommand: async () => {
           commandCalled = true;
+          options.onCapturedOutput?.({ stdout: JSON.stringify({ok:true}), stderr: '' });
           return 0;
         },
         writeError: (message) => errors.push(message),
@@ -3924,7 +3914,7 @@ describe('update checks', () => {
       },
     );
 
-    assert.deepEqual(calls, [['postplus', 'update']]);
+    assert.deepEqual(calls, [['postplus', 'update', '--json']]);
     assert.deepEqual(result, {
       attempted: true,
       exitCode: 23,
@@ -4079,7 +4069,7 @@ describe('update checks', () => {
 
   it('compares the public skill releaseId with the managed skill baseline', async () => {
     await writeManagedSkillBaseline({
-      releaseId: 'catalog-1',
+      releaseId: 'skills-2026-09-01.1',
       skillNames: ['demo-skill'],
     });
 
@@ -4091,7 +4081,7 @@ describe('update checks', () => {
         return new Response(
           JSON.stringify({
             schemaVersion: 2,
-            releaseId: 'catalog-2',
+            releaseId: 'skills-2026-09-02.1',
             source: 'PostPlusAI/postplus-skills',
             skills: [
               {
@@ -4118,8 +4108,8 @@ describe('update checks', () => {
       const report = await generateFixtureUpdateStatus({ force: true });
 
       assert.equal(report.cli.updateCommand, POSTPLUS_UPDATE_COMMAND);
-      assert.equal(report.skills.currentReleaseId, 'catalog-1');
-      assert.equal(report.skills.latestReleaseId, 'catalog-2');
+      assert.equal(report.skills.currentReleaseId, 'skills-2026-09-01.1');
+      assert.equal(report.skills.latestReleaseId, 'skills-2026-09-02.1');
       assert.equal(report.skills.updateAvailable, true);
       assert.equal(report.skills.updateCommand, POSTPLUS_UPDATE_COMMAND);
     } finally {
@@ -4129,14 +4119,17 @@ describe('update checks', () => {
 
   it('refreshes update state only after update installs and verifies the new release', async () => {
     const originalFetch = globalThis.fetch;
-    let catalogReleaseId = 'catalog-1';
+    let catalogReleaseId = 'skills-2026-09-01.1';
+    let linked = false;
+    const installedPath = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'installed-demo');
+    await writeInstalledFixture(installedPath);
     const listInstalled = async () => ({
       stderr: '',
-      stdout: JSON.stringify([
+      stdout: serializeInstallerEntries([
         {
-          agents: ['Codex'],
+          agents: linked ? INSTALLER_LABELS : [],
           name: 'demo-skill',
-          path: '/tmp/demo-skill',
+          path: installedPath,
           scope: 'global',
         },
       ]),
@@ -4174,18 +4167,22 @@ describe('update checks', () => {
 
     try {
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         skillNames: ['demo-skill'],
       });
       await generateFixtureUpdateStatus({ force: true });
-      catalogReleaseId = 'catalog-2';
+      catalogReleaseId = 'skills-2026-09-02.1';
+      const catalog = await (await globalThis.fetch('https://raw.githubusercontent.com/PostPlusAI/postplus-skills/main/skills/catalog.json')).json();
+      process.env.POSTPLUS_SKILLS_SOURCE = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'bundle');
+      delete process.env.POSTPLUS_SKILLS_CATALOG_URL;
+      await writeFixtureBundle(process.env.POSTPLUS_SKILLS_SOURCE, catalog);
 
       const verify = await runPostPlusSkillVerify({
         runCommand: listInstalled,
       });
       assert.equal(verify.ok, false);
-      assert.equal((await readManagedSkillBaseline()).releaseId, 'catalog-1');
-      await runPostPlusSkillUpdate({ runCommand: listInstalled, runInteractiveCommand: async () => 0 });
+      assert.equal((await readManagedSkillBaseline()).releaseId, 'skills-2026-09-01.1');
+      await runPostPlusSkillUpdate({ runCommand: listInstalled, runInteractiveCommand: async () => { linked = true; return 0; } });
       const status = await generateStatusReportWithDependencies({
         generateUpdateStatus: generateFixtureUpdateStatus,
         generateAuthStatus: async () => ({
@@ -4226,10 +4223,10 @@ describe('update checks', () => {
 
       assert.equal(verify.baselineUpdated, false);
       assert.equal(verify.verifiedSkillsReleaseId, null);
-      assert.equal(status.skills.managedSkillsReleaseId, 'catalog-2');
+      assert.equal(status.skills.managedSkillsReleaseId, 'skills-2026-09-02.1');
       assert.equal(status.updates.source, 'remote');
-      assert.equal(status.updates.skills.currentReleaseId, 'catalog-2');
-      assert.equal(status.updates.skills.latestReleaseId, 'catalog-2');
+      assert.equal(status.updates.skills.currentReleaseId, 'skills-2026-09-02.1');
+      assert.equal(status.updates.skills.latestReleaseId, 'skills-2026-09-02.1');
       assert.equal(status.updates.skills.updateAvailable, false);
     } finally {
       globalThis.fetch = originalFetch;
@@ -4239,7 +4236,20 @@ describe('update checks', () => {
 
 describe('skill management commands', () => {
   const originalCwd = process.cwd();
+  let fixtureAgents: string[] = [];
+  const skillPath = (name: string) => resolve(process.env.POSTPLUS_CONFIG_DIR!, 'installed', name);
+  async function prepareSkillCatalog() {
+    const catalog = await (await globalThis.fetch('https://raw.githubusercontent.com/PostPlusAI/postplus-skills/main/skills/catalog.json')).json();
+    await writeFixtureBundle(process.env.POSTPLUS_SKILLS_SOURCE!, catalog);
+    for (const name of [...catalog.skills.map((skill: { name: string }) => skill.name), 'retired-skill', 'project-only-skill']) {
+      await writeInstalledFixture(skillPath(name));
+    }
+  }
+  const completeFixtureInstall = () => { fixtureAgents = [...INSTALLER_LABELS]; };
   beforeEach(() => {
+    fixtureAgents = [];
+    delete process.env.POSTPLUS_SKILLS_CATALOG_URL;
+    process.env.POSTPLUS_SKILLS_SOURCE = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'bundle');
     // Mutation locks follow the real install scope, independently of config/state.
     process.env.HOME = process.env.POSTPLUS_CONFIG_DIR!;
     process.env.USERPROFILE = process.env.POSTPLUS_CONFIG_DIR!;
@@ -4509,21 +4519,20 @@ describe('skill management commands', () => {
       'hermes-agent',
     ]);
     assert.deepEqual(buildPostPlusSkillUpdateArgs(['a', 'b']), [
-      '-y',
-      'skills',
+      SKILLS_INSTALLER_ENTRY,
       'add',
-      'PostPlusAI/postplus-skills',
+      process.env.POSTPLUS_SKILLS_SOURCE!,
       '--global',
       '--full-depth',
       '--skill',
-      '*',
+      'a',
+      'b',
       '--agent',
       ...POSTPLUS_SKILLS_AGENT_TARGETS,
       '--yes',
     ]);
     assert.deepEqual(buildPostPlusSkillUninstallArgs(['a', 'b']), [
-      '-y',
-      'skills',
+      SKILLS_INSTALLER_ENTRY,
       'remove',
       'a',
       'b',
@@ -4535,18 +4544,18 @@ describe('skill management commands', () => {
   it('builds current-directory update and uninstall commands', () => {
     assert.equal(
       POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND,
-      'for agent in claude-code codex cursor github-copilot windsurf trae trae-cn openclaw hermes-agent; do npx -y skills add PostPlusAI/postplus-skills --full-depth --skill \'*\' --agent "$agent" --yes; done',
+      'postplus install --current-directory',
     );
     assert.deepEqual(
       buildPostPlusSkillUpdateArgs(['a', 'b'], 'current-directory'),
       [
-        '-y',
-        'skills',
+        SKILLS_INSTALLER_ENTRY,
         'add',
-        'PostPlusAI/postplus-skills',
+        process.env.POSTPLUS_SKILLS_SOURCE!,
         '--full-depth',
         '--skill',
-        '*',
+        'a',
+      'b',
         '--agent',
         ...POSTPLUS_SKILLS_AGENT_TARGETS,
         '--yes',
@@ -4554,7 +4563,7 @@ describe('skill management commands', () => {
     );
     assert.deepEqual(
       buildPostPlusSkillUninstallArgs(['a', 'b'], 'current-directory'),
-      ['-y', 'skills', 'remove', 'a', 'b', '--yes'],
+      [SKILLS_INSTALLER_ENTRY, 'remove', 'a', 'b', '--yes'],
     );
   });
 
@@ -4563,14 +4572,14 @@ describe('skill management commands', () => {
       'PostPlusAI/postplus-skills#release/2026-05-03.1';
 
     assert.deepEqual(buildPostPlusSkillUpdateArgs(['a', 'b']), [
-      '-y',
-      'skills',
+      SKILLS_INSTALLER_ENTRY,
       'add',
       'PostPlusAI/postplus-skills#release/2026-05-03.1',
       '--global',
       '--full-depth',
       '--skill',
-      '*',
+      'a',
+      'b',
       '--agent',
       ...POSTPLUS_SKILLS_AGENT_TARGETS,
       '--yes',
@@ -4583,7 +4592,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-1',
+          releaseId: 'skills-2026-09-01.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -4605,6 +4614,7 @@ describe('skill management commands', () => {
       );
 
     try {
+      await prepareSkillCatalog();
       const report = await generateSkillInstallStatusReport({
         runCommand: async (_command, args) => {
           if (args.includes('--global')) {
@@ -4616,11 +4626,11 @@ describe('skill management commands', () => {
 
           return {
             stderr: '',
-            stdout: JSON.stringify([
+            stdout: serializeInstallerEntries([
               {
-                agents: ['Codex'],
+                agents: fixtureAgents,
                 name: 'demo-skill',
-                path: '/tmp/demo-skill',
+                path: skillPath('demo-skill'),
                 scope: 'project',
               },
             ]),
@@ -4643,7 +4653,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-1',
+          releaseId: 'skills-2026-09-01.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -4660,6 +4670,7 @@ describe('skill management commands', () => {
       );
 
     try {
+      await prepareSkillCatalog();
       const report = await generateSkillInstallStatusReport({
         runCommand: async (_command, args) => {
           activeListCalls += 1;
@@ -4671,11 +4682,11 @@ describe('skill management commands', () => {
           return {
             stderr: '',
             stdout: args.includes('--global')
-              ? JSON.stringify([
+              ? serializeInstallerEntries([
                   {
-                    agents: ['Codex'],
+                    agents: fixtureAgents,
                     name: 'demo-skill',
-                    path: '/tmp/demo-skill',
+                    path: skillPath('demo-skill'),
                     scope: 'global',
                   },
                 ])
@@ -4686,7 +4697,7 @@ describe('skill management commands', () => {
 
       assert.equal(report.ok, false, 'matching names alone do not prove a release');
       assert.deepEqual(calls, [
-        ['-y', 'skills', 'list', '--json', '--global'],
+        [SKILLS_INSTALLER_ENTRY, 'list', '--json', '--global'],
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -4699,10 +4710,10 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           releaseNotes: {
             schemaVersion: 1,
-            releaseId: 'catalog-2',
+            releaseId: 'skills-2026-09-02.1',
             title: 'Fewer interruptions',
             summary: 'Routine recoverable errors no longer stop the task.',
             highlights: [
@@ -4726,24 +4737,25 @@ describe('skill management commands', () => {
       );
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         skillNames: ['demo-skill', 'retired-skill'],
       });
       const report = await generateSkillInstallStatusReport({
         runCommand: async () => ({
           stderr: '',
-          stdout: JSON.stringify([
+          stdout: serializeInstallerEntries([
             {
-              agents: ['Codex'],
+              agents: fixtureAgents,
               name: 'demo-skill',
-              path: '/tmp/demo-skill',
+              path: skillPath('demo-skill'),
               scope: 'global',
             },
             {
-              agents: ['Codex'],
+              agents: fixtureAgents,
               name: 'retired-skill',
-              path: '/tmp/retired-skill',
+              path: skillPath('retired-skill'),
               scope: 'global',
             },
           ]),
@@ -4751,7 +4763,7 @@ describe('skill management commands', () => {
       });
 
       assert.equal(report.ok, false);
-      assert.equal(report.managedSkillsReleaseId, 'catalog-1');
+      assert.equal(report.managedSkillsReleaseId, 'skills-2026-09-01.1');
       assert.deepEqual(report.retiredManagedSkills, ['retired-skill']);
     } finally {
       globalThis.fetch = originalFetch;
@@ -4764,10 +4776,10 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           releaseNotes: {
             schemaVersion: 1,
-            releaseId: 'catalog-2',
+            releaseId: 'skills-2026-09-02.1',
             title: 'Fewer interruptions',
             summary: 'Routine recoverable errors no longer stop the task.',
             highlights: [
@@ -4799,30 +4811,32 @@ describe('skill management commands', () => {
     const successMessages: string[] = [];
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         skillNames: ['demo-skill', 'retired-skill'],
       });
       const exitCode = await runPostPlusSkillUpdate({
         reportSuccess: (message) => successMessages.push(message),
         runCommand: async () => ({
           stderr: '',
-          stdout: JSON.stringify([
+          stdout: serializeInstallerEntries([
             {
-              agents: ['Codex'],
+              agents: fixtureAgents,
               name: 'demo-skill',
-              path: '/tmp/demo-skill',
+              path: skillPath('demo-skill'),
               scope: 'global',
             },
             {
-              agents: ['Codex'],
+              agents: fixtureAgents,
               name: 'new-skill',
-              path: '/tmp/new-skill',
+              path: skillPath('new-skill'),
               scope: 'global',
             },
           ]),
         }),
         runInteractiveCommand: async (_command, args) => {
+          completeFixtureInstall();
           calls.push(args);
           return 0;
         },
@@ -4830,7 +4844,7 @@ describe('skill management commands', () => {
       const config = await readLocalConfig();
 
       assert.equal(exitCode, 0);
-      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length + 1);
+      assert.equal(calls.length, 2);
       assert.deepEqual(
         calls[0],
         buildPostPlusSkillUpdateArgs(
@@ -4840,23 +4854,17 @@ describe('skill management commands', () => {
         ),
       );
       assert.deepEqual(
-        calls[POSTPLUS_SKILLS_AGENT_TARGETS.length],
+        calls[1],
         buildPostPlusSkillUninstallArgs(['retired-skill'], 'global'),
       );
       assert.deepEqual((await readManagedSkillBaseline())?.skillNames, [
         'demo-skill',
         'new-skill',
       ]);
-      assert.equal((await readManagedSkillBaseline())?.releaseId, 'catalog-2');
+      assert.equal((await readManagedSkillBaseline())?.releaseId, 'skills-2026-09-02.1');
       assert.equal(config?.cliVersion, CURRENT_CLI_VERSION);
       assert.deepEqual(successMessages, [
-        'PostPlus Skills updated: 2 current, 1 retired removed (global).',
-        [
-          'PostPlus update catalog-2: Fewer interruptions',
-          'Routine recoverable errors no longer stop the task.',
-          '- PostPlus retries once after a compatible update.',
-          '- Safe local usage errors can be corrected before submission.',
-        ].join('\n'),
+        'PostPlus Skills updated: 2 current, 1 retired removed (global). Skills are ready on disk. Start a new agent session to use the verified skills.',
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -4878,37 +4886,31 @@ describe('skill management commands', () => {
     const installCalls: string[][] = [];
 
     try {
+      await prepareSkillCatalog();
       const exitCode = await runPostPlusSkillUpdate({
         reportSuccess: (message) => successMessages.push(message),
         runCommand: async () => ({
           stderr: '',
-          stdout: JSON.stringify([
+          stdout: serializeInstallerEntries([
             {
-              agents: ['Codex'],
+              agents: fixtureAgents,
               name: 'demo-skill',
-              path: '/tmp/demo-skill',
+              path: skillPath('demo-skill'),
               scope: 'global',
             },
           ]),
         }),
         runInteractiveCommand: async (_command, args) => {
+          completeFixtureInstall();
           installCalls.push(args);
           return 0;
         },
       });
 
       assert.equal(exitCode, 0);
-      assert.equal(installCalls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length);
+      assert.equal(installCalls.length, 1);
       assert.deepEqual(successMessages, [
-        [
-          'PostPlus is ready: 1 official Skills installed and verified (global).',
-          '',
-          'Marketing should not begin with a maze of tools. It should begin with an ambition.',
-          '',
-          'PostPlus gives individuals and lean teams the operating power of a much larger marketing organization.',
-          '',
-          'Start a new agent session to use them; run `postplus list` to browse available capabilities.',
-        ].join('\n'),
+        'PostPlus is ready: 1 official Skills installed and verified (global). Skills are ready on disk. Start a new agent session to use the verified skills.',
       ]);
       assert.doesNotMatch(successMessages.join('\n'), /PostPlus update/u);
     } finally {
@@ -4916,9 +4918,37 @@ describe('skill management commands', () => {
     }
   });
 
+  it('captures installer output and preserves its failure as a diagnostic cause', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => createPublicCatalogResponse();
+    try {
+    await prepareSkillCatalog();
+    const installerError = Object.assign(new Error('Installer exited with code 7.'), {
+      exitCode: 7, stdout: 'installer details', stderr: 'specific failure',
+    });
+    const messages: string[] = [];
+    await assert.rejects(runPostPlusSkillUpdate({
+      runCommand: async () => ({ stdout: '[]', stderr: '' }),
+      reportSuccess: (message) => messages.push(message),
+      runInteractiveCommand: async (_command, _args, options) => {
+        assert.equal(options?.stdout, 'capture');
+        assert.equal(options?.stdin, 'ignore');
+        throw installerError;
+      },
+    }), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.cause, installerError);
+      assert.doesNotMatch(error.message, /installer details|specific failure/);
+      return true;
+    });
+    assert.deepEqual(messages, []);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   it('verifies an already-current setup without reinstalling every agent target', async () => {
+    completeFixtureInstall();
     await writeManagedSkillBaseline({
-      releaseId: 'catalog-1',
+      releaseId: 'skills-2026-09-01.1',
       skillNames: ['demo-skill'],
     });
     const originalFetch = globalThis.fetch;
@@ -4927,20 +4957,22 @@ describe('skill management commands', () => {
     let installCalled = false;
 
     try {
+      await prepareSkillCatalog();
       const exitCode = await runPostPlusSkillUpdate({
         reportSuccess: (message) => successMessages.push(message),
         runCommand: async () => ({
           stderr: '',
-          stdout: JSON.stringify([
+          stdout: serializeInstallerEntries([
             {
-              agents: ['Codex'],
+              agents: fixtureAgents,
               name: 'demo-skill',
-              path: '/tmp/demo-skill',
+              path: skillPath('demo-skill'),
               scope: 'global',
             },
           ]),
         }),
         runInteractiveCommand: async () => {
+          completeFixtureInstall();
           installCalled = true;
           return 0;
         },
@@ -4958,7 +4990,7 @@ describe('skill management commands', () => {
 
   it('keeps implicit recovery output to one official update summary', async () => {
     await writeManagedSkillBaseline({
-      releaseId: 'catalog-1',
+      releaseId: 'skills-2026-09-01.1',
       skillNames: ['demo-skill'],
     });
     const originalFetch = globalThis.fetch;
@@ -4966,10 +4998,10 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           releaseNotes: {
             schemaVersion: 1,
-            releaseId: 'catalog-2',
+            releaseId: 'skills-2026-09-02.1',
             title: 'Fewer interruptions',
             summary: 'Routine recoverable errors no longer stop the task.',
             highlights: ['PostPlus retries once after a compatible update.'],
@@ -4991,28 +5023,29 @@ describe('skill management commands', () => {
     const successMessages: string[] = [];
 
     try {
+      await prepareSkillCatalog();
       const exitCode = await runPostPlusSkillUpdate(
         {
           reportSuccess: (message) => successMessages.push(message),
           runCommand: async () => ({
             stderr: '',
-            stdout: JSON.stringify([
+            stdout: serializeInstallerEntries([
               {
-                agents: ['Codex'],
+                agents: fixtureAgents,
                 name: 'demo-skill',
-                path: '/tmp/demo-skill',
+                path: skillPath('demo-skill'),
                 scope: 'global',
               },
             ]),
           }),
-          runInteractiveCommand: async () => 0,
+          runInteractiveCommand: async () => { completeFixtureInstall(); return 0; },
         },
         { messageMode: 'implicit', scope: 'global' },
       );
 
       assert.equal(exitCode, 0);
       assert.deepEqual(successMessages, [
-        'PostPlus Skills updated: Fewer interruptions. Routine recoverable errors no longer stop the task.',
+        'PostPlus Skills updated: 1 current, 0 retired removed (global). Skills are ready on disk. Start a new agent session to use the verified skills.',
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -5021,7 +5054,7 @@ describe('skill management commands', () => {
 
   it('repairs a current baseline only after typed installation drift', async () => {
     await writeManagedSkillBaseline({
-      releaseId: 'catalog-1',
+      releaseId: 'skills-2026-09-01.1',
       skillNames: ['demo-skill'],
     });
     const originalFetch = globalThis.fetch;
@@ -5030,30 +5063,32 @@ describe('skill management commands', () => {
     let installs = 0;
     const messages: string[] = [];
     try {
+      await prepareSkillCatalog();
       const exitCode = await runPostPlusSkillUpdate({
         reportSuccess: (message) => messages.push(message),
         runCommand: async () => ({
           stderr: '',
-          stdout: JSON.stringify(
+          stdout: serializeInstallerEntries(
             ++inspections === 1
               ? []
               : [
                   {
-                    agents: ['Codex'],
+                    agents: fixtureAgents,
                     name: 'demo-skill',
-                    path: '/tmp/demo-skill',
+                    path: skillPath('demo-skill'),
                     scope: 'global',
                   },
                 ],
           ),
         }),
         runInteractiveCommand: async () => {
+          completeFixtureInstall();
           installs++;
           return 0;
         },
       });
       assert.equal(exitCode, 0);
-      assert.equal(installs, POSTPLUS_SKILLS_AGENT_TARGETS.length);
+      assert.equal(installs, 1);
       assert.match(messages.join('\n'), /repaired and verified/u);
     } finally {
       globalThis.fetch = originalFetch;
@@ -5062,7 +5097,7 @@ describe('skill management commands', () => {
 
   it('does not infer repair permission from an unrelated error with matching English text', async () => {
     await writeManagedSkillBaseline({
-      releaseId: 'catalog-1',
+      releaseId: 'skills-2026-09-01.1',
       skillNames: ['demo-skill'],
     });
     const originalFetch = globalThis.fetch;
@@ -5072,12 +5107,14 @@ describe('skill management commands', () => {
     );
     let installs = 0;
     try {
+      await prepareSkillCatalog();
       await assert.rejects(
         runPostPlusSkillUpdate({
           runCommand: async () => {
             throw failure;
           },
           runInteractiveCommand: async () => {
+          completeFixtureInstall();
             installs++;
             return 0;
           },
@@ -5096,7 +5133,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -5113,37 +5150,39 @@ describe('skill management commands', () => {
       );
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         skillNames: ['demo-skill', 'retired-skill'],
+        contentHashes: { 'retired-skill': await hashSkillDirectory(skillPath('retired-skill')) },
       });
 
       await assert.rejects(
         runPostPlusSkillUpdate({
           runCommand: async () => ({
             stderr: '',
-            stdout: JSON.stringify([
+            stdout: serializeInstallerEntries([
               {
-                agents: ['Codex', 'Gemini CLI'],
+                agents: [...fixtureAgents, 'Gemini CLI'],
                 name: 'demo-skill',
-                path: '/tmp/demo-skill',
+                path: skillPath('demo-skill'),
                 scope: 'global',
               },
               {
                 agents: ['Gemini CLI'],
                 name: 'retired-skill',
-                path: '/tmp/retired-skill',
+                path: skillPath('retired-skill'),
                 scope: 'global',
               },
             ]),
           }),
-          runInteractiveCommand: async () => 0,
+          runInteractiveCommand: async () => { completeFixtureInstall(); return 0; },
         }),
         /did not converge.*still present: retired-skill.*baseline was not changed/i,
       );
 
       const config = await readLocalConfig();
-      assert.equal((await readManagedSkillBaseline())?.releaseId, 'catalog-1');
+      assert.equal((await readManagedSkillBaseline())?.releaseId, 'skills-2026-09-01.1');
       assert.deepEqual((await readManagedSkillBaseline())?.skillNames, [
         'demo-skill',
         'retired-skill',
@@ -5170,7 +5209,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -5194,8 +5233,9 @@ describe('skill management commands', () => {
     let installCalls = 0;
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         skillNames: ['demo-skill'],
       });
       await writeGlobalSkillsInstallerLock({
@@ -5220,9 +5260,9 @@ describe('skill management commands', () => {
         reportSuccess: (message) => messages.push(message),
         runCommand: async () => ({
           stderr: '',
-          stdout: JSON.stringify([
+          stdout: serializeInstallerEntries([
             {
-              agents: ['Codex'],
+              agents: fixtureAgents,
               name: 'demo-skill',
               path: installedSkillDir,
               scope: 'global',
@@ -5230,6 +5270,7 @@ describe('skill management commands', () => {
           ]),
         }),
         runInteractiveCommand: async () => {
+          completeFixtureInstall();
           installCalls += 1;
           await writeFile(
             resolve(installedSkillDir, 'SKILL.md'),
@@ -5241,7 +5282,7 @@ describe('skill management commands', () => {
       });
 
       assert.equal(exitCode, 0);
-      assert.equal(installCalls, POSTPLUS_SKILLS_AGENT_TARGETS.length);
+      assert.equal(installCalls, 1);
       assert.deepEqual(prompts, [
         {
           action: 'update',
@@ -5249,7 +5290,8 @@ describe('skill management commands', () => {
           skillNames: ['demo-skill'],
         },
       ]);
-      assert.match(messages[0] ?? '', /Backed up 1 locally modified/);
+      assert.equal(messages.length, 1);
+      assert.match(messages[0] ?? '', /Backup saved:/);
       const backupRoot = resolve(
         process.env.POSTPLUS_CONFIG_DIR ?? '',
         'skill-backups',
@@ -5286,16 +5328,16 @@ describe('skill management commands', () => {
         isInteractive: () => true,
         runCommand: async () => ({
           stderr: '',
-          stdout: JSON.stringify([
+          stdout: serializeInstallerEntries([
             {
-              agents: ['Codex'],
+              agents: fixtureAgents,
               name: 'demo-skill',
               path: installedSkillDir,
               scope: 'global',
             },
           ]),
         }),
-        runInteractiveCommand: async () => 0,
+        runInteractiveCommand: async () => { completeFixtureInstall(); return 0; },
       });
       assert.equal(repeatedExitCode, 0);
       assert.equal(repeatedPromptCount, 0);
@@ -5328,7 +5370,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -5346,6 +5388,7 @@ describe('skill management commands', () => {
     let promptCount = 0;
 
     try {
+      await prepareSkillCatalog();
       await writeGlobalSkillsInstallerLock({
         'demo-skill': {
           source: 'PostPlusAI/postplus-skills',
@@ -5367,22 +5410,22 @@ describe('skill management commands', () => {
         isInteractive: () => true,
         runCommand: async () => ({
           stderr: '',
-          stdout: JSON.stringify([
+          stdout: serializeInstallerEntries([
             {
-              agents: ['Codex'],
+              agents: fixtureAgents,
               name: 'demo-skill',
               path: globalSkillDir,
               scope: 'global',
             },
             {
-              agents: ['Codex'],
+              agents: fixtureAgents,
               name: 'demo-skill',
               path: projectSkillDir,
               scope: 'project',
             },
           ]),
         }),
-        runInteractiveCommand: async () => 0,
+        runInteractiveCommand: async () => { completeFixtureInstall(); return 0; },
       });
 
       assert.equal(exitCode, 0);
@@ -5407,7 +5450,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -5425,8 +5468,9 @@ describe('skill management commands', () => {
     let mutationCalls = 0;
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         skillNames: ['demo-skill'],
       });
       await writeGlobalSkillsInstallerLock({
@@ -5447,9 +5491,9 @@ describe('skill management commands', () => {
           isInteractive: () => false,
           runCommand: async () => ({
             stderr: '',
-            stdout: JSON.stringify([
+            stdout: serializeInstallerEntries([
               {
-                agents: ['Codex'],
+                agents: fixtureAgents,
                 name: 'demo-skill',
                 path: installedSkillDir,
                 scope: 'global',
@@ -5457,17 +5501,18 @@ describe('skill management commands', () => {
             ]),
           }),
           runInteractiveCommand: async () => {
+          completeFixtureInstall();
             mutationCalls += 1;
             return 0;
           },
         }),
-        /require confirmation.*interactive terminal.*baseline was not changed/i,
+        { code: 'postplus_skills_requires_human' },
       );
 
       assert.equal(mutationCalls, 0);
       assert.equal(
         (await readManagedSkillBaseline())?.releaseId,
-        'catalog-1',
+        'skills-2026-09-01.1',
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -5480,7 +5525,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -5502,8 +5547,9 @@ describe('skill management commands', () => {
       );
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         skillNames: ['demo-skill'],
       });
 
@@ -5511,23 +5557,23 @@ describe('skill management commands', () => {
         runPostPlusSkillUpdate({
           runCommand: async () => ({
             stderr: '',
-            stdout: JSON.stringify([
+            stdout: serializeInstallerEntries([
               {
-                agents: ['Codex'],
+                agents: fixtureAgents,
                 name: 'demo-skill',
-                path: '/tmp/demo-skill',
+                path: skillPath('demo-skill'),
                 scope: 'global',
               },
             ]),
           }),
-          runInteractiveCommand: async () => 0,
+          runInteractiveCommand: async () => { completeFixtureInstall(); return 0; },
         }),
         /did not converge.*missing: new-skill.*baseline was not changed/i,
       );
 
       assert.equal(
         (await readManagedSkillBaseline())?.releaseId,
-        'catalog-1',
+        'skills-2026-09-01.1',
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -5540,7 +5586,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -5558,8 +5604,9 @@ describe('skill management commands', () => {
     const calls: string[][] = [];
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-2',
+        releaseId: 'skills-2026-09-02.1',
         skillNames: ['demo-skill'],
       });
       const currentLock = {
@@ -5588,16 +5635,17 @@ describe('skill management commands', () => {
       const exitCode = await runPostPlusSkillUpdate({
         runCommand: async () => ({
           stderr: '',
-          stdout: JSON.stringify([
+          stdout: serializeInstallerEntries([
             {
-              agents: ['Codex'],
+              agents: fixtureAgents,
               name: 'demo-skill',
-              path: '/tmp/demo-skill',
+              path: skillPath('demo-skill'),
               scope: 'global',
             },
           ]),
         }),
         runInteractiveCommand: async (_command, args) => {
+          completeFixtureInstall();
           calls.push(args);
           if (args.includes('remove')) {
             const { ['retired-skill']: _retired, ...remaining } = currentLock;
@@ -5608,9 +5656,9 @@ describe('skill management commands', () => {
       });
 
       assert.equal(exitCode, 0);
-      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length + 1);
+      assert.equal(calls.length, 2);
       assert.deepEqual(
-        calls[POSTPLUS_SKILLS_AGENT_TARGETS.length],
+        calls[1],
         buildPostPlusSkillUninstallArgs(['retired-skill'], 'global'),
       );
       assert.doesNotMatch(calls.flat().join(' '), /local-user-skill/);
@@ -5626,7 +5674,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -5644,20 +5692,22 @@ describe('skill management commands', () => {
     const calls: string[][] = [];
 
     try {
+      await prepareSkillCatalog();
       const exitCode = await runPostPlusSkillUpdate(
         {
           runCommand: async () => ({
             stderr: '',
-            stdout: JSON.stringify([
+            stdout: serializeInstallerEntries([
               {
-                agents: ['Codex'],
+                agents: fixtureAgents,
                 name: 'demo-skill',
-                path: '/tmp/demo-skill',
+                path: skillPath('demo-skill'),
                 scope: 'project',
               },
             ]),
           }),
           runInteractiveCommand: async (_command, args) => {
+          completeFixtureInstall();
             calls.push(args);
             return 0;
           },
@@ -5666,7 +5716,7 @@ describe('skill management commands', () => {
       );
 
       assert.equal(exitCode, 0);
-      assert.equal(calls.length, POSTPLUS_SKILLS_AGENT_TARGETS.length);
+      assert.equal(calls.length, 1);
       assert.deepEqual(
         calls[0],
         buildPostPlusSkillUpdateArgs(
@@ -5687,7 +5737,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -5704,21 +5754,22 @@ describe('skill management commands', () => {
       );
 
     try {
+      await prepareSkillCatalog();
       await assert.rejects(
         runPostPlusSkillUpdate(
           {
             runCommand: async () => ({
               stderr: '',
-              stdout: JSON.stringify([
+              stdout: serializeInstallerEntries([
                 {
-                  agents: ['Codex'],
+                  agents: fixtureAgents,
                   name: 'demo-skill',
-                  path: '/tmp/global-demo-skill',
+                  path: skillPath('global-demo-skill'),
                   scope: 'global',
                 },
               ]),
             }),
-            runInteractiveCommand: async () => 0,
+            runInteractiveCommand: async () => { completeFixtureInstall(); return 0; },
           },
           { scope: 'current-directory' },
         ),
@@ -5730,12 +5781,13 @@ describe('skill management commands', () => {
   });
 
   it('verifies an already recorded installation without rewriting its baseline', async () => {
+    completeFixtureInstall();
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -5758,24 +5810,25 @@ describe('skill management commands', () => {
     const calls: string[][] = [];
 
     try {
-      await writeManagedSkillBaseline({ releaseId: 'catalog-2', skillNames: ['demo-skill', 'new-skill'] });
+      await prepareSkillCatalog();
+      await writeManagedSkillBaseline({ releaseId: 'skills-2026-09-02.1', skillNames: ['demo-skill', 'new-skill'] });
       const report = await runPostPlusSkillVerify({
         runCommand: async (_command, args) => {
           calls.push(args);
           return {
             stderr: '',
             stdout: args.includes('--global')
-              ? JSON.stringify([
+              ? serializeInstallerEntries([
                   {
-                    agents: ['Codex'],
+                    agents: fixtureAgents,
                     name: 'demo-skill',
-                    path: '/tmp/demo-skill',
+                    path: skillPath('demo-skill'),
                     scope: 'global',
                   },
                   {
-                    agents: ['Codex'],
+                    agents: fixtureAgents,
                     name: 'new-skill',
-                    path: '/tmp/new-skill',
+                    path: skillPath('new-skill'),
                     scope: 'global',
                   },
                 ])
@@ -5787,17 +5840,17 @@ describe('skill management commands', () => {
 
       assert.equal(report.ok, true);
       assert.equal(report.baselineUpdated, false);
-      assert.equal(report.previousManagedSkillsReleaseId, 'catalog-2');
-      assert.equal(report.verifiedSkillsReleaseId, 'catalog-2');
+      assert.equal(report.previousManagedSkillsReleaseId, 'skills-2026-09-02.1');
+      assert.equal(report.verifiedSkillsReleaseId, 'skills-2026-09-02.1');
       assert.deepEqual(calls, [
-        ['-y', 'skills', 'list', '--json', '--global'],
+        [SKILLS_INSTALLER_ENTRY, 'list', '--json', '--global'],
       ]);
       assert.deepEqual((await readManagedSkillBaseline())?.skillNames, [
         'demo-skill',
         'new-skill',
       ]);
-      assert.equal((await readManagedSkillBaseline())?.releaseId, 'catalog-2');
-      assert.match(formatSkillBaselineVerifyReport(report), /Verified baseline: catalog-2/);
+      assert.equal((await readManagedSkillBaseline())?.releaseId, 'skills-2026-09-02.1');
+      assert.match(formatSkillBaselineVerifyReport(report), /Verified baseline: skills-2026-09-02.1/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -5809,7 +5862,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -5826,8 +5879,9 @@ describe('skill management commands', () => {
       );
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-2',
+        releaseId: 'skills-2026-09-02.1',
         skillNames: ['demo-skill'],
       });
       await writeGlobalSkillsInstallerLock({
@@ -5851,17 +5905,17 @@ describe('skill management commands', () => {
         runCommand: async (_command, args) => ({
           stderr: '',
           stdout: args.includes('--global')
-            ? JSON.stringify([
+            ? serializeInstallerEntries([
                 {
-                  agents: ['Codex'],
+                  agents: fixtureAgents,
                   name: 'demo-skill',
-                  path: '/tmp/demo-skill',
+                  path: skillPath('demo-skill'),
                   scope: 'global',
                 },
                 {
-                  agents: ['Codex'],
+                  agents: fixtureAgents,
                   name: 'retired-skill',
-                  path: '/tmp/retired-skill',
+                  path: skillPath('retired-skill'),
                   scope: 'global',
                 },
               ])
@@ -5873,7 +5927,7 @@ describe('skill management commands', () => {
       assert.equal(report.ok, false);
       assert.equal(report.baselineUpdated, false);
       assert.deepEqual(report.retiredManagedSkills, ['retired-skill']);
-      assert.equal((await readManagedSkillBaseline())?.releaseId, 'catalog-2');
+      assert.equal((await readManagedSkillBaseline())?.releaseId, 'skills-2026-09-02.1');
       assert.match(
         formatSkillBaselineVerifyReport(report),
         /Retired managed skills: retired-skill/,
@@ -5884,12 +5938,13 @@ describe('skill management commands', () => {
   });
 
   it('does not report a project skill as retired from a global PostPlus installer lock entry', async () => {
+    completeFixtureInstall();
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -5906,8 +5961,9 @@ describe('skill management commands', () => {
       );
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-2',
+        releaseId: 'skills-2026-09-02.1',
         skillNames: ['demo-skill'],
       });
       await writeGlobalSkillsInstallerLock({
@@ -5924,19 +5980,19 @@ describe('skill management commands', () => {
         runCommand: async (_command, args) => ({
           stderr: '',
           stdout: args.includes('--global')
-            ? JSON.stringify([
+            ? serializeInstallerEntries([
                 {
-                  agents: ['Codex'],
+                  agents: fixtureAgents,
                   name: 'demo-skill',
-                  path: '/tmp/demo-skill',
+                  path: skillPath('demo-skill'),
                   scope: 'global',
                 },
               ])
-            : JSON.stringify([
+            : serializeInstallerEntries([
                 {
-                  agents: ['Codex'],
+                  agents: fixtureAgents,
                   name: 'retired-skill',
-                  path: '/tmp/project-retired-skill',
+                  path: skillPath('project-retired-skill'),
                   scope: 'project',
                 },
               ]),
@@ -5951,12 +6007,13 @@ describe('skill management commands', () => {
   });
 
   it('does not record the managed baseline when verification finds missing skills', async () => {
+    completeFixtureInstall();
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -5978,18 +6035,19 @@ describe('skill management commands', () => {
       );
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         skillNames: ['demo-skill'],
       });
       const report = await runPostPlusSkillVerify({
         runCommand: async () => ({
           stderr: '',
-          stdout: JSON.stringify([
+          stdout: serializeInstallerEntries([
             {
-              agents: ['Codex'],
+              agents: fixtureAgents,
               name: 'demo-skill',
-              path: '/tmp/demo-skill',
+              path: skillPath('demo-skill'),
               scope: 'global',
             },
           ]),
@@ -5999,9 +6057,9 @@ describe('skill management commands', () => {
 
       assert.equal(report.ok, false);
       assert.equal(report.baselineUpdated, false);
-      assert.equal(report.previousManagedSkillsReleaseId, 'catalog-1');
+      assert.equal(report.previousManagedSkillsReleaseId, 'skills-2026-09-01.1');
       assert.deepEqual(report.missingSkills, ['missing-skill']);
-      assert.equal((await readManagedSkillBaseline())?.releaseId, 'catalog-1');
+      assert.equal((await readManagedSkillBaseline())?.releaseId, 'skills-2026-09-01.1');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -6013,7 +6071,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -6031,13 +6089,15 @@ describe('skill management commands', () => {
     const calls: string[][] = [];
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         skillNames: ['demo-skill', 'retired-skill'],
       });
       const exitCode = await runPostPlusSkillUninstall({
         runCommand: async () => ({ stderr: '', stdout: '[]' }),
         runInteractiveCommand: async (_command, args) => {
+          completeFixtureInstall();
           calls.push(args);
           return 0;
         },
@@ -6066,7 +6126,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -6084,14 +6144,16 @@ describe('skill management commands', () => {
     const calls: string[][] = [];
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-1',
+        releaseId: 'skills-2026-09-01.1',
         skillNames: ['retired-skill'],
       });
       const exitCode = await runPostPlusSkillUninstall(
         {
           runCommand: async () => ({ stderr: '', stdout: '[]' }),
           runInteractiveCommand: async (_command, args) => {
+          completeFixtureInstall();
             calls.push(args);
             return 0;
           },
@@ -6121,7 +6183,7 @@ describe('skill management commands', () => {
       new Response(
         JSON.stringify({
           schemaVersion: 2,
-          releaseId: 'catalog-2',
+          releaseId: 'skills-2026-09-02.1',
           source: 'PostPlusAI/postplus-skills',
           skills: [
             {
@@ -6138,8 +6200,9 @@ describe('skill management commands', () => {
       );
 
     try {
+      await prepareSkillCatalog();
       await writeManagedSkillBaseline({
-        releaseId: 'catalog-2',
+        releaseId: 'skills-2026-09-02.1',
         skillNames: ['demo-skill'],
       });
 
@@ -6147,23 +6210,23 @@ describe('skill management commands', () => {
         runPostPlusSkillUninstall({
           runCommand: async () => ({
             stderr: '',
-            stdout: JSON.stringify([
+            stdout: serializeInstallerEntries([
               {
                 agents: ['Gemini CLI'],
                 name: 'demo-skill',
-                path: '/tmp/demo-skill',
+                path: skillPath('demo-skill'),
                 scope: 'global',
               },
             ]),
           }),
-          runInteractiveCommand: async () => 0,
+          runInteractiveCommand: async () => { completeFixtureInstall(); return 0; },
         }),
         /uninstall did not converge.*still present: demo-skill.*baseline was not changed/i,
       );
 
       assert.equal(
         (await readManagedSkillBaseline())?.releaseId,
-        'catalog-2',
+        'skills-2026-09-02.1',
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -6639,14 +6702,14 @@ describe('hosted domain commands', () => {
       ]),
       (error) => {
         const execError = error as Error & {
-          stderr?: string;
+          stdout?: string;
         };
 
         assert.match(
-          execError.stderr ?? '',
+          JSON.parse(execError.stdout ?? '{}').error.message,
           /Unknown media endpoint video-missing-provider/u,
         );
-        assert.match(execError.stderr ?? '', /video-seedance-2-text/u);
+        assert.equal(JSON.parse(execError.stdout ?? '{}').error.action, 'Run postplus media --help.');
         return true;
       },
     );
@@ -6666,14 +6729,14 @@ describe('hosted domain commands', () => {
       ]),
       (error) => {
         const execError = error as Error & {
-          stderr?: string;
+          stdout?: string;
         };
 
         assert.match(
-          execError.stderr ?? '',
+          JSON.parse(execError.stdout ?? '{}').error.message,
           /Unknown research route instagram-missing-provider/u,
         );
-        assert.match(execError.stderr ?? '', /youtube-channel-summary/u);
+        assert.equal(JSON.parse(execError.stdout ?? '{}').error.action, 'Run postplus research --help.');
         return true;
       },
     );
@@ -9093,7 +9156,8 @@ globalThis.fetch=async(url,init)=>{
               stderr: string;
             };
             assert.equal(failure.code, 1);
-            assert.match(failure.stderr, /ACK lost/u);
+            assert.match(failure.stderr, /PostPlus could not reach the requested service/u);
+            assert.match(failure.stderr, /Check the same operation; do not resubmit/u);
             return true;
           },
         );
@@ -15153,14 +15217,23 @@ describe('hosted media transfer', () => {
         range: headers.get('range'),
       });
       if (requestCount === 1) {
+        let delivered = false;
         const body = new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(mediaBytes.subarray(0, 4));
-            setTimeout(
-              () =>
-                controller.error(new Error('simulated interrupted download')),
-              5,
-            );
+          async pull(controller) {
+            if (!delivered) {
+              delivered = true;
+              controller.enqueue(mediaBytes.subarray(0, 4));
+              return;
+            }
+            // Inject interruption only after the intended four bytes are on
+            // disk. A 5ms timer raced filesystem writes under parallel load.
+            const partial = resolve(downloadDir, '.clip.bin.postplus-download.part');
+            const deadline = Date.now() + 5_000;
+            while ((await stat(partial).catch(() => null))?.size !== 4) {
+              assert.ok(Date.now() < deadline, 'Fixture partial bytes must reach disk');
+              await new Promise((resolve) => setTimeout(resolve, 5));
+            }
+            controller.error(new Error('simulated interrupted download'));
           },
         });
         return new Response(body, {

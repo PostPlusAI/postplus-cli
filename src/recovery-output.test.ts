@@ -1,14 +1,20 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import test from 'node:test';
 
 // Exercise real inherited file descriptors in a child process: intercepting
 // process.stdout.write cannot catch an installer's inherited stdout.
-async function recover(options: { updateExit?: number; restart?: boolean } = {}) {
+async function recover(options: { updateExit?: number; restart?: boolean; malformed?: boolean; human?: boolean; newSession?: boolean } = {}) {
   const source = `
     import { runPostPlusClientUpgradeRecovery } from './src/update-check.ts';
     import { runInteractiveCommand } from './src/command-runner.ts';
     const originalArgs = ['media', 'schema', '--json', 'two words', '& literal'];
+    import { writeFailure } from './src/failure-contract.ts';
+    try {
     const result = await runPostPlusClientUpgradeRecovery({
       originalArgs,
       payload: { code: 'postplus_client_upgrade_required', compatibility: {
@@ -18,12 +24,13 @@ async function recover(options: { updateExit?: number; restart?: boolean } = {})
       environment: { ...process.env, POSTPLUS_CLIENT_RECOVERY_ATTEMPT: '' },
       runInteractiveCommand: async (command, args, options) => {
         const script = args[0] === 'update'
-          ? 'console.log("installer stdout"); console.error("installer stderr"); process.exitCode = ${options.updateExit ?? 0};'
+          ? ${JSON.stringify(`console.log(${JSON.stringify(options.malformed ? 'broken JSON' : JSON.stringify((options.updateExit ?? 0) === 0 ? {ok:true, session:{newSessionRequired:options.newSession === true,action:options.newSession ? 'Start a new agent session before using updated skills.' : null}} : {ok:false,error:{code:options.human?'postplus_requires_human':'postplus_cli_update_failed',stage:'npm-install',service:'npm',correlationId:'fixture-id',retryable:false,message:'Update stopped.',action:'Review the installation.',cause:[{name:'Error',code:'EACCES',message:'npm permission denied'}]}}))}); console.error('installer stderr'); process.exitCode = ${options.updateExit ?? 0};`)}
           : 'process.stdout.write(JSON.stringify({ok:true,args:process.argv.slice(1)}));';
         return runInteractiveCommand(process.execPath, ['-e', script, '--', ...args], options);
       }
     });
     process.exitCode = result.exitCode;
+    } catch (error) { writeFailure(error, {json:true}); process.exitCode=1; }
   `;
   return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
     const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', source], {
@@ -46,17 +53,29 @@ test('automatic recovery keeps the complete original JSON stdout parseable', asy
     args: ['media', 'schema', '--json', 'two words', '& literal'],
   });
   assert.match(result.stderr, /PostPlus is updating/);
-  assert.match(result.stderr, /installer stdout/);
-  assert.match(result.stderr, /installer stderr/);
+  assert.doesNotMatch(result.stderr, /installer (stdout|stderr)|Updated skills need a new agent session/);
   t.diagnostic(`exit=${result.code}; stdout=${JSON.stringify(result.stdout)}`);
 });
 
-test('failed maintenance leaves stdout empty and preserves its exit code', async (t) => {
+test('failed maintenance preserves structured npm failure and original cause', async () => {
   const result = await recover({ updateExit: 23 });
-  assert.equal(result.code, 23);
-  assert.equal(result.stdout, '');
-  assert.match(result.stderr, /automatic update failed with exit code 23/);
-  t.diagnostic(`exit=${result.code}; stdout=${JSON.stringify(result.stdout)}`);
+  assert.equal(result.code, 1);
+  const fact = JSON.parse(result.stdout).error;
+  assert.equal(fact.code, 'postplus_cli_update_failed');
+  assert.equal(fact.stage, 'npm-install');
+  assert.equal(fact.correlationId, 'fixture-id');
+  assert.ok(fact.cause.some((item: {code: string}) => item.code === 'EACCES'));
+  assert.doesNotMatch(result.stderr, /installer stderr/);
+});
+test('requires-human remains actionable without replay', async () => {
+  const result = await recover({updateExit:1, human:true});
+  assert.equal(JSON.parse(result.stdout).error.code, 'postplus_requires_human');
+  assert.equal(result.code, 1);
+});
+test('malformed update JSON fails closed without replay', async () => {
+  const result = await recover({updateExit:1, malformed:true});
+  assert.equal(JSON.parse(result.stdout).error.code, 'postplus_update_response_invalid');
+  assert.equal(result.code, 1);
 });
 
 test('restart-required maintenance leaves stdout empty without replay', async (t) => {
@@ -65,4 +84,28 @@ test('restart-required maintenance leaves stdout empty without replay', async (t
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /requires a new agent session/);
   t.diagnostic(`exit=${result.code}; stdout=${JSON.stringify(result.stdout)}`);
+});
+
+
+test('successful skills update advises a new session once without blocking authorized replay', async () => {
+  const result = await recover({newSession:true});
+  assert.equal(result.code,0);
+  assert.equal(JSON.parse(result.stdout).ok,true);
+  assert.equal(result.stderr.match(/Updated skills need a new agent session/g)?.length,1);
+  assert.match(result.stderr,/Start a new agent session before using updated skills/);
+});
+test('malformed successful update fails closed without replay', async () => {
+  const result = await recover({malformed:true});
+  assert.equal(result.code,1);
+  assert.equal(JSON.parse(result.stdout).error.code,'postplus_update_response_invalid');
+});
+
+
+test('real CLI-only update continuation emits a valid success envelope', async (t) => {
+  const config = await mkdtemp(join(tmpdir(), 'postplus-cli-only-json-'));
+  t.after(() => rm(config, {recursive:true,force:true}));
+  const result = await promisify(execFile)(process.execPath, ['--import','tsx','src/index.ts','update','--json'], {
+    env: {...process.env, POSTPLUS_CONFIG_DIR:config, POSTPLUS_CLIENT_RECOVERY_COMPONENTS:'cli', POSTPLUS_CLIENT_RECOVERY_ATTEMPT:'1', POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION:'0.0.0'},
+  });
+  assert.deepEqual(JSON.parse(result.stdout), {ok:true,command:'update',components:['cli']});
 });

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +8,7 @@ import test from 'node:test';
 
 import {
   CommandInterruptedError,
+  CommandTimeoutError,
   runCommand,
   runInteractiveCommand,
 } from './command-runner.js';
@@ -55,7 +58,9 @@ test('captured runner drains stderr and includes the failing exit code', async (
     ]),
     (error: Error) =>
       error.message.startsWith('Command failed (7):') &&
-      error.message.endsWith(tail),
+      error.message.endsWith(tail) &&
+      error.message.includes('[stderr truncated; last 65536 bytes]') &&
+      error.message.length < 66_000,
   );
 });
 
@@ -178,3 +183,88 @@ test(
     }
   },
 );
+
+
+test('interactive timeout is typed and bounded even when the child ignores SIGTERM', async () => {
+  await assert.rejects(runInteractiveCommand(process.execPath, ['-e',
+    'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);'],
+    { stdin: 'ignore', timeoutMs: 300 }),
+    (error: unknown) => error instanceof CommandTimeoutError && error.timeoutMs === 300);
+});
+
+test('interactive ignored stdin reaches EOF and stdout can be routed to stderr', async () => {
+  const runner = new URL('./command-runner.ts', import.meta.url).href;
+  const { stdout, stderr } = await promisify(execFile)(process.execPath,
+    ['--import', 'tsx', '--input-type=module', '-e', `
+      import { runInteractiveCommand } from ${JSON.stringify(runner)};
+      const code = await runInteractiveCommand(process.execPath, ['-e',
+        'process.stdin.resume(); process.stdin.on("end", () => { console.log("child stdout"); console.error("child stderr"); });'],
+        { stdin: 'ignore', stdout: 'stderr', timeoutMs: 2000 });
+      console.log(JSON.stringify({code}));
+    `]);
+  assert.deepEqual(JSON.parse(stdout), { code: 0 });
+  assert.match(stderr, /child stdout/);
+  assert.match(stderr, /child stderr/);
+});
+
+// Real POSIX signals/process groups cannot be established by mocking platform.
+test('parent interruption is typed and stops a detached command group', {
+  skip: process.platform === 'win32',
+}, async () => {
+  const runner = new URL('./command-runner.ts', import.meta.url).href;
+  const { stdout } = await promisify(execFile)(process.execPath,
+    ['--import', 'tsx', '--input-type=module', '-e', `
+      import { runInteractiveCommand, CommandInterruptedError } from ${JSON.stringify(runner)};
+      setTimeout(() => process.kill(process.pid, 'SIGINT'), 300);
+      try {
+        await runInteractiveCommand(process.execPath, ['-e', 'setInterval(() => {}, 1000)'],
+          { stdin: 'ignore', timeoutMs: 5000 });
+        process.exitCode = 9;
+      } catch (error) {
+        if (!(error instanceof CommandInterruptedError)) throw error;
+        console.log(JSON.stringify({code: error.code, signal: error.signal}));
+      }
+    `]);
+  assert.deepEqual(JSON.parse(stdout), { code: 'postplus_command_interrupted', signal: 'SIGINT' });
+});
+
+test('timeout stops a descendant even when its leader exits on SIGTERM', {
+  skip: process.platform === 'win32',
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'postplus-runner-tree-'));
+  const heartbeat = join(root, 'heartbeat');
+  const descendant = `process.on('SIGTERM', () => {}); setInterval(() => require('node:fs').appendFileSync(${JSON.stringify(heartbeat)}, '.'), 20);`;
+  try {
+    await assert.rejects(runInteractiveCommand(process.execPath, ['-e', `
+      require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], {stdio: 'ignore'});
+      setInterval(() => {}, 1000);
+    `], { stdin: 'ignore', timeoutMs: 5_000 }), CommandTimeoutError);
+    const after = await readFile(heartbeat, 'utf8');
+    assert.ok(after.length > 0, 'descendant must have started');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(await readFile(heartbeat, 'utf8'), after, 'descendant must stop writing after timeout');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('capture hides output and preserves bounded failure diagnostics', async () => {
+  const { CommandExecutionError } = await import('./command-runner.js');
+  await assert.rejects(runInteractiveCommand(process.execPath, ['-e', "process.stdout.write('x'.repeat(100000));process.stderr.write('npm EACCES');process.exitCode=23"], {stdout:'capture'}), (error: unknown) => {
+    assert.ok(error instanceof CommandExecutionError);
+    assert.equal(error.exitCode,23);
+    assert.match(error.stderr,/npm EACCES/);
+    assert.ok(error.stdout.length < 66000);
+    assert.doesNotMatch(error.message,/EACCES/);
+    return true;
+  });
+  assert.equal(await runInteractiveCommand(process.execPath,['-e',"console.log('hidden')"],{stdout:'capture'}),0);
+});
+
+test('capture preserves timeout type and partial output', async () => {
+  await assert.rejects(runInteractiveCommand(process.execPath, ['-e', "console.error('partial diagnostic');setInterval(()=>{},1000)"], {stdout:'capture',timeoutMs:300}), (error: unknown) => {
+    assert.ok(error instanceof CommandTimeoutError);
+    assert.match((error as CommandTimeoutError & {stderr:string}).stderr,/partial diagnostic/);
+    return true;
+  });
+});

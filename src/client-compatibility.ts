@@ -24,6 +24,9 @@ export const POSTPLUS_CLIENT_COMPATIBILITY_HEADERS = {
 export type PostPlusClientUpgradePayload = {
   code?: string;
   compatibility?: {
+    reason?: string;
+    received?: { cliVersion?: string | null; skillsReleaseId?: string | null };
+    required?: { cliVersion?: string; skillsReleaseId?: string; releaseId?: string };
     upgrade?: {
       command?: string;
       cli?: {
@@ -42,6 +45,13 @@ export type PostPlusClientUpgradePayload = {
 
 export class PostPlusClientUpgradeRequiredError extends Error {
   readonly code = 'postplus_client_upgrade_required';
+  readonly stage = 'compatibility';
+  readonly service = 'postplus-cloud';
+  readonly retryable = false;
+  readonly compatibilityReason: string;
+  readonly summary: string;
+  readonly action = 'Run postplus update.';
+  readonly versions: { cliVersion: string | null; skillsReleaseId: string | null; requiredCliVersion: string | null; requiredSkillsReleaseId: string | null };
   // Commands that already own durable work resume that identity after updating.
   // Absent for requests rejected before work began: their original argv is safe.
   recoveryArgs?: string[];
@@ -49,6 +59,21 @@ export class PostPlusClientUpgradeRequiredError extends Error {
   constructor(readonly payload: PostPlusClientUpgradePayload) {
     super(formatPostPlusClientUpgradeError(payload));
     this.name = 'PostPlusClientUpgradeRequiredError';
+    const compatibility = payload.compatibility;
+    const missingSkills = compatibility?.upgrade?.skills?.required && compatibility.received?.skillsReleaseId === null;
+    this.compatibilityReason = missingSkills ? 'skills_baseline_missing'
+      : compatibility?.reason ?? (compatibility?.upgrade?.cli?.required ? 'cli_release_too_old'
+        : compatibility?.upgrade?.skills?.required ? 'skills_release_mismatch' : 'client_compatibility');
+    this.summary = missingSkills ? 'PostPlus has no verified skill installation record.'
+      : this.compatibilityReason === 'cli_release_too_old' ? 'Your PostPlus CLI is out of date.'
+      : this.compatibilityReason === 'skills_release_mismatch' ? 'Your installed PostPlus skills are out of date.'
+      : 'Your PostPlus installation needs an update.';
+    this.versions = {
+      cliVersion: compatibility?.received?.cliVersion ?? null,
+      skillsReleaseId: compatibility?.received?.skillsReleaseId ?? null,
+      requiredCliVersion: compatibility?.required?.cliVersion ?? null,
+      requiredSkillsReleaseId: compatibility?.required?.skillsReleaseId ?? null,
+    };
   }
 }
 
@@ -169,7 +194,7 @@ export function readPostPlusCompatibilityError(payload: unknown): Error | null {
     return new PostPlusClientUpgradeRequiredError(payload);
   }
   if (isPostPlusCloudReleaseInProgressPayload(payload)) {
-    return new Error(formatPostPlusCloudReleaseInProgressError(payload));
+    return new PostPlusCloudReleaseInProgressError(payload);
   }
   return null;
 }
@@ -196,4 +221,15 @@ export function isPostPlusCloudReleaseInProgressPayload(payload: unknown) {
     'code' in payload &&
     payload.code === 'postplus_cli_cloud_release_in_progress'
   );
+}
+
+export class PostPlusCloudReleaseInProgressError extends Error {
+  readonly code = 'postplus_cli_cloud_release_in_progress';
+  readonly stage = 'compatibility';
+  readonly service = 'postplus-cloud';
+  readonly retryable = true;
+  constructor(payload: unknown) {
+    super(formatPostPlusCloudReleaseInProgressError(payload));
+    this.name = 'PostPlusCloudReleaseInProgressError';
+  }
 }

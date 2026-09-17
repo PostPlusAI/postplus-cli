@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { PostPlusFailure, writeFailure, toFailureFact, formatFailure } from './failure-contract.js';
 import { readFile } from 'node:fs/promises';
 
 import {
@@ -137,6 +138,9 @@ async function runDoctor(options: DiagnosticCommandOptions): Promise<number> {
 
   if (options.json) {
     writeJson(report);
+  } else if (!report.requiredOk) {
+    const failed = report.checks.find((check) => check.status === 'fail' && check.severity === 'required')!;
+    process.stderr.write(`${formatFailure(failed.failure ?? toFailureFact(new PostPlusFailure(failed.detail, { code: 'postplus_readiness_blocked', action: failed.fix }))) }\n`);
   } else {
     process.stdout.write(`${formatDoctorReport(report)}\n`);
   }
@@ -161,6 +165,9 @@ async function runStatus(options: DiagnosticCommandOptions): Promise<number> {
 
   if (options.json) {
     writeJson(report);
+  } else if (!report.ok) {
+    const failed = report.doctor.checks.find((check) => check.status === 'fail' && check.severity === 'required');
+    process.stderr.write(`${formatFailure(failed?.failure ?? toFailureFact(new PostPlusFailure(failed?.detail ?? 'PostPlus is not ready.', { code: 'postplus_readiness_blocked', action: failed?.fix ?? 'Run postplus status --json to identify the blocked component.' }))) }\n`);
   } else {
     process.stdout.write(`${formatStatusReport(report)}\n`);
   }
@@ -201,6 +208,7 @@ async function runVersion(): Promise<number> {
 }
 
 async function runSkillUpdateCommand(rest: string[]): Promise<number> {
+  if (rest.some(isHelpArg)) return printSkillMutationHelp('update', rest.includes('--json'));
   const options = parseSkillMutationOptions(rest, 'update');
   const updatePlan = resolvePostPlusUpdatePlan();
   const scope = updatePlan.skills && !rest.includes('--current-directory')
@@ -209,10 +217,13 @@ async function runSkillUpdateCommand(rest: string[]): Promise<number> {
 
   if (updatePlan.cli) {
     const cliSelfUpdate = await runCliSelfUpdateIfOutdated({
-      continuationArgs: scope === 'current-directory' ? ['--current-directory'] : rest,
-      quiet: updatePlan.implicitRecovery,
+      continuationArgs: scope === 'current-directory' && !rest.includes('--current-directory') ? [...rest, '--current-directory'] : rest,
+      quiet: updatePlan.implicitRecovery || options.json,
     });
 
+    if (cliSelfUpdate.failure) {
+      throw new PostPlusFailure(cliSelfUpdate.failure.message, cliSelfUpdate.failure, { cause: new Error(`npm installation exited with code ${cliSelfUpdate.exitCode}.`) });
+    }
     if (cliSelfUpdate.updateAvailable) {
       return cliSelfUpdate.exitCode ?? 1;
     }
@@ -221,28 +232,34 @@ async function runSkillUpdateCommand(rest: string[]): Promise<number> {
   if (!updatePlan.skills) {
     await writeCurrentCliVersionToLocalConfig();
     await clearUpdateCheckCache();
+    if (options.json) writeJson({ ok: true, command: 'update', components: ['cli'] });
     return 0;
   }
 
   return runPostPlusSkillUpdate(undefined, {
+    ...options,
     messageMode: updatePlan.implicitRecovery ? 'implicit' : 'explicit',
     scope,
   });
 }
 
 async function runSkillInstallCommand(rest: string[]): Promise<number> {
+  if (rest.some(isHelpArg)) return printSkillMutationHelp('install', rest.includes('--json'));
   const options = parseSkillMutationOptions(rest, 'install');
 
   return runPostPlusSkillUpdate(undefined, {
+    ...options,
     messageMode: 'explicit',
     scope: options.scope,
   });
 }
 
 async function runSkillUninstallCommand(rest: string[]): Promise<number> {
+  if (rest.some(isHelpArg)) return printSkillMutationHelp('uninstall', rest.includes('--json'));
   const options = parseSkillMutationOptions(rest, 'uninstall');
 
   return runPostPlusSkillUninstall(undefined, {
+    ...options,
     scope: options.scope,
   });
 }
@@ -486,10 +503,14 @@ function parseDiagnosticOptions(args: string[]): DiagnosticCommandOptions {
 function parseSkillMutationOptions(
   args: string[],
   commandName: 'install' | 'update' | 'uninstall',
-): { scope: PostPlusSkillsInstallScope } {
+): { scope: PostPlusSkillsInstallScope; json: boolean; yes: boolean } {
+  let json = false;
+  let yes = false;
   let scope: PostPlusSkillsInstallScope = 'global';
 
   for (const arg of args) {
+    if (arg === '--json') { json = true; continue; }
+    if (arg === '--yes') { yes = true; continue; }
     if (arg === '--current-directory') {
       scope = 'current-directory';
       continue;
@@ -498,7 +519,7 @@ function parseSkillMutationOptions(
     throw new Error(`Unknown option for ${commandName}: ${arg}`);
   }
 
-  return { scope };
+  return { scope, json, yes };
 }
 
 async function runAuthLogout(json: boolean): Promise<number> {
@@ -708,9 +729,7 @@ async function main(): Promise<void> {
       }
     }
     default:
-      process.stderr.write(`Unknown command: ${command}\n\n`);
-      printHelp();
-      process.exitCode = 1;
+      throw new PostPlusFailure(`Unknown command: ${command}`, { code: 'postplus_unknown_command', stage: 'parse', action: 'Run postplus --help.' });
   }
 }
 
@@ -723,7 +742,14 @@ async function runMainWithRecovery(): Promise<void> {
         originalArgs: error.recoveryArgs ?? process.argv.slice(2),
         payload: error.payload,
       });
-      process.exitCode = recovery.exitCode;
+      if (recovery.exitCode !== 0 && (!recovery.attempted || recovery.updateExitCode !== 0 || recovery.restartAgentSessionRequired)) {
+        throw new PostPlusFailure(recovery.restartAgentSessionRequired ? 'PostPlus updated; this task needs a new agent session.' : 'PostPlus could not complete the required update.', {
+          code: recovery.restartAgentSessionRequired ? 'postplus_agent_restart_required' : 'postplus_client_upgrade_failed',
+          stage: 'compatibility-recovery', service: 'cli', retryable: false,
+          action: recovery.restartAgentSessionRequired ? 'Start a new agent session and resume the task.' : 'Run postplus update --json and resolve the reported failure.',
+        }, { cause: error });
+      }
+      process.exitCode = recovery.exitCode === 0 ? 0 : 1;
       return;
     }
 
@@ -731,9 +757,16 @@ async function runMainWithRecovery(): Promise<void> {
   }
 }
 
-runMainWithRecovery().catch((error: unknown) => {
-  const message =
-    error instanceof Error ? error.message : 'Unexpected PostPlus CLI error';
-  process.stderr.write(`${message}\n`);
+runMainWithRecovery().then(() => {
+  if (process.exitCode && process.exitCode !== 0) process.exitCode = 1;
+}).catch((error: unknown) => {
+  writeFailure(error, { json: process.argv.includes('--json'), stage: process.argv[2] ?? 'command' });
   process.exitCode = 1;
 });
+
+function printSkillMutationHelp(command: string, json: boolean): number {
+  const help = { command: `postplus ${command}`, usage: `postplus ${command} [--current-directory] [--json] [--yes]`, options: { '--current-directory': 'Target this project.', '--json': 'Return machine-readable output.', '--yes': 'Authorize backup and replacement of locally modified managed skills.' } };
+  if (json) writeJson(help);
+  else process.stdout.write(`${help.usage}\n\n${Object.entries(help.options).map(([flag, detail]) => `${flag}  ${detail}`).join('\n')}\n`);
+  return 0;
+}

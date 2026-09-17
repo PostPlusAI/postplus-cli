@@ -1,3 +1,4 @@
+import { PostPlusFailure } from './failure-contract.js';
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import {
@@ -17,7 +18,7 @@ import {
 import { homedir, platform } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-import { CommandInterruptedError } from './command-runner.js';
+import { CommandInterruptedError, CommandTimeoutError } from './command-runner.js';
 
 export type PostPlusLocalConfig = {
   accessToken?: string;
@@ -211,7 +212,7 @@ export async function withPostPlusUpdateLock<T>(
     } catch (error) {
       if (
         options.installationRoot &&
-        error instanceof CommandInterruptedError
+        (error instanceof CommandInterruptedError || error instanceof CommandTimeoutError)
       ) {
         releaseLock = false;
         throw new Error(
@@ -320,7 +321,8 @@ export async function readLocalConfig(): Promise<PostPlusLocalConfig | null> {
   try {
     const raw = await readFile(configPath, 'utf8');
     const parsed = JSON.parse(raw) as PostPlusLocalConfig;
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new SyntaxError('Expected a configuration object.');
+    return parsed;
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError.code === 'ENOENT') {
@@ -422,7 +424,70 @@ export async function assertLocalConfigWritable(): Promise<void> {
   await stageLocalConfig('{}\n', false);
 }
 
-export async function writeLocalConfig(
+// This scope contains only local configuration writes, never child processes.
+// A dead owner therefore has no installer descendants that could keep writing.
+async function withConfigWriteLock<T>(operation: () => Promise<T>): Promise<T> {
+  const directory = getPostPlusConfigDir();
+  const lockPath = join(directory, 'config.lock');
+  const ownerFile = `owner-${randomUUID()}.json`;
+  const candidatePath = join(directory, `.config-${ownerFile}`);
+  const deadline = Date.now() + 5_000;
+  await mkdir(directory, { recursive: true });
+  await mkdir(candidatePath, { mode: 0o700 });
+  try {
+    await writeFile(join(candidatePath, ownerFile), JSON.stringify({ pid: process.pid }), { mode: CONFIG_FILE_MODE });
+    while (true) {
+      try {
+        // Do not replace an empty legacy/unknown lock directory.
+        const existing = await stat(lockPath).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return null;
+          throw error;
+        });
+        if (existing) throw Object.assign(new Error('Configuration lock exists'), { code: 'EEXIST' });
+        await rename(candidatePath, lockPath);
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        const destinationExists = code === 'EEXIST' || code === 'ENOTEMPTY' ||
+          ((code === 'EACCES' || code === 'EPERM') && await stat(lockPath).then(value => value.isDirectory(), () => false));
+        if (!destinationExists) throw new PostPlusLocalConfigError('write', error);
+        // Unknown, malformed and inaccessible records are never reclaimed.
+        let deadOwner: string | null = null;
+        try {
+          const files = await readdir(lockPath);
+          if (files.length === 1 && /^owner-[a-f0-9-]+\.json$/u.test(files[0]!)) {
+            const owner = JSON.parse(await readFile(join(lockPath, files[0]!), 'utf8')) as { pid?: unknown };
+            if (Number.isInteger(owner.pid) && (owner.pid as number) > 0) {
+              try { process.kill(owner.pid as number, 0); }
+              catch (probeError) {
+                if ((probeError as NodeJS.ErrnoException).code === 'ESRCH') deadOwner = files[0]!;
+              }
+            }
+          }
+        } catch { /* Preserve unknown ownership; the bounded wait reports it. */ }
+        if (deadOwner) await removePostPlusUpdateLockOwner(lockPath, deadOwner);
+        if (Date.now() >= deadline) throw new PostPlusFailure('PostPlus configuration is locked by another writer.', {
+          code: 'postplus_config_busy', stage: 'config-write', service: 'local-state', retryable: false,
+          action: 'Wait for the other CLI command to finish; if the lock remains, inspect the interrupted writer before retrying.',
+        });
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+    try { return await operation(); }
+    finally { await removePostPlusUpdateLockOwner(lockPath, ownerFile); }
+  } finally {
+    await rm(candidatePath, { recursive: true, force: true });
+  }
+}
+
+export async function writeLocalConfig(config: PostPlusLocalConfig): Promise<void> {
+  await withConfigWriteLock(async () => {
+    await readLocalConfig();
+    await writeLocalConfigUnlocked(config);
+  });
+}
+
+async function writeLocalConfigUnlocked(
   config: PostPlusLocalConfig,
 ): Promise<void> {
   await stageLocalConfig(
@@ -463,9 +528,11 @@ export async function assertConfigFilePermissions(): Promise<void> {
 export async function updateLocalConfig(
   updater: (current: PostPlusLocalConfig | null) => PostPlusLocalConfig,
 ): Promise<PostPlusLocalConfig> {
-  const next = updater(await readLocalConfig());
-  await writeLocalConfig(next);
-  return next;
+  return withConfigWriteLock(async () => {
+    const next = updater(await readLocalConfig());
+    await writeLocalConfigUnlocked(next);
+    return next;
+  });
 }
 
 export async function clearLocalAuthState(): Promise<PostPlusLocalConfig> {
@@ -516,6 +583,17 @@ export async function setLocalApiBaseUrl(
   }));
 }
 
+export function assertLocalAuthUnchanged(current: PostPlusLocalConfig | null, expected: PostPlusLocalConfig | null): void {
+  const fields = ['accessToken', 'refreshToken', 'cliSessionToken', 'sessionApiBaseUrl', 'apiBaseUrl', 'sessionExpiresAt',
+    'accountId', 'accountName', 'accountSlug', 'accountType', 'userId', 'userEmail'] as const;
+  if (fields.some((field) => current?.[field] !== expected?.[field])) {
+    throw new PostPlusFailure('PostPlus authentication changed while refresh was in progress.', {
+      code: 'postplus_auth_state_changed', stage: 'auth-refresh-save', service: 'local-state', retryable: false,
+      action: 'Check postplus auth status before starting another authenticated command.',
+    });
+  }
+}
+
 export async function setLocalSession(input: {
   accountId: string;
   accountName?: string | null;
@@ -528,6 +606,7 @@ export async function setLocalSession(input: {
   userEmail: string | null;
   userId: string;
   persistApiBaseUrl?: boolean;
+  expectedAuthConfig?: PostPlusLocalConfig | null;
 }): Promise<PostPlusLocalConfig> {
   const cliSessionToken = input.cliSessionToken.trim();
   const apiBaseUrl = input.apiBaseUrl.trim().replace(/\/+$/, '');
@@ -541,6 +620,7 @@ export async function setLocalSession(input: {
   }
 
   return updateLocalConfig((current) => {
+    if (input.expectedAuthConfig !== undefined) assertLocalAuthUnchanged(current, input.expectedAuthConfig);
     const next: PostPlusLocalConfig = {
       ...omitLegacyAuthFields(current),
       ...(input.cliVersion ? { cliVersion: input.cliVersion } : {}),
