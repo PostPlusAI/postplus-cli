@@ -180,17 +180,20 @@ export async function withPostPlusUpdateLock<T>(
             owner.file &&
             owner.operationStarted !== false
           ) {
-            throw new Error(
-              `PostPlus cannot confirm whether an interrupted installer is still running (code=postplus_update_installation_uncertain). No update was started and the lock was retained at ${lockPath}. Confirm the installer has stopped before removing this lock.`,
+            throw new PostPlusFailure(
+              'PostPlus cannot confirm whether an interrupted installer is still running (code=postplus_update_installation_uncertain).',
+              { code: 'postplus_update_installation_uncertain', stage: 'installation-lock', service: 'local-state', retryable: false,
+                action: `Confirm all installer processes have stopped before removing the retained lock at ${lockPath}, then retry.` },
             );
           }
           await removePostPlusUpdateLockOwner(lockPath, owner.file);
         }
 
         if (Date.now() - startedAt >= timeoutMs) {
-          throw new Error(
-            'Another PostPlus update is still running. Wait for it to finish, then retry.',
-          );
+          throw new PostPlusFailure('Another PostPlus update is still running.', {
+            code: 'postplus_update_in_progress', stage: 'installation-lock', service: 'local-state', retryable: false,
+            action: 'Wait for the active update to finish, then retry the command.',
+          });
         }
 
         await new Promise((resolve) => setTimeout(resolve, pollMs));
@@ -215,8 +218,10 @@ export async function withPostPlusUpdateLock<T>(
         (error instanceof CommandInterruptedError || error instanceof CommandTimeoutError)
       ) {
         releaseLock = false;
-        throw new Error(
-          `PostPlus installer or continuation was interrupted (code=postplus_update_installation_uncertain). The lock was retained at ${lockPath}; confirm its child processes have stopped before removing it.`,
+        throw new PostPlusFailure(
+          'PostPlus installer or continuation was interrupted (code=postplus_update_installation_uncertain).',
+          { code: 'postplus_update_installation_uncertain', stage: 'installation-lock', service: 'local-state', retryable: false,
+            action: `Confirm all installer processes have stopped before removing the retained lock at ${lockPath}, then retry.` },
           { cause: error },
         );
       }

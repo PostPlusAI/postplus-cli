@@ -6,7 +6,7 @@ import test, { type TestContext } from 'node:test';
 
 import { PostPlusFailure, toFailureFact } from './failure-contract.js';
 import { runHostedDomainCommand } from './hosted-domain-commands.js';
-import { setLocalSession } from './local-state.js';
+import { setLocalSession, withPostPlusUpdateLock } from './local-state.js';
 import { prepareMediaRunCheckpoint } from './media-run-checkpoint.js';
 import { generateUpdateStatusReport } from './update-check.js';
 
@@ -102,4 +102,26 @@ test('truncated media checkpoint blocks poll and same-operation preparation with
     assert.equal(await readFile(checkpoint.filePath, 'utf8'), raw);
   }
   assert.equal(requests, 0);
+});
+
+
+test('an active installation lock returns one structured blocking fact without running mutation', async (t) => {
+  const root = await isolateConfig(t);
+  const lock = join(root, '.postplus-skills-update.lock');
+  await mkdir(lock);
+  const owner = JSON.stringify({ pid: process.pid, operationStarted: true });
+  await writeFile(join(lock, 'owner.json'), owner);
+  let ran = false;
+  await assert.rejects(withPostPlusUpdateLock(async () => { ran = true; }, {
+    installationRoot: root, lockName: '.postplus-skills-update.lock', timeoutMs: 1, pollMs: 1,
+  }), (error) => {
+    const fact = toFailureFact(error);
+    assert.equal(fact.code, 'postplus_update_in_progress');
+    assert.equal(fact.stage, 'installation-lock');
+    assert.equal(fact.retryable, false);
+    assert.match(fact.action, /Wait for the active update/);
+    return true;
+  });
+  assert.equal(ran, false);
+  assert.equal(await readFile(join(lock, 'owner.json'), 'utf8'), owner);
 });
