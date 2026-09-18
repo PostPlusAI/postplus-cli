@@ -14,6 +14,7 @@ export type FailureFact = {
   checkpointId?: string;
   resumeAvailable?: boolean;
   compatibilityReason?: string;
+  recovery?: { attempted: true; exhausted: true; nextActionAfterUserResolution: string };
   versions?: Record<string, string | null>;
 };
 
@@ -138,6 +139,7 @@ export function toFailureFact(
                 : "Resolve the reported problem, then retry the command."),
     ),
     cause,
+    ...(record(source.recovery).exhausted === true ? { recovery: { attempted: true as const, exhausted: true as const, nextActionAfterUserResolution: sanitizeFailureText(string(record(source.recovery).nextActionAfterUserResolution) ?? '') } } : {}),
     ...(string(source.compatibilityReason) ? { compatibilityReason: sanitizeFailureText(String(source.compatibilityReason)) } : {}),
     ...(source.versions && typeof source.versions === 'object' ? { versions: Object.fromEntries(
       Object.entries(source.versions).filter(([key]) => ['cliVersion', 'skillsReleaseId', 'requiredCliVersion', 'requiredSkillsReleaseId'].includes(key))
@@ -164,9 +166,10 @@ export function formatFailure(fact: FailureFact): string {
 }
 
 export function stopAutomaticRecovery(fact: FailureFact): FailureFact {
-  if (fact.action.startsWith('Stop automatic recovery')) return { ...fact, retryable: false };
   return { ...fact, retryable: false,
-    action: `Stop automatic recovery and report this failure. Any further action requires the user to resolve the blocker: ${fact.action}` };
+    action: 'Stop automatic recovery and report this failure; do not run another update or resubmit the task.',
+    recovery: { attempted: true, exhausted: true,
+      nextActionAfterUserResolution: fact.recovery?.nextActionAfterUserResolution ?? fact.action } };
 }
 
 export function writeFailure(

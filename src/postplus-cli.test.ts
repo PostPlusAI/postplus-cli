@@ -3780,10 +3780,12 @@ describe('update checks', () => {
       restartAgentSessionRequired: false,
       updateExitCode: 0,
     });
-    assert.deepEqual(calls, [
-      { command: 'postplus', args: ['update', '--json'], env: recoveryEnv },
-      { command: 'postplus', args: originalArgs, env: recoveryEnv },
+    assert.ok(calls.every(call => call.command === process.execPath));
+    assert.deepEqual(calls.map(call => ({args:call.args.slice(3),env:call.env})), [
+      { args: ['update', '--json'], env: recoveryEnv },
+      { args: originalArgs, env: recoveryEnv },
     ]);
+    assert.equal(calls[0].args[2], resolve('src/index.ts'));
     assert.match(
       output.join(''),
       /updating\. The current task can resume only if the update succeeds/u,
@@ -3857,7 +3859,8 @@ describe('update checks', () => {
       },
     );
 
-    assert.deepEqual(calls, [['postplus', 'update', '--json']]);
+    assert.equal(calls[0]?.[0], process.execPath);
+    assert.deepEqual(calls.map(call=>call.slice(4)), [['update', '--json']]);
     assert.deepEqual(result, {
       attempted: true,
       exitCode: 1,
@@ -3915,7 +3918,8 @@ describe('update checks', () => {
       },
     );
 
-    assert.deepEqual(calls, [['postplus', 'update', '--json']]);
+    assert.equal(calls[0]?.[0], process.execPath);
+    assert.deepEqual(calls.map(call=>call.slice(4)), [['update', '--json']]);
     assert.deepEqual(result, {
       attempted: true,
       exitCode: 23,
@@ -5569,7 +5573,7 @@ describe('skill management commands', () => {
           }),
           runInteractiveCommand: async () => { completeFixtureInstall(); return 0; },
         }),
-        /did not converge.*missing: new-skill.*baseline was not changed/i,
+        /did not converge.*missing or unready targets for: new-skill.*baseline was not changed/i,
       );
 
       assert.equal(
@@ -5774,7 +5778,7 @@ describe('skill management commands', () => {
           },
           { scope: 'current-directory' },
         ),
-        /did not converge.*missing: demo-skill.*baseline was not changed/i,
+        /did not converge.*missing or unready targets for: demo-skill.*baseline was not changed/i,
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -14474,16 +14478,13 @@ describe('workflow commands', () => {
     }
   });
 
-  it('help exits 0 and an unknown subcommand exits 1', async () => {
+  it('help exits 0 and an unknown subcommand throws a structured-entrypoint error', async () => {
     const help = await captureWorkflowStdout(() =>
       runWorkflowCommand(['help']),
     );
     assert.equal(help.exitCode, 0);
     assert.match(help.stdout, /postplus workflow launch/u);
-    const bogus = await captureWorkflowStdout(() =>
-      runWorkflowCommand(['bogus']),
-    );
-    assert.equal(bogus.exitCode, 1);
+    await assert.rejects(runWorkflowCommand(['bogus']), /Unknown command: workflow bogus/);
   });
 });
 

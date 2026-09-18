@@ -137,27 +137,22 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
       };
     `);
     const entry = path.resolve('src/index.ts');
-    const shim = `
-      const { readFileSync, writeFileSync, readdirSync } = require('node:fs');
-      const { spawnSync } = require('node:child_process');
-      const statePath = ${JSON.stringify(statePath)};
-      const args = process.argv.slice(2);
-      if (args[0] === 'update') {
+    // The wrong installation on PATH must never receive update or task replay.
+    const wrongCliMarker = path.join(root, 'wrong-cli');
+    await writeFixtureCommand(bin, 'postplus', process.execPath, ['-e',
+      `require('node:fs').writeFileSync(${JSON.stringify(wrongCliMarker)}, 'called'); process.exit(99)`]);
+    const updateMock = path.join(root, 'update-mock.mjs');
+    await writeFile(updateMock, `
+      import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+      if (process.argv[2] === 'update') {
+        const statePath = ${JSON.stringify(statePath)};
         const state = JSON.parse(readFileSync(statePath, 'utf8'));
         state.updates++; writeFileSync(statePath, JSON.stringify(state));
         ${scenario === 'corrupt' ? `const dir = ${JSON.stringify(path.join(config, 'media-runs'))};
-          writeFileSync(require('node:path').join(dir, readdirSync(dir)[0]), '{}');` : ''}
-        console.log(JSON.stringify({ok:true}));
-      } else {
-        const result = spawnSync(${JSON.stringify(process.execPath)},
-          ['--import', 'tsx', '--import', ${JSON.stringify(mock)}, ${JSON.stringify(entry)}, ...args],
-          { env: process.env, stdio: 'inherit' });
-        process.exitCode = result.status ?? 1;
+          writeFileSync(dir + '/' + readdirSync(dir)[0], '{}');` : ''}
+        console.log(JSON.stringify({ok:true})); process.exit(0);
       }
-    `;
-    const shimJs = path.join(bin, 'postplus.cjs');
-    await writeFile(shimJs, shim);
-    await writeFixtureCommand(bin, 'postplus', process.execPath, [shimJs]);
+    `);
     // Only explicitly allowed tools enter the child PATH. A broken or missing
     // fixture must never resolve to the user's installed PostPlus CLI.
     for (const command of ['ffmpeg', 'ffprobe']) {
@@ -169,7 +164,8 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
     const output = path.join(root, 'original report.md');
     const env = { ...process.env, POSTPLUS_CONFIG_DIR: config,
       POSTPLUS_API_BASE_URL: 'https://postplus.test',
-      POSTPLUS_CLIENT_RECOVERY_ATTEMPT: '', PATH: bin };
+      POSTPLUS_CLIENT_RECOVERY_ATTEMPT: '', PATH: bin,
+      NODE_OPTIONS: `--import=${JSON.stringify(mock)} --import=${JSON.stringify(updateMock)}` };
     const run = async (args: string[]) => {
       try {
         const result = await exec(process.execPath, ['--import', 'tsx', '--import', mock, entry, ...args], { env });
@@ -184,6 +180,7 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
       : ['media', 'analyze', 'video-analysis', '--video', video,
       '--prompt', 'Retain original intent & text', '--output', output, '--json'];
     let result = await run(original);
+    await assert.rejects(readFile(wrongCliMarker), {code:'ENOENT'});
     const checkpointDir = path.join(config, 'media-runs');
     const files = await readdir(checkpointDir);
     assert.equal(files.length, 1, 'automatic replay must never create a second identity');

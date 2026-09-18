@@ -48,10 +48,7 @@ sample, or deliverable.
 - Start with one route and a small sample; keep each seed attributable.
 - For an organic benchmark, start with `10-15` items per theme, account,
   hashtag, or query and no more than `3-5` broad seeds.
-- On hard auth, network, contract, or service errors, stop with the exact error.
-- On successful but sparse/noisy evidence, apply the shared bounded recovery
-  rule once; do not repeat an identical request or silently expand the approved
-  PostPlus credit scope.
+- Execution failures follow `postplus-shared/references/shared-public-skill-rules.md`; stop after its permitted recovery is exhausted. Successful but insufficient evidence follows `postplus-shared/references/research-quality-recovery.md` within the existing scope and budget.
 - Resume with `postplus research run --resume-from result.json`; never resubmit.
 
 ## Evidence

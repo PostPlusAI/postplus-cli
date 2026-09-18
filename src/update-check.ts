@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { PostPlusFailure, stopAutomaticRecovery, sanitizeFailureText, toFailureFact, type FailureFact } from './failure-contract.js';
 import { diagnosticFetch } from './network-diagnostics.js';
 import { createHash } from 'node:crypto';
@@ -165,10 +166,14 @@ export async function runPostPlusClientUpgradeRecovery(
     'PostPlus is updating. The current task can resume only if the update succeeds and no agent restart is required.\n',
   );
 
+  // Resolve our own installation, never another executable earlier on PATH.
+  const source = import.meta.url.endsWith('.ts');
+  const cliEntry = fileURLToPath(new URL(source ? './index.ts' : './index.js', import.meta.url));
+  const cliArgs = source ? ['--import', import.meta.resolve('tsx'), cliEntry] : [cliEntry];
   let updateExitCode: number;
   let updateOutput = '';
   try {
-    updateExitCode = await runInteractiveCommand('postplus', ['update', '--json'], {
+    updateExitCode = await runInteractiveCommand(process.execPath, [...cliArgs, 'update', '--json'], {
       env: recoveryEnvironment, stdout: 'capture', stdin: 'ignore', timeoutMs: 300_000,
       onCapturedOutput: (result) => { updateOutput = result.stdout; },
     });
@@ -239,8 +244,8 @@ export async function runPostPlusClientUpgradeRecovery(
   }
 
   const retryExitCode = await runInteractiveCommand(
-    'postplus',
-    input.originalArgs,
+    process.execPath,
+    [...cliArgs, ...input.originalArgs],
     { env: recoveryEnvironment, stdin: 'ignore', timeoutMs: 300_000 },
   );
 

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -23,6 +23,7 @@ async function recover(options: { updateExit?: number; restart?: boolean; malfor
     }, {
       environment: { ...process.env, POSTPLUS_CLIENT_RECOVERY_ATTEMPT: '' },
       runInteractiveCommand: async (command, args, options) => {
+        args = args.slice(3);
         const script = args[0] === 'update'
           ? ${JSON.stringify(`console.log(${JSON.stringify(options.malformed ? 'broken JSON' : JSON.stringify((options.updateExit ?? 0) === 0 ? {ok:true, session:{newSessionRequired:options.newSession === true,action:options.newSession ? 'Start a new agent session before using updated skills.' : null}} : {ok:false,error:{code:options.human?'postplus_requires_human':'postplus_cli_update_failed',stage:'npm-install',service:'npm',correlationId:'fixture-id',retryable:false,message:'Update stopped.',action:'Review the installation.',cause:[{name:'Error',code:'EACCES',message:'npm permission denied'}]}}))}); console.error('installer stderr'); process.exitCode = ${options.updateExit ?? 0};`)}
           : 'process.stdout.write(JSON.stringify({ok:true,args:process.argv.slice(1)}));';
@@ -129,7 +130,40 @@ test('ordinary failure in a real recovery child returns one stopped JSON envelop
   assert.equal(result.code,1,result.stderr);
   const failure=JSON.parse(result.stdout).error;
   assert.match(failure.action,/^Stop automatic recovery/);
-  assert.match(failure.action,/requires the user/);
-  assert.match(failure.action,/postplus doctor --help/);
+  assert.equal(failure.recovery.exhausted,true);
+  assert.match(failure.recovery.nextActionAfterUserResolution,/postplus doctor --help/);
+  assert.doesNotMatch(failure.action,/Run postplus/);
   assert.equal(failure.retryable,false);
+});
+
+
+test('a hosted product failure after recovery stops without a second action or JSON envelope', async (t) => {
+  const config=await mkdtemp(join(tmpdir(),'postplus-recovery-product-'));
+  t.after(()=>rm(config,{recursive:true,force:true}));
+  const mock=join(config,'mock.mjs');
+  await writeFile(join(config,'config.json'),JSON.stringify({cliSessionToken:'fixture',apiBaseUrl:'https://postplus.test'}),{mode:0o600});
+  const request=join(config,'request.json');
+  await writeFile(request,'{}');
+  await writeFile(mock, `globalThis.fetch=async()=>Response.json({code:'postplus_cli_fixture_failed',error:'Task failed.',userAction:'Run postplus update.',operationId:'original-operation'},{status:400});`);
+  for (const json of [true,false]) {
+    await assert.rejects(promisify(execFile)(process.execPath,['--import',mock,'--import','tsx','src/index.ts','publish','list-channels','--request',request,...(json?['--json']:[])],{
+      env:{...process.env,POSTPLUS_CONFIG_DIR:config,POSTPLUS_API_BASE_URL:'https://postplus.test',POSTPLUS_CLI_SESSION_TOKEN:'fixture',POSTPLUS_CLIENT_RECOVERY_ATTEMPT:'1'},
+    }), (error:any) => {
+      assert.equal(error.code,1);
+      if (json) {
+        const failure=JSON.parse(error.stdout).error;
+        assert.equal(failure.code,'postplus_cli_fixture_failed');
+        assert.equal(failure.operationId,'original-operation');
+        assert.equal(failure.recovery.exhausted,true);
+        assert.equal(failure.recovery.nextActionAfterUserResolution,'Run postplus update.');
+        assert.equal(failure.userAction,undefined);
+        assert.doesNotMatch(failure.action,/Run postplus/);
+      } else {
+        assert.equal(error.stdout,'');
+        assert.equal(error.stderr.trim().split('\n').length,2);
+        assert.match(error.stderr,/Stop automatic recovery/);
+      }
+      return true;
+    });
+  }
 });

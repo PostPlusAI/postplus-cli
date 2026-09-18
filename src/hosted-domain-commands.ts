@@ -139,8 +139,9 @@ export async function runHostedDomainCommand(
         `research ${subcommand} was removed. Migrate to \`postplus research run <route> --<semantic flags> --wait --output <result.json>\`; JSON request files and --max-charge-usd are no longer accepted.`,
       );
     }
+    if (subcommand !== undefined && !isHelp(subcommand)) throw new Error(`Unknown command: research ${subcommand}`);
     printResearchHelp();
-    return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+    return 0;
   }
 
   if (subcommand === 'schema') {
@@ -193,8 +194,9 @@ export async function runHostedDomainCommand(
     return runPublishOperation(subcommand, rest, context);
   }
 
+  if (subcommand !== undefined && !isHelp(subcommand)) throw new Error(`Unknown command: ${domain} ${subcommand}`);
   printDomainVerbHelp(domain);
-  return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+  return 0;
 }
 
 // Manifest-driven verb grammar: `postplus media <verb> <endpointKey> ...`. The
@@ -633,8 +635,9 @@ export async function runMediaFileCommand(
   if (subcommand === 'download') {
     return runMediaFileDownload(rest, context);
   }
+  if (subcommand !== undefined && !isHelp(subcommand)) throw new Error(`Unknown command: media-file ${subcommand}`);
   printMediaFileHelp();
-  return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+  return 0;
 }
 
 /**
@@ -2678,8 +2681,9 @@ export async function runWorkflowCommand(args: string[]): Promise<number> {
     case 'launch':
       return runWorkflowLaunch(rest);
     default:
+      if (subcommand !== undefined && !isHelp(subcommand)) throw new Error(`Unknown command: workflow ${subcommand}`);
       printWorkflowHelp();
-      return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+      return 0;
   }
 }
 

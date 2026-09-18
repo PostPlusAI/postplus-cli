@@ -148,6 +148,15 @@ for (const skillFile of skillFiles) {
 for (const markdownFile of markdownFiles) {
   const text = fs.readFileSync(markdownFile, "utf8");
   const repoPath = toRepoPath(markdownFile);
+  // Cross-skill references occur inside business references as well as SKILL.md.
+  const sharedRoot = path.dirname(sharedRulebookRoot);
+  for (const match of text.matchAll(/postplus-shared\/([^\s`)*]+\.md)/gu)) {
+    const target = path.resolve(sharedRoot, match[1]);
+    if (!target.startsWith(sharedRoot + path.sep) || !fs.existsSync(target) || !fs.statSync(target).isFile()) {
+      report(errors, `${repoPath}: shared reference postplus-shared/${match[1]} is missing or escapes its skill directory.`);
+    }
+  }
+
   const sharedMarkdownMatches = text.match(SHARED_MARKDOWN_PATH_PATTERN) || [];
   for (const match of sharedMarkdownMatches) {
     report(

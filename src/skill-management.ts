@@ -54,6 +54,7 @@ export type SkillInstallStatusReport = {
   ok: boolean;
   installedCount: number;
   missingSkills: string[];
+  targetIssues?: { skill: string; agent: string; paths: string[] }[];
   requiredCount: number;
   scopes: string[];
   source: string;
@@ -86,6 +87,7 @@ type SkillMutationDependencies = {
 };
 
 type SkillMutationOptions = {
+  command?: 'install' | 'update';
   json?: boolean;
   yes?: boolean;
   messageMode?: 'explicit' | 'implicit';
@@ -93,7 +95,7 @@ type SkillMutationOptions = {
 };
 
 type ModifiedSkillBackupPrompt = {
-  action: 'uninstall' | 'update';
+  action: 'uninstall' | 'update' | 'install';
   scope: PostPlusSkillsInstallScope;
   skillNames: string[];
 };
@@ -182,7 +184,7 @@ async function reconcilePostPlusSkills(
   let installed = await listInstalledSkillsForMutationScope(dependencies, options.scope);
   let hashes = await readInstalledHashes(installed.filter((entry) => releasedSkills.has(entry.name) || retiredSkillNames.includes(entry.name)));
   const backup = await protectLocallyModifiedSkills({
-    action: 'update', dependencies, scope: options.scope,
+    action: options.command ?? 'update', dependencies, scope: options.scope,
     yes: options.yes, json: options.json, targetHashes: catalog.contentHashes, managedNames: retiredSkillNames,
   });
   const baselineIsCurrent = !shouldRepairManagedBaseline({ baseline, releaseId: catalog.releaseId, skillNames });
@@ -193,14 +195,14 @@ async function reconcilePostPlusSkills(
     const neededSkills = skillNames.filter((name) => !agentDirectoriesMatch(installed, hashes, name, agentTarget, catalog.contentHashes![name]!));
     if (neededSkills.length === 0) continue;
     targets.push(agentTarget);
-    const updateExitCode = await runSkillInstaller(dependencies,
+    const updateExitCode = await runSkillInstaller(dependencies, formatPostPlusSkillsInstallCommand(undefined, options.scope),
       process.execPath, buildPostPlusSkillUpdateArgs(neededSkills, options.scope, agentTarget),
       { stdin: 'ignore', stdout: 'capture', timeoutMs: 300_000 },
     );
     if (updateExitCode !== 0) {
       throw new SkillMutationError('postplus_skill_install_failed',
         `Skill installation stopped at ${agentTarget}; completed targets will be reused.`,
-        formatPostPlusSkillUpdateCommand(options.scope));
+        formatPostPlusSkillsInstallCommand(undefined, options.scope));
     }
     // The installer owns shared-directory/link behavior. Observe its actual
     // result before deciding whether another target still needs a write.
@@ -209,14 +211,14 @@ async function reconcilePostPlusSkills(
   }
 
   if (retiredSkillNames.length > 0) {
-    const removeExitCode = await runSkillInstaller(dependencies,
+    const removeExitCode = await runSkillInstaller(dependencies, formatPostPlusSkillsInstallCommand(undefined, options.scope),
       process.execPath,
       buildPostPlusSkillUninstallArgs(retiredSkillNames, options.scope),
       { stdin: 'ignore', stdout: 'capture', timeoutMs: 300_000 },
     );
 
     if (removeExitCode !== 0) {
-      throw new SkillMutationError('postplus_skill_remove_failed', 'Retired skill removal failed.', formatPostPlusSkillUpdateCommand(options.scope));
+      throw new SkillMutationError('postplus_skill_remove_failed', 'Retired skill removal failed.', formatPostPlusSkillsInstallCommand(undefined, options.scope));
     }
   }
 
@@ -304,6 +306,7 @@ class SkillMutationError extends Error {
 
 async function runSkillInstaller(
   dependencies: SkillMutationDependencies,
+  recoveryCommand: string,
   ...args: Parameters<typeof runInteractiveCommand>
 ): Promise<number> {
   try {
@@ -313,12 +316,14 @@ async function runSkillInstaller(
     if (cause instanceof CommandInterruptedError || cause instanceof CommandTimeoutError) throw cause;
     throw new SkillMutationError('postplus_skill_install_failed',
       'Skill maintenance could not finish; completed work will be reused.',
-      'Resolve the reported installer failure, then run postplus update again.', cause);
+      `Resolve the reported installer failure, then run ${recoveryCommand}.`, cause);
   }
 }
 
 class SkillReconciliationError extends Error {
   readonly code = 'postplus_skill_reconciliation_failed';
+  readonly retryable = false;
+  constructor(message: string, readonly action: string) { super(message); }
 }
 
 export async function runPostPlusSkillUninstall(
@@ -367,7 +372,7 @@ async function uninstallPostPlusSkills(
     managedNames: allKnownSkillNames,
   });
 
-  const exitCode = await runSkillInstaller(dependencies,
+  const exitCode = await runSkillInstaller(dependencies, formatPostPlusSkillUninstallCommand(options.scope),
     process.execPath,
     buildPostPlusSkillUninstallArgs(allKnownSkillNames, options.scope),
     { stdin: 'ignore', stdout: 'capture', timeoutMs: 300_000 },
@@ -480,10 +485,15 @@ async function inspectPostPlusSkillInstall(
     const missingSkills = [...requiredSkills].filter(
       (skill) => !installedNames.has(skill),
     );
+    const targetIssues: NonNullable<SkillInstallStatusReport['targetIssues']> = [];
     if (catalog.contentHashes) {
       const hashes = await readInstalledHashes(postPlusInstalled);
       for (const name of requiredSkills) {
-        if (POSTPLUS_SKILLS_AGENT_TARGETS.some((agent) => !agentDirectoriesMatch(postPlusInstalled, hashes, name, agent, catalog.contentHashes![name]!)) && !missingSkills.includes(name)) missingSkills.push(name);
+        for (const agent of POSTPLUS_SKILLS_AGENT_TARGETS) {
+          if (agentDirectoriesMatch(postPlusInstalled, hashes, name, agent, catalog.contentHashes[name]!)) continue;
+          if (!missingSkills.includes(name)) missingSkills.push(name);
+          targetIssues.push({skill:name,agent,paths:postPlusInstalled.filter(entry=>entry.name===name && entry.agentIds.includes(agent)).map(entry=>entry.path)});
+        }
       }
     }
     const baselineIsCurrent = !shouldRepairManagedBaseline({
@@ -509,12 +519,13 @@ async function inspectPostPlusSkillInstall(
           baselineIsCurrent,
         error: baselineIsCurrent
           ? null
-          : 'This installation has no verified current release. Run postplus update to install and verify it.',
+          : `This installation has no verified current release. Run ${formatPostPlusSkillsInstallCommand(undefined, scope)} to install and verify the bundled skills.`,
         installCommand: formatPostPlusSkillsInstallCommand(
           catalog.source,
           scope,
         ),
         installedCount: installedNames.size,
+        targetIssues,
         managedSkillsReleaseId: baseline.releaseId,
         missingSkills,
         requiredCount: requiredSkills.size,
@@ -563,14 +574,18 @@ export function formatSkillInstallStatusReport(
     lines.push(`[FAIL] Skill installer: ${report.error}`);
   } else if (report.ok) {
     lines.push(
-      `[PASS] Installed released skills: ${report.installedCount}/${report.requiredCount}`,
+      `[PASS] Skill kinds found: ${report.installedCount}/${report.requiredCount}`,
     );
   } else {
     lines.push(
-      `[FAIL] Installed released skills: ${report.installedCount}/${report.requiredCount}`,
+      `[FAIL] Skill kinds found: ${report.installedCount}/${report.requiredCount}`,
     );
   }
 
+  if (report.ok) lines.push('  All supported targets verified.');
+  for (const issue of report.targetIssues ?? []) {
+    lines.push(`  Target ${issue.agent} / ${issue.skill}: ${issue.paths.length ? 'content needs attention at ' + issue.paths.join(', ') : 'missing'}`);
+  }
   lines.push(`  Source: ${report.source}`);
   lines.push(
     `  Managed baseline: ${report.managedSkillsReleaseId ?? 'none'}`,
@@ -588,8 +603,8 @@ export function formatSkillInstallStatusReport(
 
   if (report.missingSkills.length > 0) {
     lines.push(
-      `  Missing: ${formatSkillList(report.missingSkills, 8)}`,
-      `  Fix: ${report.updateCommand}`,
+      `  Missing or unready across supported targets: ${formatSkillList(report.missingSkills, 8)}`,
+      `  Fix: ${report.installCommand}`,
     );
   } else {
     lines.push(`  Update: ${report.updateCommand}`);
@@ -607,14 +622,18 @@ export function formatSkillBaselineVerifyReport(
     lines.push(`[FAIL] Skill installer: ${report.error}`);
   } else if (report.ok) {
     lines.push(
-      `[PASS] Installed released skills: ${report.installedCount}/${report.requiredCount}`,
+      `[PASS] Skill kinds found: ${report.installedCount}/${report.requiredCount}`,
     );
   } else {
     lines.push(
-      `[FAIL] Installed released skills: ${report.installedCount}/${report.requiredCount}`,
+      `[FAIL] Skill kinds found: ${report.installedCount}/${report.requiredCount}`,
     );
   }
 
+  if (report.ok) lines.push('  All supported targets verified.');
+  for (const issue of report.targetIssues ?? []) {
+    lines.push(`  Target ${issue.agent} / ${issue.skill}: ${issue.paths.length ? 'content needs attention at ' + issue.paths.join(', ') : 'missing'}`);
+  }
   lines.push(`  Source: ${report.source}`);
   lines.push(
     `  Previous managed baseline: ${
@@ -638,8 +657,8 @@ export function formatSkillBaselineVerifyReport(
 
   if (report.missingSkills.length > 0) {
     lines.push(
-      `  Missing: ${formatSkillList(report.missingSkills, 8)}`,
-      `  Fix: ${report.updateCommand}`,
+      `  Missing or unready across supported targets: ${formatSkillList(report.missingSkills, 8)}`,
+      `  Fix: ${report.installCommand}`,
     );
   }
 
@@ -736,7 +755,7 @@ function haveSameSkillNames(left: string[], right: string[]): boolean {
 }
 
 async function protectLocallyModifiedSkills(input: {
-  action: 'uninstall' | 'update';
+  action: 'uninstall' | 'update' | 'install';
   dependencies: SkillMutationDependencies;
   scope: PostPlusSkillsInstallScope;
   yes?: boolean;
@@ -767,14 +786,14 @@ async function protectLocallyModifiedSkills(input: {
     return null;
   }
 
-  const skillNames = modifiedSkills.map((skill) => skill.name);
+  const skillNames = [...new Set(modifiedSkills.map((skill) => skill.name))];
   if (!input.yes && (input.json || input.dependencies.isInteractive?.() !== true)) {
     const retryCommand =
-      input.action === 'update'
-        ? formatPostPlusSkillUpdateCommand(input.scope)
-        : formatPostPlusSkillUninstallCommand(input.scope);
+      input.action === 'uninstall'
+        ? formatPostPlusSkillUninstallCommand(input.scope)
+        : input.action === 'install' ? formatPostPlusSkillsInstallCommand(undefined, input.scope) : formatPostPlusSkillUpdateCommand(input.scope);
     throw new SkillMutationError('postplus_skills_requires_human',
-      `Local skill content needs approval before ${input.action}: ${formatSkillList(skillNames, 8)}.`,
+      `Local skill content needs approval before ${input.action}: ${formatSkillList(skillNames, 8)}. Locations: ${formatSkillList(modifiedSkills.map(skill => skill.installedPath), 8)}.`,
       `Ask the user to approve backup and replacement, then run ${retryCommand} --yes.`);
   }
 
@@ -810,10 +829,10 @@ async function confirmModifiedSkillBackup(
 
   try {
     process.stdout.write(
-      `Locally modified PostPlus skills detected (${input.scope}): ${formatSkillList(input.skillNames, 8)}\n`,
+      `Local PostPlus content needs approval (${input.scope}): ${formatSkillList(input.skillNames, 8)}\n`,
     );
     const answer = await terminal.question(
-      input.action === 'update'
+      input.action !== 'uninstall'
         ? 'Back up the local versions and install the official release? [Y/n] '
         : 'Back up the local versions and uninstall the managed skills? [Y/n] ',
     );
@@ -847,7 +866,7 @@ async function backupModifiedSkills(
       verbatimSymlinks: true,
     });
     if (await hashSkillDirectory(skillBackupPath) !== skill.actualContentHash) {
-      throw new SkillMutationError('postplus_skill_backup_changed', 'Skill content changed while its backup was being made.', 'Stop editing the skill, then run postplus update again.');
+      throw new SkillMutationError('postplus_skill_backup_changed', 'Skill content changed while its backup was being made.', 'Stop editing the skill, then rerun the requested maintenance command.');
     }
     manifestEntries.push({
       ...skill,
@@ -916,6 +935,7 @@ async function verifyPostPlusSkillUpdate(input: {
       residualSkills: retiredSkills,
       scope: input.scope,
     }),
+    `Run ${formatPostPlusSkillsInstallCommand(undefined, input.scope)} to reconcile the bundled skills.`,
   );
 }
 
@@ -951,11 +971,12 @@ async function verifyPostPlusSkillUninstall(input: {
       residualSkills,
       scope: input.scope,
     }),
+    `Run ${formatPostPlusSkillUninstallCommand(input.scope)} to finish removing managed skills.`,
   );
 }
 
 function formatSkillReconciliationError(input: {
-  action: 'uninstall' | 'update';
+  action: 'uninstall' | 'update' | 'install';
   missingSkills: string[];
   residualSkills: string[];
   scope: PostPlusSkillsInstallScope;
@@ -963,7 +984,7 @@ function formatSkillReconciliationError(input: {
   const details: string[] = [];
 
   if (input.missingSkills.length > 0) {
-    details.push(`missing: ${formatSkillList(input.missingSkills, 8)}`);
+    details.push(`missing or unready targets for: ${formatSkillList(input.missingSkills, 8)}`);
   }
   if (input.residualSkills.length > 0) {
     details.push(

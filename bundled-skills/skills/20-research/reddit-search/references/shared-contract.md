@@ -26,11 +26,8 @@ Run `postplus research run <route> --help` when needed, then run with `--wait
 
 ## Failure And Recovery
 
-Hard command, auth, network, contract, unavailable, or privacy errors stop the
-route. Resume a checkpoint with `postplus research run --resume-from
-result.json`; never resubmit. For a successful but sparse/noisy result, apply
-the shared bounded recovery rule once, changing one semantic axis at a time and
-remaining inside the approved PostPlus credit scope.
+Execution failures follow `postplus-shared/references/shared-public-skill-rules.md`; stop after its permitted recovery is exhausted. Successful but insufficient evidence follows `postplus-shared/references/research-quality-recovery.md` within the existing scope and budget.
+Resume a pending checkpoint with `postplus research run --resume-from result.json`; never resubmit work that may have started. Privacy and unavailable-surface limits remain stops.
 
 ## Evidence
 

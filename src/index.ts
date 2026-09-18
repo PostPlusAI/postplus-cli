@@ -261,6 +261,7 @@ async function runSkillInstallCommand(rest: string[]): Promise<number> {
 
   return runPostPlusSkillUpdate(undefined, {
     ...options,
+    command: 'install',
     messageMode: 'explicit',
     scope: options.scope,
   });
@@ -318,9 +319,11 @@ Examples:
   postplus skills verify
   postplus skills verify --json
 
-Next: Follow the reported action; use postplus update for managed repair.
+Next: Follow the reported action; use postplus install to repair from this CLI's bundled skills.
 
 Install scope:
+  postplus install                      Repair global skills from the local bundle
+  postplus install --current-directory  Repair current project skills from the local bundle
   postplus update                       Update current project Skills when present, otherwise global
   postplus update --current-directory   Update PostPlus skills in the current directory
   postplus uninstall                    Remove global PostPlus skills
@@ -789,7 +792,7 @@ runMainWithRecovery().then(() => {
 });
 
 function printSkillMutationHelp(command: string, json: boolean): number {
-  const help = { purpose: command === 'install' ? 'Install the matching bundled skills; reuse already correct content.' : command === 'update' ? 'Update the CLI and reconcile its matching managed skills.' : 'Remove managed PostPlus skills while protecting local changes.', examples: [`postplus ${command}`, `postplus ${command} --current-directory`], next: 'Follow the reported action. Changes may require a new agent session; --yes authorizes backup and replacement only with user approval.', command: `postplus ${command}`, usage: `postplus ${command} [--current-directory] [--json] [--yes]`, options: { '--current-directory': 'Target this project.', '--json': 'Return machine-readable output.', '--yes': 'Authorize backup and replacement of locally modified managed skills.' } };
+  const help = { purpose: command === 'install' ? 'Install the matching bundled skills; reuse already correct content.' : command === 'update' ? 'Update the CLI and reconcile its matching managed skills.' : 'Remove managed PostPlus skills while protecting local changes.', examples: [`postplus ${command}`, `postplus ${command} --current-directory`], next: command === 'uninstall' ? 'Success means managed skills have been removed after protecting local changes. Start a new agent session to stop using previously loaded skills.' : 'Success means every supported installation target has been verified against this CLI bundle. It does not refresh the current agent session. Follow the reported action. Changes may require a new agent session; --yes authorizes backup and replacement only with user approval.', command: `postplus ${command}`, usage: `postplus ${command} [--current-directory] [--json] [--yes]`, options: { '--current-directory': 'Target this project.', '--json': 'Return machine-readable output.', '--yes': command === 'uninstall' ? 'Authorize backup and removal of locally changed managed skills.' : 'Authorize backup and replacement of locally modified managed skills.' } };
   if (json) process.stdout.write(`${JSON.stringify(help)}\n`);
   else process.stdout.write(`${help.purpose}\n\nUsage: ${help.usage}\n\nOptions:\n${Object.entries(help.options).map(([flag, detail]) => `${flag}  ${detail}`).join('\n')}\n\nExamples:\n${help.examples.join('\n')}\n\nNext: ${help.next}\n`);
   return 0;

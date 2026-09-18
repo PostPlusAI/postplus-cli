@@ -42,9 +42,7 @@ privacy boundary, sample, or deliverable. Do not ask for implementation details.
 
 - Start with one route and the smallest useful sample.
 - Keep independent sources separately attributable.
-- On hard auth, network, contract, or service errors, stop with the exact error.
-- On a successful but sparse/noisy result, apply
-  `postplus-shared/research-quality-recovery.md` once within the same bound.
+- Execution failures follow `postplus-shared/references/shared-public-skill-rules.md`; stop after its permitted recovery is exhausted. Successful but insufficient evidence follows `postplus-shared/references/research-quality-recovery.md` within the existing scope and budget.
 - Resume a pending checkpoint with
   `postplus research run --resume-from result.json`; never resubmit it.
 

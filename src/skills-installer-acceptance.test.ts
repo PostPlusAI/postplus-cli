@@ -104,6 +104,16 @@ for (const scope of ['global', 'project'] as const) {
     const blocked = await install();
     assert.equal(blocked.code, 1, blocked.stdout + blocked.stderr);
     assert.equal(JSON.parse(blocked.stdout).error.code, 'postplus_skills_requires_human');
+    assert.match(JSON.parse(blocked.stdout).error.action, /postplus install/);
+    assert.doesNotMatch(JSON.parse(blocked.stdout).error.action, /postplus update/);
+    assert.ok(JSON.parse(blocked.stdout).error.message.includes(independent.path));
+    const verification = await run(['--import',tsx,cli,'skills','verify','--json']);
+    assert.equal(verification.code,1);
+    const report=JSON.parse(verification.stdout);
+    assert.equal(report.installedCount,1);
+    assert.equal(report.ok,false);
+    assert.ok(report.targetIssues.some((issue: {paths:string[]})=>issue.paths.includes(independent.path)));
+
     assert.equal(await readFile(join(independent.path, 'SKILL.md'), 'utf8'), modified);
     assert.equal(await readFile(baselinePath, 'utf8'), before);
     const approved = await install('--yes');

@@ -461,8 +461,9 @@ export async function runRunsCommand(args: string[]): Promise<number> {
     return 0;
   }
 
+  if (subcommand !== undefined && !isHelp(subcommand)) throw new Error(`Unknown command: runs ${subcommand}`);
   printRunsHelp();
-  return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+  return 0;
 }
 
 function printRunsHelp(): void {

@@ -1,3 +1,4 @@
+import { PostPlusFailure } from './failure-contract.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
 import {
   readPostPlusCompatibilityError,
@@ -66,7 +67,7 @@ export async function resolveFreshRemoteAuth(
     ]);
 
   if (!cliSessionTokenState.present || !cliSessionTokenState.value) {
-    throw new Error('Run `postplus auth login` before using PostPlus auth.');
+    throw new PostPlusFailure('Run `postplus auth login` before using PostPlus auth.', { code: 'postplus_auth_required', stage: 'authentication', service: 'postplus-cloud', retryable: false, action: 'Run postplus auth login.' });
   }
   options.signal?.throwIfAborted();
 
@@ -129,9 +130,7 @@ export async function refreshRemoteAuthSession(input?: {
       : input.cliSessionToken;
 
   if (!cliSessionToken) {
-    throw new Error(
-      'Run `postplus auth login` before refreshing PostPlus auth.',
-    );
+    throw new PostPlusFailure('Run `postplus auth login` before refreshing PostPlus auth.', { code: 'postplus_auth_required', stage: 'authentication', service: 'postplus-cloud', retryable: false, action: 'Run postplus auth login.' });
   }
 
   const response = await sendAuthedCloudRequest({

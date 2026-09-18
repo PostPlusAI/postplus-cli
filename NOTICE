@@ -10,8 +10,14 @@ See the LICENSE file for the full text.
 Third-Party Notices
 -------------------
 
-This project has no runtime npm dependencies. The compiled release artifact
-contains only code authored in this repository.
+The distributed CLI includes PostPlus code and third-party runtime dependencies,
+including cross-spawn and Undici. Skill installation uses a bundled, pinned
+skills runtime with a PostPlus read-only query patch.
+
+Third-party code retains its respective copyright and license terms. See
+vendor/skills-runtime/licenses/ for the bundled installer notices and licenses,
+and each runtime dependency's package for its license. The installer integrity
+manifest records upstream versions and the applied patch identity.
 
 Development tooling (TypeScript, tsx, @types/node) is used at build time only
 and is not included in the distributed artifact.

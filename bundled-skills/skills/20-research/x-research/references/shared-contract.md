@@ -29,8 +29,7 @@ accounts with `x-profiles`.
 - Keep multiple markets/queries separately attributable.
 - Preserve post/profile URL, observed timestamp, visible metrics, and raw JSON.
 - Treat public metrics as observations, not proof of reach or conversion.
-- Stop on hard errors; use the shared bounded recovery rule for successful but
-  sparse/noisy evidence.
+- Execution failures follow `postplus-shared/references/shared-public-skill-rules.md`; stop after its permitted recovery is exhausted. Successful but insufficient evidence follows `postplus-shared/references/research-quality-recovery.md` within the existing scope and budget.
 - Resume with `postplus research run --resume-from result.json`; never resubmit.
 
 Protected accounts, DMs, hidden analytics, complete follower graphs, exhaustive

@@ -210,11 +210,16 @@ export async function resolvePostPlusSkillsScope(): Promise<PostPlusSkillsInstal
     // An unreadable/deleted cwd or invalid lock must not redirect a project
     // update into the user's global installation.
     await realpath(process.cwd());
+    // Bundled installs have a local source in the third-party lock. The owned
+    // project baseline identifies their scope without relying on a GitHub URL.
+    const baseline = await readManagedSkillBaseline('current-directory');
+    if (baseline.releaseId !== null) return 'current-directory';
     const project = await readPostPlusInstallerLockedSkillEntries(
       'current-directory',
     );
     return project.length > 0 ? 'current-directory' : 'global';
   } catch (cause) {
+    if (cause instanceof PostPlusSkillsStateError) throw cause;
     throw new PostPlusSkillsStateError('scope', cause);
   }
 }

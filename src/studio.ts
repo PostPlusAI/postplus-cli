@@ -79,9 +79,7 @@ export async function runStudioCommand(args: string[]): Promise<number> {
       return 0;
     }
     default:
-      process.stderr.write(`Unknown studio command: ${subcommand}\n\n`);
-      printStudioHelp();
-      return 1;
+      throw new Error(`Unknown command: studio ${subcommand}`);
   }
 }
 

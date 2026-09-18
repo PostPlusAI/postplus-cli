@@ -77,3 +77,32 @@ test('invalid options suggest the nearest valid command help and diagnostics exp
   assert.match(help.results, /does not guarantee/);
   assert.match(help.next, /skills verify/);
 });
+
+
+test('unknown public subcommands return one JSON failure and a valid family help action', async () => {
+  for (const command of ['publish','media','research','workflow','studio','runs','media-file']) {
+    await assert.rejects(exec(process.execPath,['--import','tsx','src/index.ts',command,'not-a-command','--json']), (error:any) => {
+      const payload=JSON.parse(error.stdout);
+      assert.equal(payload.ok,false,command);
+      assert.equal(payload.error.code,'postplus_invalid_arguments',command);
+      assert.equal(payload.error.action,`Run postplus ${command} --help.`,command);
+      return true;
+    });
+  }
+});
+
+
+test('unauthenticated doctor preserves the login action and local checks in JSON', async (t) => {
+  const directory=await mkdtemp(join(tmpdir(),'postplus-no-session-'));
+  t.after(()=>rm(directory,{recursive:true,force:true}));
+  await assert.rejects(exec(process.execPath,['--import','tsx','src/index.ts','doctor','--json'],{
+    env:{...process.env,POSTPLUS_CONFIG_DIR:directory,POSTPLUS_CLI_SESSION_TOKEN:''},
+  }), (error:any) => {
+    const report=JSON.parse(error.stdout);
+    const auth=report.checks.find((check:any)=>check.id==='remote_auth');
+    assert.equal(auth.failure.code,'postplus_auth_required');
+    assert.equal(auth.failure.action,'Run postplus auth login.');
+    assert.ok(report.checks.some((check:any)=>check.id==='local_dependencies'));
+    return true;
+  });
+});

@@ -1,3 +1,4 @@
+import { PostPlusFailure } from './failure-contract.js';
 import { formatAccountBindingLines } from './account-binding-display.js';
 import { refreshRemoteAuthSession } from './auth-session.js';
 import { clearAuthState, generateAuthStatusReport } from './auth.js';
@@ -54,7 +55,7 @@ export async function revokeRemoteAuth() {
   ]);
 
   if (!cliSessionTokenState.present || !cliSessionTokenState.value) {
-    throw new Error('Run `postplus auth login` before revoking PostPlus auth.');
+    throw new PostPlusFailure('Run `postplus auth login` before revoking PostPlus auth.', { code: 'postplus_auth_required', stage: 'authentication', service: 'postplus-cloud', retryable: false, action: 'Run postplus auth login.' });
   }
 
   const response = await sendAuthedCloudRequest({
