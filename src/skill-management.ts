@@ -34,7 +34,7 @@ import {
   resolvePostPlusSkillsScope,
 } from './skill-installation.js';
 
-import { hashSkillDirectory, SkillsBundleError } from './skills-bundle.js';
+import { hashSkillDirectory, SkillsBundleError, UnsupportedSkillEntryError } from './skills-bundle.js';
 
 export const SKILLS_INSTALLER_ENTRY = fileURLToPath(new URL('../vendor/skills-runtime/cli.mjs', import.meta.url));
 const SKILLS_INSTALLER_ARGS = [SKILLS_INSTALLER_ENTRY];
@@ -275,7 +275,7 @@ function reportPostPlusSkillReconcileSuccess(input: {
   backup: SkillBackup | null;
 }): void {
   const session = { newSessionRequired: input.changed,
-    action: input.changed ? 'Start a new agent session to use the verified skills.' : null };
+    action: input.changed ? 'Start a new agent session to use the verified skills. Then say: "Help me get started with PostPlus" (or "带我开始使用 PostPlus").' : null };
   if (input.options.json) {
     process.stdout.write(`${JSON.stringify({ ok: true, outcome: input.outcome, releaseId: input.catalog.releaseId,
       skillCount: input.skillCount, retiredSkillCount: input.retiredSkillCount, scope: input.options.scope,
@@ -1061,6 +1061,11 @@ async function readInstalledHash(entry: InstalledSkillEntry): Promise<string | n
     }
     return await hashSkillDirectory(entry.path);
   } catch (error) {
+    if (error instanceof UnsupportedSkillEntryError) {
+      throw new SkillMutationError('postplus_skills_directory_unreadable',
+        `Installed skill content cannot be verified at ${error.path}.`,
+        'Move the symbolic link or special file out of the installed skill directory, then rerun the command.');
+    }
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   }

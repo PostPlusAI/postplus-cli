@@ -124,6 +124,25 @@ export function formatHostedBalanceReport(report: HostedBalanceReport): string {
 }
 
 export async function runBalanceCommand(args: string[]): Promise<number> {
+  if (args.some(isHelp)) {
+    process.stdout.write(`Show the selected account's available and reserved credits.
+
+Usage:
+  postplus balance [--json]
+
+Options:
+  --json      Return structured account balances.
+  --help, -h  Show help without contacting the service.
+
+Examples:
+  postplus balance
+  postplus balance --json
+
+Next:
+  Use postplus runs list to inspect recent usage. Running balance requires authentication.
+`);
+    return 0;
+  }
   const json = assertOnlyJsonFlag(args, 'balance');
   const report = await fetchHostedBalance();
 
@@ -411,6 +430,11 @@ export function formatHostedRunDetailReport(report: HostedRunDetail): string {
 export async function runRunsCommand(args: string[]): Promise<number> {
   const [subcommand, ...rest] = args;
 
+  if ((subcommand === 'list' || subcommand === 'show') && rest.some(isHelp)) {
+    printRunsHelp();
+    return 0;
+  }
+
   if (subcommand === 'list') {
     const options = parseRunsListOptions(rest);
     const report = await fetchHostedRunsList(options);
@@ -450,6 +474,14 @@ Usage:
 
 Runs are read-only hosted run history for the selected account. list defaults to
 the most recent runs; show returns the full record including settled actual cost.
+
+Examples:
+  postplus runs list --limit 10
+  postplus runs show <run-id> --json
+
+Next:
+  Inspect a run's reported error or result before deciding whether to retry.
+  --help, -h shows help without authentication or hosted requests.
 `);
 }
 

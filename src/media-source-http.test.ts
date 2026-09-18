@@ -93,6 +93,9 @@ async function proxy(t: TestContext, status = 200, stall = false) {
   const sockets = new Set<Socket>();
   const received = Promise.withResolvers<void>();
   const secure = tls.createServer({ key, cert }, (socket) => {
+    // Client cancellation/dispatcher shutdown may reset this fixture peer.
+    // Request promises and response assertions still verify client failures.
+    socket.on('error', () => {});
     socket.once('data', (data) => {
       requests.push(data.toString());
       received.resolve();
@@ -400,7 +403,7 @@ test('macOS rejects automatic/SOCKS proxies and reads enabled HTTPS', async (t) 
   });
   stdout =
     '<dictionary> {\n  HTTPSEnable : 1\n  HTTPSProxy : localhost\n  HTTPSPort : 8080\n  SOCKSEnable : 1\n}';
-  await assert.rejects(readMediaProxyEnvironment(), {code:'postplus_proxy_configuration_unsupported'});
+  assert.deepEqual(await readMediaProxyEnvironment(), { HTTPS_PROXY: 'http://localhost:8080' });
 });
 
 for (const systemProxy of [false,true]) {
@@ -412,7 +415,7 @@ for (const systemProxy of [false,true]) {
       Object.defineProperty(process,'platform',{value:'darwin'});
       const port=new URL(fixture.url).port;
       const previous=childProcess.execFile;
-      childProcess.execFile=Object.assign(()=>{}, {[promisify.custom]:async()=>({stdout:`<dictionary> {\nHTTPSEnable : 1\nHTTPSProxy : 127.0.0.1\nHTTPSPort : ${port}\n}`,stderr:''})}) as typeof childProcess.execFile;
+      childProcess.execFile=Object.assign(()=>{}, {[promisify.custom]:async()=>({stdout:`<dictionary> {\nHTTPSEnable : 1\nHTTPSProxy : 127.0.0.1\nHTTPSPort : ${port}\nSOCKSEnable : 1\n}`,stderr:''})}) as typeof childProcess.execFile;
       syncBuiltinESMExports();
       t.after(()=>{childProcess.execFile=previous;syncBuiltinESMExports();});
     } else process.env.HTTPS_PROXY=fixture.url;

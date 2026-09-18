@@ -1,3 +1,4 @@
+import { PostPlusFailure } from './failure-contract.js';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -458,7 +459,7 @@ export async function prepareVideoAnalysisInput(
       }
       return response;
     } catch (error) {
-      if (error instanceof PostPlusNetworkRequestError) throw error;
+      if (error instanceof PostPlusNetworkRequestError || error instanceof PostPlusFailure) throw error;
       throw new VideoTransferError('media_video_upload_result_unknown', true, {
         cause: error,
       });

@@ -55,7 +55,7 @@ export async function runStudioCommand(args: string[]): Promise<number> {
     return 0;
   }
 
-  if (rest.some((arg) => ['help', '--help', '-h'].includes(arg))) {
+  if (['init', 'open', 'status'].includes(subcommand) && rest.some((arg) => ['help', '--help', '-h'].includes(arg))) {
     printStudioHelp();
     return 0;
   }
@@ -95,6 +95,14 @@ Usage:
 
 Local Studio is a public local workspace included in the PostPlus CLI package.
 Studio creates a visible "PostPlus Studio" folder inside the selected working directory and opens the bundled local dashboard.
+
+Examples:
+  postplus studio init --workdir ./campaign
+  postplus studio open --workdir ./campaign --no-browser
+
+Next:
+  Open the printed dashboard URL; use postplus studio status to inspect the workspace.
+  --help, -h shows help without creating files or starting a server.
 `);
 }
 

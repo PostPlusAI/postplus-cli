@@ -59,3 +59,31 @@ for (const code of ['CERT_HAS_EXPIRED', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIG
     });
   });
 }
+
+test('cloud and media preserve the same actionable proxy preflight failure without sending requests', async (t) => {
+  const { createImageSourceFetcher } = await import('./media-source-http.js');
+  const { formatFailure } = await import('./failure-contract.js');
+  const env = process.env;
+  t.after(() => { process.env = env; });
+  process.env = { ALL_PROXY: 'socks5://localhost:1080' };
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async () => { requests++; throw new Error('unexpected request'); });
+  const facts = [];
+  for (const operation of [
+    () => fetchWithNetworkDiagnostics(target, {}, { label: 'test', redirectPolicy: 'error' }),
+    () => createImageSourceFetcher(),
+  ]) {
+    await assert.rejects(operation(), (error) => {
+      const fact = toFailureFact(error);
+      assert.equal(fact.code, 'postplus_proxy_configuration_unsupported');
+      assert.equal(fact.stage, 'proxy-configuration');
+      assert.equal(fact.retryable, false);
+      assert.match(formatFailure(fact), /ALL_PROXY/);
+      assert.doesNotMatch(formatFailure(fact), /could not reach/);
+      facts.push(fact);
+      return true;
+    });
+  }
+  assert.deepEqual(facts[0], facts[1]);
+  assert.equal(requests, 0);
+});

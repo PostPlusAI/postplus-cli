@@ -4,7 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { hashSkillDirectory, readSkillsManifest } from './skills-bundle.js';
+import { hashSkillDirectory, readSkillsManifest, UnsupportedSkillEntryError } from './skills-bundle.js';
 import { loadPublicSkillCatalog } from './skill-catalog.js';
 import { runPostPlusSkillUpdate } from './skill-management.js';
 import { readManagedSkillBaseline, writeManagedSkillBaseline } from './skill-installation.js';
@@ -56,7 +56,9 @@ test('bundle rejects traversal and symbolic links', async (t) => {
   await writeFile(join(bundle, 'skills-manifest.json'), JSON.stringify({ ...manifest, skills: [{ ...manifest.skills[0], path: 'skills/../outside/SKILL.md' }] }));
   await assert.rejects(readSkillsManifest(bundle), { code: 'postplus_skills_bundle_invalid' });
   await symlink(join(skill, 'SKILL.md'), join(skill, 'link'));
-  await assert.rejects(hashSkillDirectory(skill), { code: 'postplus_skills_bundle_invalid' });
+  await assert.rejects(hashSkillDirectory(skill), UnsupportedSkillEntryError);
+  await writeFile(join(bundle, 'skills-manifest.json'), JSON.stringify(manifest));
+  await assert.rejects(readSkillsManifest(bundle), { code: 'postplus_skills_bundle_invalid' });
 });
 
 test('matching target content adopts baseline despite stale third-party lock and repeats without installation', async (t) => {
@@ -188,4 +190,31 @@ test('two links to the same modified real directory produce one complete backup 
   const manifest = JSON.parse(await readFile(join(f.root, 'config/skill-backups', backup!, 'manifest.json'), 'utf8'));
   assert.equal(manifest.skills.length, 1);
   assert.equal(await readFile(join(manifest.skills[0].backupPath, 'SKILL.md'), 'utf8'), 'User-owned content');
+});
+
+
+test('unsupported installed content is preserved and never reported as a damaged CLI bundle', async (t) => {
+  const f = await setup(t);
+  await cp(f.skill, f.installed, { recursive: true });
+  const linkedFile = join(f.installed, 'user-link');
+  await symlink(join(f.installed, 'SKILL.md'), linkedFile);
+  let mutations = 0;
+  const deps = {
+    runCommand: async () => ({ stdout: serializeInstallerEntries([{ name: 'demo', path: f.installed, scope: 'global', agents: labels }]), stderr: '' }),
+    runInteractiveCommand: async () => { mutations++; return 0; },
+    isInteractive: () => false,
+  };
+  for (const yes of [false, true]) {
+    await assert.rejects(runPostPlusSkillUpdate(deps, { scope: 'global', yes }), (error: unknown) => {
+      assert.equal((error as { code: string }).code, 'postplus_skills_directory_unreadable');
+      assert.ok((error as Error).message.includes(linkedFile));
+      assert.match((error as { action: string }).action, /Move the symbolic link or special file/);
+      assert.doesNotMatch((error as { action: string }).action, /Reinstall/);
+      return true;
+    });
+  }
+  assert.equal(mutations, 0);
+  const { lstat } = await import('node:fs/promises');
+  assert.equal((await lstat(linkedFile)).isSymbolicLink(), true);
+  assert.equal(await readFile(linkedFile, 'utf8'), await readFile(join(f.skill, 'SKILL.md'), 'utf8'));
 });

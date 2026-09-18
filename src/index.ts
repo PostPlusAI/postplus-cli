@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { PostPlusFailure, writeFailure, toFailureFact, formatFailure } from './failure-contract.js';
+import { buildVerbTargetIndex } from './hosted-manifest-index.js';
 import { readFile } from 'node:fs/promises';
 
 import {
@@ -64,6 +65,7 @@ import {
 
 function printAuthHelp(): void {
   process.stdout.write(`PostPlus CLI — auth commands
+Manage the selected account session. Help does not sign in or change credentials.
 
 Usage:
   postplus auth login [--no-browser]  Sign in with your PostPlus account in a browser
@@ -77,12 +79,19 @@ Options:
   --no-browser  Print the login URL without opening a browser (login only)
   --json        Output results as JSON (status, validate, refresh, revoke, logout)
 
+Examples:
+  postplus auth login
+  postplus auth status --json
+
+Next: Use postplus auth validate to check the session remotely, or postplus doctor to inspect readiness.
 Run \`postplus help\` for all commands.
 `);
 }
 
 function printHelp(): void {
   process.stdout.write(`PostPlus CLI
+Install and maintain PostPlus skills, inspect readiness, and run supported tasks.
+Use postplus <command> --help, -h, or postplus help <command> [subcommand].
 
 Usage:
   postplus auth login [--no-browser]
@@ -125,6 +134,8 @@ First-time setup:
 
 To keep Skills inside the current project:
   postplus install --current-directory
+
+Next: Use postplus status for an overview, or postplus doctor after a readiness failure.
 `);
 }
 
@@ -265,6 +276,7 @@ async function runSkillUninstallCommand(rest: string[]): Promise<number> {
 }
 
 async function runSkillsCommand(rest: string[]): Promise<number> {
+  if (rest[0] === 'verify' && rest.slice(1).some(isHelpArg)) return runSkillsCommand(['help']);
   const [subcommand] = rest;
 
   switch (subcommand) {
@@ -273,10 +285,7 @@ async function runSkillsCommand(rest: string[]): Promise<number> {
       const unknownOption = options.find((option) => option !== '--json');
 
       if (unknownOption) {
-        process.stderr.write(
-          `Unknown option for skills verify: ${unknownOption}\n`,
-        );
-        return 1;
+        throw new Error(`Unknown option for skills verify: ${unknownOption}`);
       }
 
       const report = await runPostPlusSkillVerify();
@@ -302,6 +311,13 @@ Usage:
 
 Options:
   --json    Output results as JSON
+  --help, -h  Show help without verifying files
+
+Examples:
+  postplus skills verify
+  postplus skills verify --json
+
+Next: Follow the reported action; use postplus update for managed repair.
 
 Install scope:
   postplus update                       Update current project Skills when present, otherwise global
@@ -311,33 +327,31 @@ Install scope:
 
 Local changes:
   Interactive updates ask to back up locally modified managed skills before replacing them.
-  Non-interactive updates stop before mutation and require an interactive confirmation.
+  Non-interactive updates stop before replacing local changes unless --yes explicitly authorizes backup and replacement.
+  --json changes output only; it does not authorize replacement.
 `);
       return 0;
     default:
-      process.stderr.write(`Unknown skills command: ${subcommand}\n`);
-      return 1;
+      throw new Error(`Unknown command: skills ${subcommand}`);
   }
 }
 
 async function runQuoteCommand(rest: string[]): Promise<number> {
+  if (!rest.length || isHelpArg(rest[0]!) || (rest[0] === 'confirm' && rest.some(isHelpArg))) return printQuoteHelp();
   const [subcommand, ...options] = rest;
 
   if (subcommand !== 'confirm') {
-    process.stderr.write(`Unknown quote command: ${subcommand ?? ''}\n`);
-    return 1;
+    throw new Error(`Unknown command: quote ${subcommand}`);
   }
 
   const parsed = parseQuoteConfirmOptions(options);
 
   if (!parsed.json) {
-    process.stderr.write('quote confirm requires --json.\n');
-    return 1;
+    throw new Error('quote confirm requires --json.');
   }
 
   if (!parsed.challengeFile) {
-    process.stderr.write('quote confirm requires --challenge-file.\n');
-    return 1;
+    throw new Error('quote confirm requires --challenge-file.');
   }
 
   const challenge = readLargeCreditQuoteConfirmationChallenge(
@@ -585,8 +599,12 @@ async function main(): Promise<void> {
     throw new Error(
       `PostPlus CLI requires Node.js ${manifest.engines.node}; found ${process.versions.node}. Upgrade Node.js before running this command.`,
     );
-  const [command, ...rest] = process.argv.slice(2);
-  await assertConfigFilePermissions();
+  const inputArgs = process.argv.slice(2);
+  const args = inputArgs[0] === 'help' && inputArgs[1] && !inputArgs[1].startsWith('-')
+    ? [...inputArgs.slice(1), '--help'] : inputArgs;
+  const [command, ...rest] = args;
+  // Asking how to use a command must not inspect or mutate account state.
+  if (command && !args.some(isHelpArg)) await assertConfigFilePermissions();
   const json = rest.includes('--json');
 
   switch (command) {
@@ -599,11 +617,15 @@ async function main(): Promise<void> {
     case '--version':
     case '-v':
     case 'version':
+      if (rest.some(isHelpArg)) { process.exitCode = printReadOnlyHelp('version', json); return; }
+      assertOnlyOptions(rest, [], 'version');
       process.exitCode = await runVersion();
       return;
     case 'help': {
       const [helpTopic] = rest;
-      if (helpTopic === 'auth') {
+      if (helpTopic === 'doctor' || helpTopic === 'status') {
+        printDiagnosticHelp(helpTopic, json);
+      } else if (helpTopic === 'auth') {
         printAuthHelp();
       } else if (helpTopic === 'skills') {
         await runSkillsCommand(['help']);
@@ -618,6 +640,7 @@ async function main(): Promise<void> {
       return;
     }
     case 'doctor':
+      if (rest.some(isHelpArg)) { process.exitCode = printDiagnosticHelp('doctor', json); return; }
       process.exitCode = await runDoctor(parseDiagnosticOptions(rest));
       return;
     case 'balance':
@@ -671,13 +694,21 @@ async function main(): Promise<void> {
       process.exitCode = await runSkillUninstallCommand(rest);
       return;
     case 'list':
+      if (rest.some(isHelpArg)) { process.exitCode = printReadOnlyHelp('list', json); return; }
+      assertOnlyOptions(rest, ['--json'], 'list');
       process.exitCode = await runList(json);
       return;
     case 'status':
+      if (rest.some(isHelpArg)) { process.exitCode = printDiagnosticHelp('status', json); return; }
       process.exitCode = await runStatus(parseDiagnosticOptions(rest));
       return;
     case 'auth': {
       const [subcommand, ...authRest] = rest;
+      if (authRest.some(isHelpArg)) {
+        if (!['login', 'refresh', 'revoke', 'status', 'validate', 'logout'].includes(subcommand ?? '')) throw new Error(`Unknown command: auth ${subcommand}`);
+        printAuthHelp(); process.exitCode = 0; return;
+      }
+      if (['refresh', 'revoke', 'status', 'validate', 'logout'].includes(subcommand ?? '')) assertOnlyOptions(authRest, ['--json'], `auth ${subcommand}`);
       switch (subcommand) {
         case 'login': {
           if (authRest.some(isHelpArg)) {
@@ -687,12 +718,7 @@ async function main(): Promise<void> {
           }
           const unknownOption = authRest.find((arg) => arg !== '--no-browser');
           if (unknownOption !== undefined) {
-            process.stderr.write(
-              `Unknown auth login option: ${unknownOption}\n\n`,
-            );
-            printAuthHelp();
-            process.exitCode = 1;
-            return;
+            throw new Error(`Unknown option for auth login: ${unknownOption}`);
           }
           process.exitCode = await runAuthLogin(
             !authRest.includes('--no-browser'),
@@ -722,10 +748,7 @@ async function main(): Promise<void> {
           process.exitCode = 0;
           return;
         default:
-          process.stderr.write(`Unknown auth command: ${subcommand}\n\n`);
-          printAuthHelp();
-          process.exitCode = 1;
-          return;
+          throw new Error(`Unknown command: auth ${subcommand}`);
       }
     }
     default:
@@ -760,13 +783,97 @@ async function runMainWithRecovery(): Promise<void> {
 runMainWithRecovery().then(() => {
   if (process.exitCode && process.exitCode !== 0) process.exitCode = 1;
 }).catch((error: unknown) => {
-  writeFailure(error, { json: process.argv.includes('--json'), stage: process.argv[2] ?? 'command' });
+  writeFailure(error, { json: process.argv.includes('--json'), stage: process.argv[2] ?? 'command', helpCommand: helpCommandForArgs(process.argv.slice(2)) });
   process.exitCode = 1;
 });
 
 function printSkillMutationHelp(command: string, json: boolean): number {
-  const help = { command: `postplus ${command}`, usage: `postplus ${command} [--current-directory] [--json] [--yes]`, options: { '--current-directory': 'Target this project.', '--json': 'Return machine-readable output.', '--yes': 'Authorize backup and replacement of locally modified managed skills.' } };
-  if (json) writeJson(help);
-  else process.stdout.write(`${help.usage}\n\n${Object.entries(help.options).map(([flag, detail]) => `${flag}  ${detail}`).join('\n')}\n`);
+  const help = { purpose: command === 'install' ? 'Install the matching bundled skills; reuse already correct content.' : command === 'update' ? 'Update the CLI and reconcile its matching managed skills.' : 'Remove managed PostPlus skills while protecting local changes.', examples: [`postplus ${command}`, `postplus ${command} --current-directory`], next: 'Follow the reported action. Changes may require a new agent session; --yes authorizes backup and replacement only with user approval.', command: `postplus ${command}`, usage: `postplus ${command} [--current-directory] [--json] [--yes]`, options: { '--current-directory': 'Target this project.', '--json': 'Return machine-readable output.', '--yes': 'Authorize backup and replacement of locally modified managed skills.' } };
+  if (json) process.stdout.write(`${JSON.stringify(help)}\n`);
+  else process.stdout.write(`${help.purpose}\n\nUsage: ${help.usage}\n\nOptions:\n${Object.entries(help.options).map(([flag, detail]) => `${flag}  ${detail}`).join('\n')}\n\nExamples:\n${help.examples.join('\n')}\n\nNext: ${help.next}\n`);
   return 0;
+}
+
+function printDiagnosticHelp(command: 'doctor' | 'status', json: boolean): number {
+  const help = {
+    command: `postplus ${command}`,
+    purpose: command === 'doctor'
+      ? 'Check PostPlus readiness and identify blocking problems. Use after a setup or task readiness failure.'
+      : 'Show overall PostPlus status: readiness checks, authentication, installed skills, and available updates.',
+    usage: `postplus ${command} [--skill <skill-id>] [--json]`,
+    options: {
+      '--skill <skill-id>': 'Inspect requirements relevant to a specific released skill.',
+      '--json': 'Show the complete structured report.',
+      '--help, -h': 'Show help without login, checks, or network requests.',
+    },
+    checks: command === 'doctor'
+      ? ['Client compatibility', 'Service configuration', 'Hosted capabilities', 'Local dependencies', 'Authentication', 'Skill catalog']
+      : ['Includes doctor checks, auth state, installed skill content, and update information'],
+    examples: [`postplus ${command}`, `postplus ${command} --skill video-transcription --json`],
+    results: command === 'doctor'
+      ? 'Blocking required checks return exit code 1. Exit code 0 does not guarantee every task-specific capability is ready.'
+      : 'Exit code 1 means a reported component needs attention; inspect --json for details.',
+    next: 'Follow the reported action, then check again. Verify installed skill content with postplus skills verify.',
+    related: command === 'doctor'
+      ? 'postplus status includes doctor plus auth, installed skills, and update information.'
+      : 'postplus doctor focuses on readiness checks and their suggested actions.',
+    limits: 'The command may contact PostPlus services. It does not prove this agent session has loaded skills. Help itself is offline.',
+  };
+  if (json) process.stdout.write(`${JSON.stringify(help)}\n`);
+  else process.stdout.write(`${help.purpose}\n\nUsage:\n  ${help.usage}\n\nOptions:\n${Object.entries(help.options).map(([flag, detail]) => `  ${flag}  ${detail}`).join('\n')}\n\nChecks:\n  ${help.checks.join(', ')}\n\nExamples:\n  ${help.examples.join('\n  ')}\n\nResults:\n  ${help.results}\n\nNext:\n  ${help.next}\n  ${help.related}\n\n${help.limits}\n`);
+  return 0;
+}
+
+function assertOnlyOptions(args: string[], allowed: string[], command: string): void {
+  const invalid = args.find((arg) => !allowed.includes(arg));
+  if (invalid) throw new Error(`Unknown option for ${command}: ${invalid}`);
+}
+
+function printReadOnlyHelp(command: 'list' | 'version', json: boolean): number {
+  const help = { command: `postplus ${command}`,
+    purpose: command === 'list' ? 'List released skills available in this CLI bundle.' : 'Show the installed CLI version.',
+    usage: `postplus ${command}${command === 'list' ? ' [--json]' : ''}`,
+    options: command === 'list' ? '--json: structured output; --help, -h: help' : '--help, -h: help',
+    examples: [`postplus ${command}`], next: command === 'list' ? 'Use postplus doctor --skill <skill-id> for task requirements.' : 'Use postplus status for readiness and update information.' };
+  process.stdout.write(json ? `${JSON.stringify(help)}\n` : `${help.purpose}\nUsage: ${help.usage}\nOptions: ${help.options}\nExamples: ${help.examples.join('\n')}\nNext: ${help.next}\n`);
+  return 0;
+}
+
+function printQuoteHelp(): number {
+  process.stdout.write(`Authorize a quoted operation only after user approval. Help does not confirm or execute anything.
+Usage: postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <credits>]
+Options:
+  --challenge-file  Read the challenge returned by the blocked operation.
+  --json  Required structured response.
+  --auto-confirm-under  Use only the user's already approved credit threshold.
+  --help, -h  Show this help.
+Examples:
+  postplus quote confirm --json --challenge-file ./challenge.json
+Next: After approval, use the returned token with the original operation's retry instructions.
+`);
+  return 0;
+}
+
+function helpCommandForArgs(args: string[]): string {
+  const [command, subcommand, target] = args[0] === 'help' ? args.slice(1) : args;
+  if (!command || command.startsWith('-')) return 'postplus';
+  const parts = ['postplus', command];
+  const children: Record<string, string[]> = {
+    auth: ['login', 'refresh', 'revoke', 'status', 'validate', 'logout'], skills: ['verify'], quote: ['confirm'],
+    runs: ['list', 'show'], studio: ['init', 'open', 'status'], workflow: ['list', 'show', 'runs', 'run-show', 'create', 'propose', 'save', 'quote', 'launch'],
+    research: ['schema', 'run'], media: ['schema', 'poll', 'prepare', 'estimate', ...buildVerbTargetIndex('media').keys()],
+    publish: ['schema', ...[...buildVerbTargetIndex('publish').values()].flatMap((targets) => [...targets.keys()])],
+    'media-file': ['upload', 'download'],
+  };
+  if (subcommand && children[command]?.includes(subcommand)) {
+    if (/^[a-z][a-z0-9-]*$/.test(subcommand)) parts.push(subcommand);
+  }
+  if (target && parts.length === 3) {
+    const index = command === 'media' || command === 'research' ? buildVerbTargetIndex(command) : null;
+    const valid = command === 'research' || subcommand === 'estimate'
+      ? [...(index?.values() ?? [])].some((targets) => targets.has(target))
+      : index?.get(subcommand!)?.has(target);
+    if (valid) parts.push(target);
+  }
+  return parts.join(' ');
 }

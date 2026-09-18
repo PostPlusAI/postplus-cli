@@ -33,3 +33,21 @@ test('non-mac platforms preserve normal direct mode and reject unsupported expli
 test('NO_PROXY-only overrides system exclusions without disabling the system route',async()=>{
   assert.deepEqual(await resolveProxyConfiguration({environment:{NO_PROXY:'localhost'},platform:'darwin',readSystem:read('HTTPSEnable : 1\nHTTPSProxy : localhost\nHTTPSPort : 8080\nExceptionsList : <array> {\n0 : other.example\n}')}),{httpProxy:'',httpsProxy:'http://localhost:8080',noProxy:'localhost'});
 });
+
+test('coexisting SOCKS does not reject an explicit system route for the requested protocol', async () => {
+  for (const protocol of ['http:', 'https:']) {
+    const prefix = protocol === 'http:' ? 'HTTP' : 'HTTPS';
+    const options = { environment: {}, platform: 'darwin', protocol,
+      readSystem: read(`SOCKSEnable : 1\n${prefix}Enable : 1\n${prefix}Proxy : localhost\n${prefix}Port : 8080`) };
+    const config = await resolveProxyConfiguration(options);
+    assert.equal(protocol === 'http:' ? config.httpProxy : config.httpsProxy, 'http://localhost:8080');
+    await assert.rejects(resolveProxyConfiguration({ ...options, protocol: protocol === 'http:' ? 'https:' : 'http:' }),
+      { code: 'postplus_proxy_configuration_unsupported' });
+  }
+});
+
+test('coexisting SOCKS does not bypass unsupported system exclusions', async () => {
+  await assert.rejects(resolveProxyConfiguration({ environment: {}, platform: 'darwin',
+    readSystem: read('SOCKSEnable : 1\nHTTPSEnable : 1\nHTTPSProxy : localhost\nHTTPSPort : 8080\nExceptionsList : <array> {\n0 : 10.0.0.0/8\n}') }),
+    /proxy exclusion/);
+});

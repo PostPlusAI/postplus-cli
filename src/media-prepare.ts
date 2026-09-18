@@ -161,9 +161,9 @@ export async function runMediaPrepareCommand(
     readProductError?: (error: unknown) => Record<string, unknown> | undefined;
   } = {},
 ): Promise<number> {
-  if (args.length === 1 && ['--help', '-h'].includes(args[0]!)) {
+  if (args.some((arg) => ['help', '--help', '-h'].includes(arg))) {
     console.log(
-      'postplus media prepare --source <social-url-or-local-path>\nPrepare readable local evidence for your Agent. Video preparation acquires and validates the file without purchasing video inference.',
+      'postplus media prepare --source <social-url-or-local-path>\nPrepare readable local evidence for your Agent. Video preparation acquires and validates the file without purchasing video inference.\nOptions: --source supplies a supported URL or local path; --help/-h shows help.\nExamples: postplus media prepare --source ./clip.mp4\nNext: Use the returned local evidence with your selected analysis workflow.',
     );
     return 0;
   }

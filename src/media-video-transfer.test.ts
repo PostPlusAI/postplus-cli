@@ -612,8 +612,7 @@ test('local video uploads use the shared unsupported-proxy preflight before any 
         method: string;
         message: string;
       };
-      assert.equal(failure.code, 'postplus_cli_cloud_transport_failed');
-      assert.equal(failure.method, 'PREFLIGHT');
+      assert.equal(failure.code, 'postplus_proxy_configuration_unsupported');
       assert.match(failure.message, /proxy format/);
       assert.doesNotMatch(failure.message, /secret-session|signed-ticket/);
       return true;

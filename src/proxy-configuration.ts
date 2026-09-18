@@ -38,6 +38,7 @@ export function explicitProxyConfiguration(env: NodeJS.ProcessEnv): ProxyConfigu
 // explicit environment proxies; absent those, their normal direct route remains.
 export async function resolveProxyConfiguration(options: {
   environment?: NodeJS.ProcessEnv; platform?: string; readSystem?: () => Promise<string>;
+  protocol?: string;
 } = {}): Promise<ProxyConfiguration> {
   const env = options.environment ?? process.env;
   const explicit = explicitProxyConfiguration(env);
@@ -60,7 +61,6 @@ export async function resolveProxyConfiguration(options: {
     if(value !== undefined && !['0','1'].includes(value)) unsupported('PostPlus could not interpret system proxy enablement.');
   }
   if (['ProxyAutoConfigEnable','ProxyAutoDiscoveryEnable'].some((key)=>field(key)==='1')) unsupported('PostPlus does not support automatic PAC/WPAD proxy settings.');
-  if (field('SOCKSEnable')==='1') unsupported('PostPlus does not support system SOCKS proxy settings.');
   for (const [prefix,key] of [['HTTP','httpProxy'],['HTTPS','httpsProxy']] as const) {
     const enabled = field(`${prefix}Enable`);
     if (enabled !== undefined && !['0','1'].includes(enabled)) unsupported('PostPlus could not interpret system proxy enablement.');
@@ -68,6 +68,10 @@ export async function resolveProxyConfiguration(options: {
     const host=field(`${prefix}Proxy`); const port=field(`${prefix}Port`);
     if (!host || !/^[a-zA-Z0-9.\-]+$/u.test(host) || !port || !/^\d+$/u.test(port) || +port<1 || +port>65535) unsupported('PostPlus could not interpret the system proxy endpoint.');
     result[key]=`http://${host}:${port}`;
+  }
+  const requestedProxy = (options.protocol ?? 'https:') === 'http:' ? result.httpProxy : result.httpsProxy;
+  if (field('SOCKSEnable') === '1' && !requestedProxy) {
+    unsupported('PostPlus cannot use the system SOCKS proxy for this request; configure its HTTP/HTTPS proxy.');
   }
   // System HTTPS disabled means HTTPS is direct, unlike HTTP_PROXY's documented
   // environment fallback. Passing empty httpsProxy preserves that distinction.
@@ -86,6 +90,6 @@ export async function resolveProxyConfiguration(options: {
 }
 
 export async function createProxyDispatcher(options: ConstructorParameters<typeof EnvHttpProxyAgent>[0] = {}, protocol = 'https:') {
-  const config = await resolveProxyConfiguration();
+  const config = await resolveProxyConfiguration({ protocol });
   return new EnvHttpProxyAgent({...options,...config,...(protocol === 'https:' && !config.httpsProxy ? {httpProxy:''} : {})});
 }

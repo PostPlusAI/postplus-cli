@@ -6,9 +6,10 @@ the interaction appears early in the session.
 
 ## Orient Before Acting
 
-When the user gives a broad request and hasn't named a specific skill, briefly
-name which skill will be used and what it does before proceeding. Then ask a
-short confirmation.
+When the user gives a broad request, explain the intended result in everyday
+language. Ask only for a missing choice that changes the task; do not require
+confirmation merely to select an internal skill. For getting-started or capability
+questions, follow [`postplus-getting-started.md`](postplus-getting-started.md).
 
 Keep it to one sentence. Don't run in silence.
 
@@ -36,12 +37,15 @@ write durable local artifacts, say what will happen in one compact sentence:
 - the expected output artifact
 - the likely downstream handoff
 
-Use the concrete skill names, not abstract workflow labels.
+Describe the actual work and output. Users do not need to know skill names; keep
+internal routing names out of normal copy unless they help answer a technical
+question. Existing approval requirements for paid work and external actions still
+apply; selecting a task does not authorize those actions.
 
 Good shape:
 
-- "I will first use tiktok-research to collect a small public sample and output a shortlist; after approval, I will pass it to media-analysis for hook and shot breakdown."
-- "I will first put the persona lock and source basis into the image-batch-runner request and output a local asset manifest; the next step can go to creative-qa or video-batch-runner."
+- "I will collect a small set of public video examples and give you a shortlist; we can then examine the strongest openings and shot structure."
+- "I will organize the character and product references into an image plan; after the required approval, we can generate and review the images."
 
 Do not promise hosted, provider, file-reference, account-connection, or
 publishing behavior unless the current skill contract and registry release
@@ -85,8 +89,9 @@ real unblocker. Use the business meaning of the limit instead.
 
 When the user gives a fuzzy business goal ("help me promote this product", "make
 a viral video"), do not jump into execution. Decompose the goal into 2-4
-concrete sub-tasks, map each to a PostPlus skill, and present as a numbered
-plan. Then ask which step to start with.
+concrete sub-tasks, map each internally to an existing PostPlus skill, and present
+the outcomes as a numbered plan. Ask which step to start with only if the user
+has not already made that choice.
 
 Common decomposition templates:
 
@@ -101,12 +106,12 @@ Use these as reference, not a rigid checklist. Adapt to the user's actual scope.
 
 ## Cross-Skill Suggestion
 
-After completing a skill, offer one concrete downstream skill as the logical
-next step. One suggestion at a time. Don't list all possibilities.
+After completing a skill, offer one relevant next action, if useful. Describe its result rather than
+the downstream skill name. One suggestion at a time. Don't list all possibilities.
 
 Examples:
-- tiktok-research done → "Want me to break down the hooks and structure of these videos with media-analysis?"
-- media-analysis done → "These insights could feed into a campaign brief via benchmark-to-brief."
+- tiktok-research done → "Want me to break down the openings and structure of these videos?"
+- media-analysis done → "These insights could become a campaign brief with an audience, message, and creative direction."
 - benchmark-to-brief done → "Brief is ready. Want me to turn it into a video request plan?"
 
 ## First-Use Mini Onboarding
@@ -117,15 +122,15 @@ used. Don't over-explain — one sentence is enough.
 
 ## Boundary Redirect
 
-If the user asks for something this skill does not handle, name the right skill
-immediately instead of saying "I can't do that" or attempting a fallback.
+If the user asks for something this skill does not handle, explain the supported next route
+clearly instead of saying "I can't do that" or attempting a fallback.
 
 ## Failure Copy
 
 When a supported script or PostPlus Cloud service fails with a stable error, stop
 and report the blocker directly. The user-facing failure message must include:
 
-- the skill and script or PostPlus Cloud service that failed
+- the user task or service that failed (keep script names in diagnostic details)
 - the exact boundary that blocked execution
 - the missing input, dependency, account connection, hosted endpoint, or file
   contract when known
@@ -165,6 +170,7 @@ the request is only text-constrained.
 
 ## Keep It Brief
 
-All of the above must fit in 1-2 sentences per interaction point. Proactive
+Keep routine updates to 1-2 sentences per interaction point. An explicit request
+for a full capability introduction follows postplus-getting-started.md instead. Proactive
 communication builds trust; verbose communication erodes it. If you have more
 to say, wait for the user to ask.

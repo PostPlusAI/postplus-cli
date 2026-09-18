@@ -14,6 +14,12 @@ export class SkillsBundleError extends Error {
   readonly action = 'Reinstall PostPlus CLI from the official package.';
 }
 
+export class UnsupportedSkillEntryError extends Error {
+  constructor(readonly path: string) {
+    super(`Skill content contains a symbolic link or special file: ${path}`);
+  }
+}
+
 export type SkillsManifest = {
   schemaVersion: 1;
   releaseId: string;
@@ -29,7 +35,7 @@ export async function hashSkillDirectory(root: string): Promise<string> {
       const path = relative ? `${relative}/${entry.name}` : entry.name;
       if (entry.isDirectory()) await visit(path);
       else if (entry.isFile()) files.push(path);
-      else throw new SkillsBundleError('Skill content contains a symbolic link or special file.');
+      else throw new UnsupportedSkillEntryError(join(root, path));
     }
   }
   await visit('');

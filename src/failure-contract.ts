@@ -57,7 +57,7 @@ function string(value: unknown): string | undefined {
 
 export function toFailureFact(
   error: unknown,
-  context: { stage?: string; service?: string } = {},
+  context: { stage?: string; service?: string; helpCommand?: string } = {},
 ): FailureFact {
   const source: Record<string, unknown> = {
     ...record(error),
@@ -66,7 +66,7 @@ export function toFailureFact(
   const originalMessage =
     error instanceof Error ? error.message : string(source.message);
   const invalidArguments =
-    /^(?:Unknown (?:option|command|media endpoint|research route)|Missing value for)/u.test(
+    /^(?:Unknown (?:option|command|media endpoint|research route|media verb|[a-z-]+ target)|Missing (?:value for|required option)|Unexpected positional argument|--[a-z][a-z0-9-]* (?:must|requires)|(?:postplus )?(?:auth|quote|runs|skills|media|research|publish|workflow|studio)[^\n]* requires)/u.test(
       originalMessage ?? "",
     );
   const code =
@@ -128,7 +128,7 @@ export function toFailureFact(
       string(source.action) ??
         string(source.userAction) ??
         (invalidArguments
-          ? `Run postplus ${context.stage ?? ""} --help.`
+          ? `Run ${context.helpCommand ?? `postplus ${context.stage ?? ""}`.trim()} --help.`
           : upgrade
             ? "Run postplus update."
             : releasing
@@ -165,7 +165,7 @@ export function formatFailure(fact: FailureFact): string {
 
 export function writeFailure(
   error: unknown,
-  options: { json: boolean; stage?: string; service?: string },
+  options: { json: boolean; stage?: string; service?: string; helpCommand?: string },
 ): void {
   const failure = toFailureFact(error, options);
   if (options.json)
