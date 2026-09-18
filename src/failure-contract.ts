@@ -163,11 +163,18 @@ export function formatFailure(fact: FailureFact): string {
   return `${fact.message}\nNext: ${fact.action}`;
 }
 
+export function stopAutomaticRecovery(fact: FailureFact): FailureFact {
+  if (fact.action.startsWith('Stop automatic recovery')) return { ...fact, retryable: false };
+  return { ...fact, retryable: false,
+    action: `Stop automatic recovery and report this failure. Any further action requires the user to resolve the blocker: ${fact.action}` };
+}
+
 export function writeFailure(
   error: unknown,
-  options: { json: boolean; stage?: string; service?: string; helpCommand?: string },
+  options: { json: boolean; stage?: string; service?: string; helpCommand?: string; automaticRecovery?: boolean },
 ): void {
-  const failure = toFailureFact(error, options);
+  const fact = toFailureFact(error, options);
+  const failure = options.automaticRecovery ? stopAutomaticRecovery(fact) : fact;
   if (options.json)
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: failure }, null, 2)}\n`,

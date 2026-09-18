@@ -20,13 +20,11 @@ const SKILLS_ROOT = fs.existsSync(PUBLIC_SKILLS_ROOT)
 const VENDORED_SUPPORT_DIR = "_" + "postplus_shared";
 
 const REQUIRED_SHARED_RULEBOOK_FILES = [
-  "shared-ads-workflow.md",
-  "shared-product-selection-preferences.md",
-  "shared-public-skill-rules.md",
-  "shared-research-preferences.md",
-  "shared-source-of-truth-files.md",
-  "shared-tiktok-music-workflow.md",
-  "shared-user-guidance.md",
+  'postplus-getting-started.md',
+  'shared-public-skill-rules.md',
+  'research-quality-recovery.md',
+  'dataset-item-schemas.md',
+  'shared-source-of-truth-files.md',
 ];
 const REMOVED_INDEX_FILE = "INDEX" + ".md";
 

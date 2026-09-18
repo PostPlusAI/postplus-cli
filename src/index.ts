@@ -57,6 +57,7 @@ import { formatStatusReport, generateStatusReport } from './status.js';
 import { resolvePostPlusSkillsScope } from './skill-installation.js';
 import { runStudioCommand } from './studio.js';
 import {
+  POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV,
   clearUpdateCheckCache,
   resolvePostPlusUpdatePlan,
   runCliSelfUpdateIfOutdated,
@@ -769,7 +770,7 @@ async function runMainWithRecovery(): Promise<void> {
         throw new PostPlusFailure(recovery.restartAgentSessionRequired ? 'PostPlus updated; this task needs a new agent session.' : 'PostPlus could not complete the required update.', {
           code: recovery.restartAgentSessionRequired ? 'postplus_agent_restart_required' : 'postplus_client_upgrade_failed',
           stage: 'compatibility-recovery', service: 'cli', retryable: false,
-          action: recovery.restartAgentSessionRequired ? 'Start a new agent session and resume the task.' : 'Run postplus update --json and resolve the reported failure.',
+          action: recovery.restartAgentSessionRequired ? 'Start a new agent session and resume the task.' : 'Stop automatic recovery and report this failure; do not run another update or resubmit the task.',
         }, { cause: error });
       }
       process.exitCode = recovery.exitCode === 0 ? 0 : 1;
@@ -783,7 +784,7 @@ async function runMainWithRecovery(): Promise<void> {
 runMainWithRecovery().then(() => {
   if (process.exitCode && process.exitCode !== 0) process.exitCode = 1;
 }).catch((error: unknown) => {
-  writeFailure(error, { json: process.argv.includes('--json'), stage: process.argv[2] ?? 'command', helpCommand: helpCommandForArgs(process.argv.slice(2)) });
+  writeFailure(error, { automaticRecovery: process.env[POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV] === '1', json: process.argv.includes('--json'), stage: process.argv[2] ?? 'command', helpCommand: helpCommandForArgs(process.argv.slice(2)) });
   process.exitCode = 1;
 });
 

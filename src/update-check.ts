@@ -1,4 +1,4 @@
-import { PostPlusFailure, sanitizeFailureText, toFailureFact, type FailureFact } from './failure-contract.js';
+import { PostPlusFailure, stopAutomaticRecovery, sanitizeFailureText, toFailureFact, type FailureFact } from './failure-contract.js';
 import { diagnosticFetch } from './network-diagnostics.js';
 import { createHash } from 'node:crypto';
 import {
@@ -184,7 +184,7 @@ export async function runPostPlusClientUpgradeRecovery(
     } catch {
       throw new PostPlusFailure('PostPlus update returned an invalid failure response.', {
         code: 'postplus_update_response_invalid', stage: 'compatibility-recovery', service: 'cli', retryable: false,
-        action: 'Inspect postplus update --json before resuming this task.',
+        action: 'Stop automatic recovery and report this response error; do not run another update or resubmit the task.',
       }, { cause: error });
     }
     let cause: Error | undefined;
@@ -193,7 +193,7 @@ export async function runPostPlusClientUpgradeRecovery(
       if (!item || typeof item.message !== 'string') continue;
       cause = Object.assign(new Error(item.message, { cause }), { name: item.name, code: item.code });
     }
-    throw new PostPlusFailure(fact.message, fact, { cause });
+    throw new PostPlusFailure(fact.message, stopAutomaticRecovery(fact), { cause });
   }
   if (updateExitCode !== 0) {
     writeError(
@@ -219,7 +219,7 @@ export async function runPostPlusClientUpgradeRecovery(
   } catch {
     throw new PostPlusFailure('PostPlus update returned an invalid success response.', {
       code: 'postplus_update_response_invalid', stage: 'compatibility-recovery', service: 'cli', retryable: false,
-      action: 'Inspect postplus update --json before resuming this task.',
+      action: 'Stop automatic recovery and report this response error; do not run another update or resubmit the task.',
     });
   }
   if (session?.newSessionRequired && input.payload.compatibility?.upgrade?.restartAgentSession !== true) {

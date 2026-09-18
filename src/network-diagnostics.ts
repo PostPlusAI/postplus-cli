@@ -65,7 +65,7 @@ export async function fetchWithNetworkDiagnostics(
       `request method=${method} target=${formatDebugUrl(currentUrl, options)}`,
     );
 
-    const dispatcher = await createProxyDispatcher({}, currentUrl.protocol).catch((cause: unknown) => {
+    const dispatcher = await createProxyDispatcher({}, currentUrl).catch((cause: unknown) => {
       if (cause instanceof PostPlusFailure) throw cause;
       throw new PostPlusNetworkRequestError({cause,method:'PREFLIGHT',targetUrl:currentUrl.toString(),action:cause instanceof PostPlusFailure ? cause.details.action : undefined});
     });

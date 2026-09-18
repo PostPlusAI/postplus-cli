@@ -20,36 +20,13 @@ artifacts, or a compile step before hosted execution.
 
 ## Bounded Client Recovery Rule
 
-- A client compatibility failure is an update precondition, not a capability
-  failure. PostPlus Cloud returns it when the installed PostPlus CLI or the
-  installed PostPlus skills are older than the current release; it surfaces as
-  `postplus_client_upgrade_required`, as HTTP 426, or as a message saying the
-  PostPlus CLI or PostPlus skills are out of date.
-- This, a missing or invalid CLI session, and an unambiguous local CLI-usage
-  rejection are the only command failure classes the agent may recover from on
-  its own. An insufficient-balance response is a user-mediated account action,
-  not an automatic retry. Every other boundary failure still follows the
-  PostPlus Cloud Rule above: fail fast and report it to the user.
-
 <!-- BEGIN PUBLIC CLI RECOVERY CONTRACT -->
-**Bounded recovery:** Current PostPlus CLIs handle a compatible update and retry the command once when no agent-session restart is required. If an older CLI only reports that an update is required, run `postplus update` and retry once under the same condition. For a missing or invalid CLI session, run `postplus auth login` yourself; it opens the browser by default. Immediately share its exact URL as a clickable link for the user to **Connect**, then retry the original command once only after the CLI confirms success. Never ask the user to run the command or enter/compare a code, approve the connection for them, or automatically restart a cancelled/expired login. For a local usage rejection before remote work starts, use that command's `--help` to make one unambiguous correction from existing user input and retry once.
+**Bounded recovery:** Current PostPlus CLIs perform one compatible update and one task retry when no agent-session restart is required. Count a CLI-managed automatic update toward the one allowed recovery attempt. Only if an older CLI reports an update requirement without attempting recovery, run `postplus update` once; retry the task only after success and when no restart is required. Update is auth-independent. If maintenance or that retry fails, stop and report its error; a suggested action is not permission for a second automatic update or task retry.
 
-If PostPlus returns `postplus_cli_balance_required` with an `open_url` user action, give the user its exact label and URL and stop for account action. Do not invent a checkout link, claim whether provider work or charging occurred, or blindly resubmit after payment; continue from the command's documented status or checkpoint once the user confirms credits are available.
+For a missing or invalid CLI session, run `postplus auth login` yourself; share its exact browser URL for the user to **Connect**, and retry once only after CLI-confirmed success. Never approve the connection for the user, expose polling secrets, or automatically restart a cancelled/expired login. A local usage rejection before remote work may be corrected once using the current command's help and existing user input.
 
-Otherwise stop and report the exact error. Never expose login polling secrets, resubmit an operation when remote work may have started, change user intent, bypass approval, switch providers, rewrite payloads, or make a second recovery attempt. After success, briefly say that PostPlus updated, using only the official update details PostPlus reported.
+For `postplus_cli_balance_required` with an `open_url` user action, share its exact label and URL and wait for account action. Do not invent checkout links or blindly resubmit after payment. Continue existing work only through its documented status or checkpoint. Never resubmit when remote work may have started, bypass approval, change intent or switch providers to hide failure. Mention an update only when the CLI actually reports one.
 <!-- END PUBLIC CLI RECOVERY CONTRACT -->
-
-Continuing an existing task through its emitted poll or checkpoint command
-follows the Async Task Rule. It does not authorize a new paid operation.
-
-- Current CLIs perform the compatibility update and one original-command retry
-  themselves. The Skill rule is also the fallback for older CLIs that can only
-  surface the compatibility failure.
-- `postplus update` is auth-independent and updates a stale CLI and the installed
-  skills in the same invocation. Do not run `postplus auth login`, a separate
-  package-manager install, or a skills-install command first.
-- A restart notice means refreshed Skill instructions apply to the next agent
-  session. Do not retry a command that PostPlus marks as requiring that restart.
 
 ## Installation And Non-Interactive Maintenance Rule
 
@@ -57,10 +34,6 @@ follows the Async Task Rule. It does not authorize a new paid operation.
   only for an explicitly chosen project scope. The CLI package supplies its
   matching skill content; do not run a separate skills installer or repeat setup
   when switching agent or session. Reuse already-correct installations.
-- Use `postplus update` for required maintenance. Count a CLI-managed automatic
-  update toward the one allowed recovery attempt. If update fails, stop and
-  report the exact error and next action; never start another update or retry
-  the original command after failed maintenance.
 - A `requires_human` result means explain the decision and wait for the user.
   Never create a pseudo-terminal (PTY), pipe confirmation input, or approve on
   the user's behalf to bypass this boundary.

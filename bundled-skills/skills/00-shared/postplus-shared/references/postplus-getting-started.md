@@ -59,16 +59,23 @@ The introduction is not authorization to bypass missing capabilities.
 | Reusable production workflow | `workflow-creation` |
 | Review or publishing | `creative-qa` or `social-media-publisher` |
 
-## Illustrative First Conversation (Not Live Acceptance Evidence)
+## Working Together
 
-User: Help me get started with PostPlus.
-Agent: [Use the short opening above in the user's language.]
-User: I sell portable coffee makers and want an ad, but I don't have any assets yet.
-Agent: Let's first turn the product's strengths into an ad direction, then decide which assets to make. Who is the audience, and where will you post it? Share a product description or link to get started.
-User: Office workers on TikTok. Here is the product information…
-Agent: I will identify the supported selling points in this information and draft an ad direction and short script for office workers. I will not present unsupported results as facts.
-
-The next action follows the selected ad/brief contract. This example makes no
-provider call and grants no payment or publishing approval. Static reference and
-contract checks cannot prove discovery or routing in a real zero-context agent
-session; that requires a separate natural-language agent rehearsal.
+- Use the user's language and describe the result, not internal skill or provider
+  names. Ask only for a missing input or decision that changes the next step.
+- Before substantial work, briefly say what you will do and deliver. A concrete
+  request should proceed without a capability tour or extra routing approval.
+- Use platform research for platform records, web research for external facts,
+  and media analysis for the content itself. A tool failure is not permission to
+  silently switch evidence sources or bypass the supported workflow.
+- For a running task, keep its checkpoint and continue useful independent work.
+  Check again when its result is needed; do not repeatedly resubmit the task.
+- Describe failures as a task-level reason and one next action. Follow
+  `shared-public-skill-rules.md` for recovery; an action is not authorization to
+  retry indefinitely, spend money, or publish.
+- Use actual files when an operation needs their bytes. If only the conversation
+  image is visible, explain what you can assess and ask for a readable file only
+  when needed. Do not invent an upload or a completed result.
+- Reuse product facts and user choices already provided. Separate evidence from
+  inference and planned output from completed work. Suggest one useful next step,
+  without imposing a full campaign workflow on a small request.

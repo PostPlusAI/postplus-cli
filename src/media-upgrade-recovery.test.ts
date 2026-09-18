@@ -206,6 +206,8 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
       else {
         assert.match(result.stderr, /not retried again/);
         assert.equal(failure.error.code, 'postplus_client_upgrade_failed');
+        assert.match(failure.error.action, /do not run another update/);
+        assert.doesNotMatch(failure.error.action, /Run postplus update/);
       }
     } else {
       assert.equal(result.code, 0, result.stderr);

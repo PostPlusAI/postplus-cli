@@ -63,6 +63,8 @@ test('failed maintenance preserves structured npm failure and original cause', a
   const fact = JSON.parse(result.stdout).error;
   assert.equal(fact.code, 'postplus_cli_update_failed');
   assert.equal(fact.stage, 'npm-install');
+  assert.match(fact.action, /Stop automatic recovery/);
+  assert.equal(fact.retryable, false);
   assert.equal(fact.correlationId, 'fixture-id');
   assert.ok(fact.cause.some((item: {code: string}) => item.code === 'EACCES'));
   assert.doesNotMatch(result.stderr, /installer stderr/);
@@ -75,6 +77,8 @@ test('requires-human remains actionable without replay', async () => {
 test('malformed update JSON fails closed without replay', async () => {
   const result = await recover({updateExit:1, malformed:true});
   assert.equal(JSON.parse(result.stdout).error.code, 'postplus_update_response_invalid');
+  assert.match(JSON.parse(result.stdout).error.action, /do not run another update/);
+  assert.doesNotMatch(JSON.parse(result.stdout).error.action, /postplus update --json/);
   assert.equal(result.code, 1);
 });
 
@@ -108,4 +112,24 @@ test('real CLI-only update continuation emits a valid success envelope', async (
     env: {...process.env, POSTPLUS_CONFIG_DIR:config, POSTPLUS_CLIENT_RECOVERY_COMPONENTS:'cli', POSTPLUS_CLIENT_RECOVERY_ATTEMPT:'1', POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION:'0.0.0'},
   });
   assert.deepEqual(JSON.parse(result.stdout), {ok:true,command:'update',components:['cli']});
+});
+
+test('ordinary failure in a real recovery child returns one stopped JSON envelope', async () => {
+  const result = await new Promise<{stdout:string;stderr:string;code:number|null}>((resolve,reject) => {
+    const child = spawn(process.execPath, ['--import','tsx','src/index.ts','doctor','--not-an-option','--json'], {
+      env:{...process.env,POSTPLUS_CLIENT_RECOVERY_ATTEMPT:'1'},
+      stdio:['ignore','pipe','pipe'],
+    });
+    let stdout='',stderr='';
+    child.stdout.on('data',chunk=>{stdout+=chunk;});
+    child.stderr.on('data',chunk=>{stderr+=chunk;});
+    child.on('error',reject);
+    child.on('close',code=>resolve({stdout,stderr,code}));
+  });
+  assert.equal(result.code,1,result.stderr);
+  const failure=JSON.parse(result.stdout).error;
+  assert.match(failure.action,/^Stop automatic recovery/);
+  assert.match(failure.action,/requires the user/);
+  assert.match(failure.action,/postplus doctor --help/);
+  assert.equal(failure.retryable,false);
 });

@@ -1,5 +1,5 @@
 import { isTlsFailure, TLS_FAILURE_ACTION } from './network-diagnostics.js';
-import { resolveProxyConfiguration } from './proxy-configuration.js';
+import { resolveProxyConfiguration, proxyConfigurationForUrl } from './proxy-configuration.js';
 import { EnvHttpProxyAgent, request } from 'undici';
 import type { LookupAddress } from 'node:dns';
 import { lookup } from 'node:dns/promises';
@@ -67,7 +67,7 @@ export async function createImageSourceFetcher() {
   return async (value:string, signal:AbortSignal, headers:Record<string,string>={}):Promise<Response> => {
     const url=assertImageSourceUrl(value);
     signal.throwIfAborted();
-    const dispatcher=new EnvHttpProxyAgent({...config,...(!config.httpsProxy ? {httpProxy:''}:{}),connect:{
+    const dispatcher=new EnvHttpProxyAgent({...proxyConfigurationForUrl(config, url),...(!config.httpsProxy ? {httpProxy:''}:{}),connect:{
       lookup: (host, options, callback) => {
         let settled=false;
         const finish=(error:Error | null, addresses:LookupAddress[] = []) => {

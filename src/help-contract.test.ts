@@ -35,8 +35,10 @@ test('every public help path and alias is offline and leaves account state untou
   await writeFile(config, '{broken-on-purpose', { mode: 0o644 });
   await writeFile(guard, `import net from 'node:net'; import http from 'node:http'; import https from 'node:https'; import tls from 'node:tls'; import {syncBuiltinESMExports} from 'node:module'; const deny=()=>{throw new Error('Help attempted network access');}; globalThis.fetch=deny; net.Socket.prototype.connect=deny; http.request=deny; https.request=deny; tls.connect=deny; syncBuiltinESMExports();`);
   const initial = await stat(config);
+  // Disable Node's startup proxy bootstrap only in this deliberately invalid
+  // fixture. Otherwise Node can exit before our help entrypoint is loaded.
   const env = { ...process.env, HOME: directory, POSTPLUS_CONFIG_DIR: directory,
-    POSTPLUS_ACCESS_TOKEN: '', POSTPLUS_REFRESH_TOKEN: '', HTTPS_PROXY: 'unsupported://help-must-not-connect' };
+    POSTPLUS_ACCESS_TOKEN: '', POSTPLUS_REFRESH_TOKEN: '', NODE_USE_ENV_PROXY: '0', NODE_OPTIONS: '', https_proxy: 'unsupported://help-must-not-connect', HTTPS_PROXY: 'unsupported://help-must-not-connect' };
   try {
     // Four bounded children at a time; each runs the actual source entrypoint.
     const cases = paths.flatMap(path => [[...path, '--help'], [...path, '-h'], ['help', ...path]]);

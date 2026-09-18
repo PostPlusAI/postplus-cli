@@ -15302,7 +15302,7 @@ it('diagnostic help works offline and gives usable recovery help in text and JSO
     for (const args of [[command, '--help'], [command, '-h'], ['help', command]]) {
       const { stdout, stderr } = await execFileAsync(process.execPath,
         ['--import', 'tsx', 'src/index.ts', ...args],
-        { env: { ...process.env, HTTPS_PROXY: 'unsupported://must-not-connect' } });
+        { env: { ...process.env, NODE_USE_ENV_PROXY: '0', NODE_OPTIONS: '', https_proxy: 'unsupported://help-must-not-connect', HTTPS_PROXY: 'unsupported://must-not-connect' } });
       assert.match(stdout, new RegExp(`postplus ${command} \\[--skill`));
       assert.equal(stderr, '');
     }

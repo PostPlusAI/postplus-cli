@@ -411,14 +411,13 @@ for (const systemProxy of [false,true]) {
     environment(t);
     const fixture=await proxy(t);
     if (systemProxy) {
-      process.env.NO_PROXY='localhost';
       Object.defineProperty(process,'platform',{value:'darwin'});
       const port=new URL(fixture.url).port;
       const previous=childProcess.execFile;
-      childProcess.execFile=Object.assign(()=>{}, {[promisify.custom]:async()=>({stdout:`<dictionary> {\nHTTPSEnable : 1\nHTTPSProxy : 127.0.0.1\nHTTPSPort : ${port}\nSOCKSEnable : 1\n}`,stderr:''})}) as typeof childProcess.execFile;
+      childProcess.execFile=Object.assign(()=>{}, {[promisify.custom]:async()=>({stdout:`<dictionary> {\nHTTPSEnable : 1\nHTTPSProxy : 127.0.0.1\nHTTPSPort : ${port}\nSOCKSEnable : 1\nExcludeSimpleHostnames : 1\nExceptionsList : <array> {\n0 : 192.168.0.0/16\n1 : 10.0.0.0/8\n2 : <local>\n3 : *.local\n}\n}`,stderr:''})}) as typeof childProcess.execFile;
       syncBuiltinESMExports();
       t.after(()=>{childProcess.execFile=previous;syncBuiltinESMExports();});
-    } else process.env.HTTPS_PROXY=fixture.url;
+    } else { process.env.HTTPS_PROXY=fixture.url; process.env.NO_PROXY='192.168.0.0/16,10.0.0.0/8,<local>'; }
     const connect=tls.connect;
     t.mock.method(tls,'connect',(options,callback)=>connect({...options,ca:cert},callback));
     const generic=await fetchWithNetworkDiagnostics(`https://${target}/generic`,{signal:signal()},{label:'test',redirectPolicy:'manual'});
