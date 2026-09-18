@@ -158,10 +158,10 @@ test('managed slot identity survives edited or missing metadata; unrelated damag
   const entry = (name: string, directoryName: string, metadataName: string | null, metadataError: string | null) => ({ name, path: f.installed, scope: 'global', agents: [], directories: [{ path: f.installed, realPath, agentIds: ids, directoryName, metadataName, metadataError }] });
   await writeFile(join(f.installed, 'SKILL.md'), '---\nname: renamed-user-skill\ndescription: Changed\n---\nMy content');
   payload = [{ name: 'renamed-user-skill', path: f.installed, scope: 'global', agents: [], directories: [] }, entry('demo', 'demo', 'renamed-user-skill', null)];
-  await assert.rejects(runPostPlusSkillUpdate(deps, { scope: 'global' }), { code: 'postplus_skills_requires_human' });
+  await assert.rejects(runPostPlusSkillUpdate(deps, { scope: 'global' }), { code: 'postplus_skills_content_unverified' });
   await unlink(join(f.installed, 'SKILL.md'));
   payload = [entry('demo', 'demo', null, 'missing-skill-file')];
-  await assert.rejects(runPostPlusSkillUpdate(deps, { scope: 'global' }), { code: 'postplus_skills_requires_human' });
+  await assert.rejects(runPostPlusSkillUpdate(deps, { scope: 'global' }), { code: 'postplus_skills_content_unverified' });
   for (const kind of ['occupied-file', 'dangling-link']) {
     payload = [entry('demo', 'demo', null, kind)];
     await assert.rejects(runPostPlusSkillUpdate(deps, { scope: 'global' }), { code: 'postplus_skills_directory_unreadable' });

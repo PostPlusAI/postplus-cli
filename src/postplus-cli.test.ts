@@ -5511,7 +5511,7 @@ describe('skill management commands', () => {
             return 0;
           },
         }),
-        { code: 'postplus_skills_requires_human' },
+        { code: 'postplus_skills_content_unverified' },
       );
 
       assert.equal(mutationCalls, 0);

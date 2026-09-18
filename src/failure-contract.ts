@@ -14,6 +14,8 @@ export type FailureFact = {
   checkpointId?: string;
   resumeAvailable?: boolean;
   compatibilityReason?: string;
+  contentState?: 'modified' | 'unverified';
+  conflicts?: { name: string; path: string; state: 'modified' | 'unverified' }[];
   recovery?: { attempted: true; exhausted: true; nextActionAfterUserResolution: string };
   versions?: Record<string, string | null>;
 };
@@ -139,6 +141,15 @@ export function toFailureFact(
                 : "Resolve the reported problem, then retry the command."),
     ),
     cause,
+    ...(['modified', 'unverified'].includes(String(source.contentState)) ? {
+      contentState: source.contentState as 'modified' | 'unverified',
+      conflicts: Array.isArray(source.conflicts) ? source.conflicts.flatMap((item) => {
+        const conflict = record(item);
+        return typeof conflict.name === 'string' && typeof conflict.path === 'string' &&
+          (conflict.state === 'modified' || conflict.state === 'unverified')
+          ? [{ name: sanitizeFailureText(conflict.name), path: sanitizeFailureText(conflict.path), state: conflict.state }] : [];
+      }) : [],
+    } : {}),
     ...(record(source.recovery).exhausted === true ? { recovery: { attempted: true as const, exhausted: true as const, nextActionAfterUserResolution: sanitizeFailureText(string(record(source.recovery).nextActionAfterUserResolution) ?? '') } } : {}),
     ...(string(source.compatibilityReason) ? { compatibilityReason: sanitizeFailureText(String(source.compatibilityReason)) } : {}),
     ...(source.versions && typeof source.versions === 'object' ? { versions: Object.fromEntries(

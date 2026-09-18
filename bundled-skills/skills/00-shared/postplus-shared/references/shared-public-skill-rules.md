@@ -34,11 +34,14 @@ For `postplus_cli_balance_required` with an `open_url` user action, share its ex
   only for an explicitly chosen project scope. The CLI package supplies its
   matching skill content; do not run a separate skills installer or repeat setup
   when switching agent or session. Reuse already-correct installations.
-- A `requires_human` result means explain the decision and wait for the user.
+- A `requires_human` or `postplus_skills_content_unverified` result means explain
+  the decision and wait for the user. Unverified content has no trusted previous
+  fingerprint; do not describe it as user-modified or as proven official content.
   Never create a pseudo-terminal (PTY), pipe confirmation input, or approve on
   the user's behalf to bypass this boundary.
-- Use `postplus update --yes` to back up and replace real local skill changes
-  only after the user explicitly authorizes that replacement. The flag is not
+- After explicit approval, use the exact scoped maintenance command reported
+  by the CLI with `--yes` to back up and replace the existing content. Keep
+  `install` repairs on `install`; do not switch them to a network update. The flag is not
   blanket permission, and a request to perform a marketing task alone does not
   authorize overwriting local edits.
 

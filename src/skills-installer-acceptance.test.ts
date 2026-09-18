@@ -104,9 +104,49 @@ for (const scope of ['global', 'project'] as const) {
     const blocked = await install();
     assert.equal(blocked.code, 1, blocked.stdout + blocked.stderr);
     assert.equal(JSON.parse(blocked.stdout).error.code, 'postplus_skills_requires_human');
+    assert.equal(JSON.parse(blocked.stdout).error.contentState, 'modified');
+    assert.equal(JSON.parse(blocked.stdout).error.stage, 'skills_content_verification');
+    assert.deepEqual(JSON.parse(blocked.stdout).error.conflicts, [{ name: 'demo', path: independent.path, state: 'modified' }]);
     assert.match(JSON.parse(blocked.stdout).error.action, /postplus install/);
     assert.doesNotMatch(JSON.parse(blocked.stdout).error.action, /postplus update/);
     assert.ok(JSON.parse(blocked.stdout).error.message.includes(independent.path));
+    // The same bytes cannot be called modified when the trusted old fingerprint
+    // is absent. Both old official-looking and damaged content remain unknown.
+    const legacyBaseline = JSON.parse(before);
+    delete legacyBaseline.contentHashes;
+    await writeFile(baselinePath, JSON.stringify(legacyBaseline));
+    for (const bytes of ['---\nname: demo\ndescription: Previous official fixture.\n---\nPrevious release content.\n', 'damaged skill content']) {
+      await writeFile(join(independent.path, 'SKILL.md'), bytes);
+      for (const command of ['install', 'update']) {
+        env.POSTPLUS_CLIENT_RECOVERY_COMPONENTS = 'skills';
+        const unknown = await run(['--import', tsx, cli, command, '--json', ...flags]);
+        delete env.POSTPLUS_CLIENT_RECOVERY_COMPONENTS;
+        assert.equal(unknown.code, 1, unknown.stdout + unknown.stderr);
+        const fact = JSON.parse(unknown.stdout).error;
+        assert.equal(fact.code, 'postplus_skills_content_unverified');
+        assert.equal(fact.contentState, 'unverified');
+        assert.equal(fact.stage, 'skills_content_verification');
+        assert.match(fact.message, /cannot be verified as managed/);
+        assert.doesNotMatch(fact.message, /user.modif/i);
+        assert.match(fact.action, new RegExp(`postplus ${command}.*--yes`));
+        assert.equal(await readFile(join(independent.path, 'SKILL.md'), 'utf8'), bytes);
+        assert.deepEqual(JSON.parse(await readFile(baselinePath, 'utf8')), legacyBaseline);
+      }
+      env.POSTPLUS_CLIENT_RECOVERY_ATTEMPT = '1';
+      const exhausted = JSON.parse((await install()).stdout).error;
+      delete env.POSTPLUS_CLIENT_RECOVERY_ATTEMPT;
+      assert.equal(exhausted.code, 'postplus_skills_content_unverified');
+      assert.equal(exhausted.recovery.exhausted, true);
+      assert.match(exhausted.action, /^Stop automatic recovery/);
+      assert.doesNotMatch(exhausted.action, /run postplus/);
+      const plainUnknown = await run(['--import', tsx, cli, 'install', ...flags]);
+      assert.equal(plainUnknown.code, 1);
+      assert.equal(plainUnknown.stdout, '');
+      assert.equal(plainUnknown.stderr.trim().split('\n').length, 2);
+      assert.match(plainUnknown.stderr, /cannot be verified as managed/);
+    }
+    await writeFile(baselinePath, before);
+    await writeFile(join(independent.path, 'SKILL.md'), modified);
     const verification = await run(['--import',tsx,cli,'skills','verify','--json']);
     assert.equal(verification.code,1);
     const report=JSON.parse(verification.stdout);

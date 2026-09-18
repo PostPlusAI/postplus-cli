@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-09-09.2-unified-integration",
+  "releaseId": "skills-2026-09-18.1-cli-mechanism-hardening",
   "skills": [
     {
       "name": "audio-generation",
@@ -105,7 +105,7 @@
     {
       "name": "postplus-shared",
       "path": "skills/00-shared/postplus-shared/SKILL.md",
-      "contentHash": "141092466e1dc29aa57154f1e03eaf94d61a901cb3cafe837e2346b963944c8d"
+      "contentHash": "2d5802924ed0be7ab47beace6fc24045848611ab7a6e3c66a0621a1ca235cbf2"
     },
     {
       "name": "postplus-workspace",

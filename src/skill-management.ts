@@ -34,6 +34,7 @@ import {
   resolvePostPlusSkillsScope,
 } from './skill-installation.js';
 
+import { PostPlusFailure } from './failure-contract.js';
 import { hashSkillDirectory, SkillsBundleError, UnsupportedSkillEntryError } from './skills-bundle.js';
 
 export const SKILLS_INSTALLER_ENTRY = fileURLToPath(new URL('../vendor/skills-runtime/cli.mjs', import.meta.url));
@@ -100,9 +101,10 @@ type ModifiedSkillBackupPrompt = {
   skillNames: string[];
 };
 
-type ModifiedInstalledSkill = {
+type ProtectedInstalledSkill = {
   actualContentHash: string;
-  expectedContentHash: string;
+  expectedContentHash: string | null;
+  state: 'modified' | 'unverified';
   installedPath: string;
   name: string;
 };
@@ -766,7 +768,7 @@ async function protectLocallyModifiedSkills(input: {
   const baseline = await readManagedSkillBaseline(input.scope);
   const installed = await listInstalledSkillsForMutationScope(input.dependencies, input.scope);
   const managed = new Set([...baseline.skillNames, ...Object.keys(input.targetHashes ?? {}), ...(input.managedNames ?? [])]);
-  const modifiedSkills: ModifiedInstalledSkill[] = [];
+  const modifiedSkills: ProtectedInstalledSkill[] = [];
   const seen = new Set<string>();
   for (const entry of installed) {
     if (!managed.has(entry.name)) continue;
@@ -777,8 +779,9 @@ async function protectLocallyModifiedSkills(input: {
     // baseline proves an untouched older official version can be upgraded.
     if (actualContentHash === input.targetHashes?.[entry.name] ||
         actualContentHash === baseline.contentHashes?.[entry.name]) continue;
-    modifiedSkills.push({ actualContentHash,
-      expectedContentHash: baseline.contentHashes?.[entry.name] ?? input.targetHashes?.[entry.name] ?? 'unknown',
+    const expectedContentHash = baseline.contentHashes?.[entry.name] ?? null;
+    modifiedSkills.push({ actualContentHash, expectedContentHash,
+      state: expectedContentHash === null ? 'unverified' : 'modified',
       installedPath: entry.path, name: entry.name });
   }
 
@@ -792,9 +795,13 @@ async function protectLocallyModifiedSkills(input: {
       input.action === 'uninstall'
         ? formatPostPlusSkillUninstallCommand(input.scope)
         : input.action === 'install' ? formatPostPlusSkillsInstallCommand(undefined, input.scope) : formatPostPlusSkillUpdateCommand(input.scope);
-    throw new SkillMutationError('postplus_skills_requires_human',
-      `Local skill content needs approval before ${input.action}: ${formatSkillList(skillNames, 8)}. Locations: ${formatSkillList(modifiedSkills.map(skill => skill.installedPath), 8)}.`,
-      `Ask the user to approve backup and replacement, then run ${retryCommand} --yes.`);
+    const contentState = modifiedSkills.some(skill => skill.state === 'unverified') ? 'unverified' : 'modified';
+    throw new PostPlusFailure(
+      `${contentState === 'unverified' ? 'Existing skill content cannot be verified as managed by this CLI version' : 'Managed skill content differs from its recorded baseline'}: ${formatSkillList(skillNames, 8)}. Locations: ${formatSkillList(modifiedSkills.map(skill => skill.installedPath), 8)}.`,
+      { code: contentState === 'unverified' ? 'postplus_skills_content_unverified' : 'postplus_skills_requires_human',
+        stage: 'skills_content_verification', service: 'local', retryable: false, contentState,
+        conflicts: modifiedSkills.map(skill => ({ name: skill.name, path: skill.installedPath, state: skill.state })),
+        action: `Ask the user to approve backup and ${input.action === 'uninstall' ? 'removal' : 'replacement'}, then run ${retryCommand} --yes.` });
   }
 
   const confirmed = input.yes || await (
@@ -808,7 +815,7 @@ async function protectLocallyModifiedSkills(input: {
 
   if (!confirmed) {
     throw new Error(
-      `PostPlus skills ${input.action} cancelled before changing locally modified skills. Managed baseline was not changed.`,
+      `PostPlus skills ${input.action} cancelled before changing existing skill content. Managed baseline was not changed.`,
     );
   }
 
@@ -844,7 +851,7 @@ async function confirmModifiedSkillBackup(
 }
 
 async function backupModifiedSkills(
-  skills: ModifiedInstalledSkill[],
+  skills: ProtectedInstalledSkill[],
   scope: PostPlusSkillsInstallScope,
 ): Promise<string> {
   const backupRoot = join(getPostPlusConfigDir(), 'skill-backups');
@@ -852,7 +859,7 @@ async function backupModifiedSkills(
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupPath = await mkdtemp(join(backupRoot, `${timestamp}-`));
   const manifestEntries: Array<
-    ModifiedInstalledSkill & { backupPath: string }
+    ProtectedInstalledSkill & { backupPath: string }
   > = [];
 
   for (const skill of skills) {
