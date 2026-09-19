@@ -1,3 +1,4 @@
+import { PostPlusFailure } from './failure-contract.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -32,6 +33,10 @@ export type PublicSkillCatalogEntry = {
   requirements: PublicSkillRequirements;
   localDependencies: string[];
   skillId: string;
+  name?: string;
+  description?: string;
+  category?: string;
+  example?: string;
   path: string | null;
 };
 
@@ -74,6 +79,7 @@ export type PublicSkillCatalogReport = {
   catalogUrl: string;
   installCommand: string;
   listCommand: string;
+  categories?: Record<string, { title: string }>;
   productBrief?: PublicProductBrief;
   releaseNotes?: PublicReleaseNotes;
   skills: PublicSkillCatalogEntry[];
@@ -163,7 +169,7 @@ function parsePublicSkillCatalog(
   payload: unknown,
 ): Pick<
   PublicSkillCatalogReport,
-  'productBrief' | 'releaseId' | 'releaseNotes' | 'skills' | 'source'
+  'categories' | 'productBrief' | 'releaseId' | 'releaseNotes' | 'skills' | 'source'
 > {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('PostPlus public skill catalog is invalid.');
@@ -192,6 +198,7 @@ function parsePublicSkillCatalog(
     throw new Error('PostPlus public skill catalog has no skills array.');
   }
 
+  const categories = parseDiscoveryCategories(record.discoveryCategories);
   const skills = record.skills.map((value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new Error('PostPlus public skill catalog has an invalid skill.');
@@ -218,7 +225,13 @@ function parsePublicSkillCatalog(
       throw new Error('PostPlus public skill catalog has an invalid skill.');
     }
 
+    const hasDiscovery = categories !== undefined || ['description', 'category', 'example'].some(key => key in skill);
+    if (hasDiscovery && (!categories || ['description', 'category', 'example'].some(key =>
+      typeof skill[key] !== 'string' || !String(skill[key]).trim() || String(skill[key]).length > 1000) ||
+      !Object.hasOwn(categories, String(skill.category)))) invalidDiscovery();
     return {
+      name: skillId,
+      ...(hasDiscovery ? { description: String(skill.description).trim(), category: String(skill.category), example: String(skill.example).trim() } : {}),
       localDependencies: requirements.localDependencies,
       skillId,
       path,
@@ -235,12 +248,32 @@ function parsePublicSkillCatalog(
   const productBrief = parsePublicProductBrief(record.productBrief);
 
   return {
+    ...(categories ? { categories } : {}),
     ...(productBrief ? { productBrief } : {}),
     releaseId,
     ...(releaseNotes ? { releaseNotes } : {}),
     skills,
     source,
   };
+}
+
+function invalidDiscovery(): never {
+  throw new PostPlusFailure('The skill catalog has invalid discovery information.', {
+    code: 'postplus_skills_catalog_invalid', stage: 'skills_catalog', service: 'local', retryable: false,
+    action: 'Reinstall PostPlus CLI from the official package.',
+  });
+}
+
+function parseDiscoveryCategories(value: unknown): PublicSkillCatalogReport['categories'] {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length) invalidDiscovery();
+  const result: Record<string, { title: string }> = {};
+  for (const [id, category] of Object.entries(value)) {
+    if (!/^[a-z][a-z0-9-]*$/.test(id) || !category || typeof category !== 'object' || Array.isArray(category) ||
+      typeof category.title !== 'string' || !category.title.trim() || category.title.length > 160) invalidDiscovery();
+    result[id] = { title: category.title.trim() };
+  }
+  return result;
 }
 
 function parsePublicProductBrief(value: unknown): PublicProductBrief | null {

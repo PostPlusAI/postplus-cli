@@ -15,4 +15,4 @@ full-resolution image, deduplicate by image URL, and discard records without an
 image. Empty or sparse results are evidence gaps, not permission to silently
 change the query or source.
 
-Execution failures follow `postplus-shared/references/shared-public-skill-rules.md`; stop after its permitted recovery is exhausted. Successful but insufficient evidence follows `postplus-shared/references/research-quality-recovery.md` within the existing scope and budget.
+Follow the CLI action for execution failures; successful but insufficient evidence follows the quality limits in this skill’s SKILL.md.

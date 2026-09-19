@@ -1,6 +1,6 @@
 ---
 name: facebook-research
-description: Run bounded public Facebook research for pages, profiles, groups, posts, reels, comments, ads, events, marketplace listings, and search. Use when public Facebook evidence should support a marketing, creator, community, competitor, or funnel decision.
+description: Research public Facebook pages, groups, posts, reels, comments, ads, events, marketplace listings, and profiles for audience or competitor evidence.
 metadata:
   postplus:
     familyId: platform-research
@@ -14,12 +14,7 @@ direct posts, public group posts, reels, comments, ad-library creative, events,
 marketplace listings, page profiles, or public search - for a growth, marketing,
 creator, community, competitor, or funnel decision.
 
-Apply shared rulebook and user-guidance rules from `postplus-shared`.
-When a supported command completes but evidence is empty, sparse, noisy,
-off-topic, or the wrong record type, apply the `postplus-shared` reference
-`research-quality-recovery.md`; hard execution errors still fail fast.
-Apply `references/shared-contract.md` first, then the one narrow reference that
-matches the job.
+Read only the one narrow reference matching the job.
 
 ## Two Lanes
 
@@ -63,16 +58,13 @@ choices, retries, credentials, hidden filters, or internal routing.
 2. Run the smallest real collection that can answer the decision.
 3. Parallelize independent sources when they do not depend on each other.
 4. If execution succeeds but evidence is empty, sparse, noisy, or off-topic,
-   apply the shared bounded research-quality recovery rule before accepting or
+   apply the quality rules below before accepting or
    exhausting the evidence.
 5. Produce JSON as the source of truth and a compact HTML evidence artifact when
    item-level evidence was collected.
 6. Return a short chat answer: scope, counts, strongest finding, biggest gap,
    artifact path, and next action.
 
-Result record shapes for every research route are documented in the
-`postplus-shared` reference `dataset-item-schemas.md`; consult it before
-writing result-processing code, and probe a single record only to verify.
 
 Use only the public filters shown by the selected route.
 
@@ -80,9 +72,7 @@ Use only the public filters shown by the selected route.
 
 - Choose the smallest matching research route and run it directly.
 - Readiness diagnostics: `postplus doctor --skill facebook-research`.
-- If an owned CLI command still fails after any bounded recovery allowed by the executing PostPlus skill, report the exact error and stop. Do not bypass
-  the failure with metadata-only answers, readiness probing, local payload
-  rewrites, alternate services, or unpublished tools.
+
 - Inspect one route with `postplus research run <route> --help` when its semantic
   flags are not already clear.
 - Run `postplus research run <route> --<semantic flags> --wait --output
@@ -90,9 +80,40 @@ Use only the public filters shown by the selected route.
 - Pass only public URLs, search terms, locations, scope, and result limits.
 - Keep the first pass bounded; expand only after inspecting the first result.
   Stop on hard errors. Do not silently swap sources or invent missing data.
-- If the CLI returns a quote-confirmation challenge, run
+- If the CLI returns a quote-confirmation challenge, obtain user approval for its scope and cost before running
   `postplus quote confirm --json --challenge-file <challenge.json>` and retry
   with the returned token.
+
+## Command Selection
+
+| Evidence need | Route | Semantic input | First pass |
+| --- | --- | --- | --- |
+| Public page/profile posts | `facebook-profile-posts` | `--url`, `--limit` | 1-5 URLs, 20 posts |
+| Direct post evidence | `facebook-post-by-url` | `--url` | 1-10 URLs |
+| Public group posts | `facebook-group-posts` | `--url`, `--limit` | 1-3 groups, 20 posts |
+| Ad-library creative | `facebook-ads-library` | `--query`, `--country`, `--status`, `--limit` | 20 ads |
+| Post/reel comments | `facebook-comments` | `--url`, `--limit` | 1-5 URLs, 20 comments |
+| Public group discussion | `facebook-groups` | `--url`, optional `--query`, `--limit` | 20 posts |
+| Events/local activity | `facebook-events` | `--query` or `--url`, `--limit` | 10 events |
+| Marketplace listings | `facebook-marketplace` | `--url`, `--limit` | 10 listings |
+| Page identity | `facebook-pages` | `--url` | 1-5 pages |
+| Rich page/profile posts | `facebook-posts` | `--url`, `--limit` | 20 posts |
+| Reels | `facebook-reels` | `--url`, `--limit` | 20 reels |
+| Broad public search | `facebook-search` | `--category`, `--location`, `--limit` | 20 results |
+
+Only if platform scope or evidence interpretation remains unclear, consult
+[platform contract](references/shared-contract.md); it is not a preflight.
+
+## Evidence Quality
+
+1. Check that page/post/comment/ad records match the requested lane; public group posts are not automatically comment evidence.
+2. Change the public source URL or a supported query when evidence misses; keep ad creative separate from organic posts.
+3. Allow at most two changed follow-up passes after successful but insufficient results, within approved scope and budget; do not repeat an identical request or hide a failed/pending operation.
+4. Stop when sufficient, at the bound, or when another pass would not help. Report useful evidence and uncertainty; preserve raw results and source links.
+
+Ad-library visibility is not spend or ROAS; preserve the source URL and observed dates, and distinguish comments from post text.
+Full machine fields belong to `postplus research schema --route <route> --json`;
+consult it only when required for processing, not before every request.
 
 <!-- BEGIN GENERATED EXECUTION EXAMPLE -->
 ```bash
@@ -109,9 +130,7 @@ postplus research run facebook-ads-library \
   --output ./result.json
 ```
 
-**Bounded recovery:** Current PostPlus CLIs perform one compatible update and one task retry when no agent-session restart is required. Count a CLI-managed automatic update toward the one allowed recovery attempt. Only if an older CLI reports an update requirement without attempting recovery, run `postplus update` once; retry the task only after success and when no restart is required. Update is auth-independent. If maintenance or that retry fails, stop and report its error; a suggested action is not permission for a second automatic update or task retry.
-
-For a missing or invalid CLI session, run `postplus auth login` yourself; share its exact browser URL for the user to **Connect**, and retry once only after CLI-confirmed success. Never approve the connection for the user, expose polling secrets, or automatically restart a cancelled/expired login. Track login and compatibility recovery separately for the same task; neither resets the other's used allowance, and a failed recovery stops the task. A local usage rejection before remote work may be corrected once using the current command's help and existing user input.
-
-For `postplus_cli_balance_required` with an `open_url` user action, share its exact label and URL and wait for account action. Do not invent checkout links or blindly resubmit after payment. Continue existing work only through its documented status or checkpoint. Never resubmit when remote work may have started, bypass approval, change intent or switch providers to hide failure. Mention an update only when the CLI actually reports one.
+Follow the CLI's structured result and reported next action; do not infer recovery from free-text messages.
+Wait for explicit user approval when requested; an action does not authorize spending, publishing, or overwriting.
+Resume the same operation through its returned checkpoint or action; never resubmit uncertain work, repeat exhausted recovery, or switch providers to bypass failure.
 <!-- END GENERATED EXECUTION EXAMPLE -->

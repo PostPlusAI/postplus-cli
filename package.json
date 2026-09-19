@@ -40,6 +40,7 @@
     "build/network-diagnostics.js",
     "build/quote-confirmation.js",
     "build/skill-catalog.js",
+    "build/skill-discovery.js",
     "build/skill-installation.js",
     "build/skill-management.js",
     "build/status.js",

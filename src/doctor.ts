@@ -237,13 +237,10 @@ async function checkLocalDependencies(
           ? `Local dependencies for ${skillId}`
           : 'Task-specific local media dependencies',
         detail,
-        skillId
-          ? 'Run the selected PostPlus skill in a local agent. The installed postplus-shared rules tell the agent how to bootstrap approved missing dependencies.'
-          : 'Run the affected PostPlus skill in a local agent. The installed postplus-shared rules tell the agent how to bootstrap approved missing media dependencies.',
+        'Stop the affected task and report the missing dependencies listed above. No automatic host installation action is available; resume after the host environment is prepared.',
         {
           severity: skillId ? 'required' : 'task_specific',
           metadata: {
-            bootstrapRule: 'postplus-shared',
             missingDependencies: report.checks
               .filter((check) => !check.ok)
               .map((check) => ({

@@ -458,7 +458,7 @@ Important files:
 - `README.md`: this first-time onboarding page
 - `skills/README.md`: short runtime catalog notes
 - `skills/catalog.json`: released skill metadata for CLI and verification
-- `skills/00-shared/postplus-shared/references/`: shared routing and judgment rules
+- `postplus --help` and `postplus list --json`: package-matched discovery; concrete tasks go directly to their skill.
 - each `SKILL.md`: the workflow contract for one specific capability
 
 ## First Requests To Try

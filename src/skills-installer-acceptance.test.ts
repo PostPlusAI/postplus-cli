@@ -24,7 +24,7 @@ for (const scope of ['global', 'project'] as const) {
     await Promise.all([home, project, config, join(bundle, 'skills/demo')].map((path) => mkdir(path, { recursive: true })));
     await writeFile(join(bundle, 'skills/demo/SKILL.md'), '---\nname: demo\ndescription: Isolated acceptance fixture.\n---\nOfficial content.\n');
     const contentHash = await hashSkillDirectory(join(bundle, 'skills/demo'));
-    await writeFile(join(bundle, 'skills/catalog.json'), JSON.stringify({ schemaVersion: 2, releaseId: 'skills-2026-09-17.1', source: 'PostPlusAI/postplus-skills', skills: [{ name: 'demo', path: 'skills/demo/SKILL.md', status: 'released' }] }));
+    await writeFile(join(bundle, 'skills/catalog.json'), JSON.stringify({ schemaVersion: 2, releaseId: 'skills-2026-09-17.1', discoveryCategories: { create: { title: 'Create media' } }, source: 'PostPlusAI/postplus-skills', skills: [{ name: 'demo', path: 'skills/demo/SKILL.md', status: 'released', description: 'Create a useful image.', category: 'create', example: 'Make an image for my campaign.' }] }));
     await writeFile(join(bundle, 'skills-manifest.json'), JSON.stringify({ schemaVersion: 1, releaseId: 'skills-2026-09-17.1', skills: [{ name: 'demo', path: 'skills/demo/SKILL.md', contentHash }] }));
     const guard = join(root, 'no-network.cjs');
     await writeFile(guard, `const fs = require('node:fs'); const deny = () => { fs.appendFileSync(${JSON.stringify(join(root, 'network-attempts'))}, new Error('network attempt').stack + '\\n'); throw new Error('Network forbidden in installer acceptance'); }; globalThis.fetch = deny; for (const name of ['node:http','node:https']) { const m=require(name); m.request=deny; m.get=deny; } const net = require('node:net'); const connect = net.Socket.prototype.connect; net.Socket.prototype.connect = function (...args) { const options = Array.isArray(args[0]) ? args[0][0] : args[0]; if (options && typeof options === 'object' && typeof options.path === 'string') return connect.apply(this, args); return deny(); }; require('node:module').syncBuiltinESMExports();`);
@@ -64,7 +64,9 @@ for (const scope of ['global', 'project'] as const) {
     assert.equal(first.code, 0, first.stdout + first.stderr);
     assert.equal(first.stderr, '');
     if (scope === 'global') {
-      assert.equal(first.stdout.trim().split('\n').length, 1);
+      assert.match(first.stdout, /Try PostPlus with your agent:/);
+      assert.match(first.stdout, /Create media/);
+      assert.match(first.stdout, /Make an image for my campaign/);
       assert.match(first.stdout, /ready on disk.*Start a new agent session/);
     } else {
       const result = JSON.parse(first.stdout);
@@ -92,6 +94,14 @@ for (const scope of ['global', 'project'] as const) {
     assert.doesNotMatch(plainCurrent.stdout, /new agent session|restart/i);
     assert.equal(await readFile(baselinePath, 'utf8'), before);
     assert.deepEqual(await Promise.all(directories.map(async (entry) => (await lstat(join(entry.realPath, 'SKILL.md'))).mtimeMs)), mtimes);
+
+    // A missing baseline is repair, not a new user's first encounter.
+    if (scope === 'global') {
+      await rm(baselinePath);
+      const rediscovered = await run(['--import', tsx, cli, 'install']);
+      assert.equal(rediscovered.code, 0, rediscovered.stdout + rediscovered.stderr);
+      assert.doesNotMatch(rediscovered.stdout, /Try PostPlus with your agent/);
+    }
 
     // Turn one link into a distinct copy, as older --copy installations do.
     const independent = directories.find((entry) => entry.agentIds.includes('claude-code'))!;

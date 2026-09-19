@@ -5,12 +5,7 @@ async polling.
 
 ## Routes
 
-| Need | Route | Flags |
-| --- | --- | --- |
-| Keyword/search URL/feed discovery | `reddit-search` | repeat `--query` or `--url`, plus sort/time-range/limit |
-| Selected thread comments | `reddit-post-comments` | repeat `--url`, plus limit |
-| Deep subreddit pass | `reddit-subreddit-posts` | repeat `--subreddit`, optional `--posted-after`, plus limit |
-| Named public profile | `reddit-user-activity` | repeat `--handle`, post-limit, comment-limit |
+Route names and first-pass bounds are in this skill’s SKILL.md.
 
 Run `postplus research run <route> --help` when needed, then run with `--wait
 --output <result.json>`.
@@ -26,7 +21,7 @@ Run `postplus research run <route> --help` when needed, then run with `--wait
 
 ## Failure And Recovery
 
-Execution failures follow `postplus-shared/references/shared-public-skill-rules.md`; stop after its permitted recovery is exhausted. Successful but insufficient evidence follows `postplus-shared/references/research-quality-recovery.md` within the existing scope and budget.
+Follow the CLI action for execution failures; successful but insufficient evidence follows the quality limits in this skill’s SKILL.md.
 Resume a pending checkpoint with `postplus research run --resume-from result.json`; never resubmit work that may have started. Privacy and unavailable-surface limits remain stops.
 
 ## Evidence

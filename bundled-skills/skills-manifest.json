@@ -5,207 +5,142 @@
     {
       "name": "audio-generation",
       "path": "skills/10-routing/audio-generation/SKILL.md",
-      "contentHash": "a20dc85ab6f4a89ac8d3d2b7a6d5e7a4442b55b2ca6a8a90014b4521fdfedb1d"
+      "contentHash": "264ba117ba758c51b13aeb801cde1b5ce518d3a18ec26e17a13f6a3b0b57cfc5"
     },
     {
       "name": "audio-transcription",
       "path": "skills/40-creative/audio-transcription/SKILL.md",
-      "contentHash": "bd87709be8b713d93facac31f416e6a625ee59370b37f41f99f9f815347a19a9"
+      "contentHash": "be42c0206d900a3bfd805ca2eb45b210506885cf686891600c6977bfe2b0aca0"
     },
     {
       "name": "authority-ad",
       "path": "skills/40-creative/authority-ad/SKILL.md",
-      "contentHash": "02b5bc93444dfb00a38abce483ceaf576c325be1611c2b03212f5fb8f93d4c3a"
+      "contentHash": "d640f253cff11f047e0b2ada6ecf9670c87c6b0a72955d63825a7425871df66a"
     },
     {
       "name": "before-after-ad",
       "path": "skills/40-creative/before-after-ad/SKILL.md",
-      "contentHash": "1b24d70f1c9fd9ce6fc5dc7780804ba58c0ea88835a52f5e392ba9189a4bc6fb"
+      "contentHash": "17c24975480ded3fc76ef2de97d5f1872bf4e59b6d3cce8a66cc336ebafd22d6"
     },
     {
       "name": "benchmark-to-brief",
       "path": "skills/40-creative/benchmark-to-brief/SKILL.md",
-      "contentHash": "ae4fd4dead0c1eacb77470aabfc05e3e9c9aab3fd7ecf468da4b09d3ee52daf7"
+      "contentHash": "6b78ae85a982fed00e569f03f2fa7f08040ecbda2759c61e8d6ec5491978b6c3"
     },
     {
       "name": "cartoon-ad",
       "path": "skills/40-creative/cartoon-ad/SKILL.md",
-      "contentHash": "0eccc53b6967cf6c3d011b8f76e1dbdcc635c0863fa79fee23b62f8b7be15200"
+      "contentHash": "78d102424eb58e391318353a6277264fbfd11256075ad9e994ab83f095336b9c"
     },
     {
       "name": "commercial-ad",
       "path": "skills/40-creative/commercial-ad/SKILL.md",
-      "contentHash": "069d76ea3b1730495971ae1c9775588731ae80ac0c96e644f8ce8a18c53e485f"
-    },
-    {
-      "name": "creative-qa",
-      "path": "skills/40-creative/creative-qa/SKILL.md",
-      "contentHash": "856ae2808aa7f4ad886a860077e33f1e8aa213c446cca08c1d289a5397126e14"
-    },
-    {
-      "name": "editing-decision-engine",
-      "path": "skills/40-creative/editing-decision-engine/SKILL.md",
-      "contentHash": "1f7b615594f5af405250a4e29757ae0d3035611c5057601918699ba38cf92934"
+      "contentHash": "a9accb099463635d7762d1543a66e2af15ecdeeb955c26a4df68f4649c7bcf00"
     },
     {
       "name": "educational-ad",
       "path": "skills/40-creative/educational-ad/SKILL.md",
-      "contentHash": "e89b882984f7eaed2d7709c910bbcd6cfa03551dcd6e2fc70353e5c2c86d8360"
+      "contentHash": "d1e315fc9c03f29f808816610ac622cb604201ae9c7d4d2af0421d8cfbc3c2c7"
     },
     {
       "name": "facebook-research",
       "path": "skills/20-research/facebook-research/SKILL.md",
-      "contentHash": "8998c711c1b1f87989ddcf9ec429d5a94cdfa17be3462c22f10637e8a0c15fe9"
-    },
-    {
-      "name": "generation-router",
-      "path": "skills/10-routing/generation-router/SKILL.md",
-      "contentHash": "1b7204ea6f645d1afc1d1b93470cda62755a18956d404ce33316c8d292e4a232"
+      "contentHash": "c45f616ff1be21ca05d193e2afa170ae819fa3954f662b059c88a243e4abea5f"
     },
     {
       "name": "google-trends-research",
       "path": "skills/20-research/google-trends-research/SKILL.md",
-      "contentHash": "e41c22ca3fae40babfa629b645d39ddb073b2f0ef98533dfc4916b2ee3b69e2e"
+      "contentHash": "96d55486ff5674742394229154411cd962b8ecfdec96b9ef4f28f02593d2d449"
     },
     {
       "name": "image-batch-runner",
       "path": "skills/40-creative/image-batch-runner/SKILL.md",
-      "contentHash": "0a9cc0ed7b4819984725e8f44b6dd638b81e0d016651e8f20ef72a8dbdebfece"
+      "contentHash": "c4b1665aaea5cf4176c74f0ee4fc5c21c6ca5c8b66c643853ae75c2f76fb7b6f"
     },
     {
       "name": "image-generation",
       "path": "skills/10-routing/image-generation/SKILL.md",
-      "contentHash": "a8b68ba72dd4e91c5c1c36a9abcabb532d42979cc8846e0e3b88e28146dd69e3"
+      "contentHash": "11f686ffb9816bbeb0dc0fdf3b47bf818a70ae1f3e484427115a1ac712003bdc"
     },
     {
       "name": "instagram-research",
       "path": "skills/20-research/instagram-research/SKILL.md",
-      "contentHash": "04c4340cb18bfb53e1789b0a90cc97b47d348a1414eb7f4cfa11849f21df9cbf"
+      "contentHash": "70682535384f0e671c0d1517110cd722157fa067692b970e34f14779a6b37259"
     },
     {
       "name": "lifestyle-ad",
       "path": "skills/40-creative/lifestyle-ad/SKILL.md",
-      "contentHash": "c38b81d30ae0060158d3bfcfe7ee1aa05f882e23a4aea69035810a475fb0b3e8"
+      "contentHash": "2f5077c7ff50899edd86b4732fa69daf988b1b5366141ef863a651a48020f4fa"
     },
     {
       "name": "media-analysis",
       "path": "skills/40-creative/media-analysis/SKILL.md",
-      "contentHash": "333857d0d44a168a3ebe6b4f51399dd7d50ccd2c57216d1331766ae360182062"
-    },
-    {
-      "name": "media-router",
-      "path": "skills/10-routing/media-router/SKILL.md",
-      "contentHash": "cc972dc5622a87c5ddaf5f63058902ec72000a18e8c618849d85b75da7d750d7"
+      "contentHash": "1a947f80e8f5ea66aa43b8aef971de93d15f7613e8f55ca4c408621501aaea14"
     },
     {
       "name": "pinterest-search",
       "path": "skills/20-research/pinterest-search/SKILL.md",
-      "contentHash": "c58772d4497c7f0b55d6ee7fc1f8b2ca4b058da4de4df5b83fdd34d4e0ede922"
-    },
-    {
-      "name": "postplus-shared",
-      "path": "skills/00-shared/postplus-shared/SKILL.md",
-      "contentHash": "2d5802924ed0be7ab47beace6fc24045848611ab7a6e3c66a0621a1ca235cbf2"
+      "contentHash": "df53b743fd73248bf8f618ab070a0a6579be1662f5eb9e1792295143f06c1902"
     },
     {
       "name": "postplus-workspace",
       "path": "skills/00-shared/postplus-workspace/SKILL.md",
-      "contentHash": "c6a0b9f11c5f2b5107e4aacafc1860157264e8c2385994971aaaf111ecd99481"
+      "contentHash": "e7457342ebe784a1d6b9765b88167146be64373505f1e944135a5cd922f7d305"
     },
     {
       "name": "reddit-search",
       "path": "skills/20-research/reddit-search/SKILL.md",
-      "contentHash": "46466e21c57fba2f0dae0a86331a138b4be9475068203f492475231b6b323119"
+      "contentHash": "e4ecfed6a420adddbba074c38c40a3a0b74264a17e88f79b8aaa4e2b76ee6ae2"
     },
     {
       "name": "reference-decode",
       "path": "skills/10-routing/reference-decode/SKILL.md",
-      "contentHash": "eae8eb99aa60950dedb0c43d7dcdf9a6d0c25aa199496cf8b4471c76fc355e02"
-    },
-    {
-      "name": "shot-by-shot-analysis",
-      "path": "skills/40-creative/shot-by-shot-analysis/SKILL.md",
-      "contentHash": "c93e04482f97188c12e593d32915e390573d08d1ff8aa8a2a15846f61b5c0273"
-    },
-    {
-      "name": "slideshow-producer",
-      "path": "skills/40-creative/slideshow-producer/SKILL.md",
-      "contentHash": "47068697a0daf043f7ed6ae365742b246adfdb431218b7022909a778b88f07b7"
-    },
-    {
-      "name": "social-media-extractor",
-      "path": "skills/10-routing/social-media-extractor/SKILL.md",
-      "contentHash": "d62e8272be2fd8e9d81c88971e811a8e436bb5262b816231a633752b57c23cfb"
+      "contentHash": "18c14aeb7575a6de1ce5ee1229f71eb1c7fa67f40914534f372848061305fead"
     },
     {
       "name": "social-media-publisher",
       "path": "skills/50-publishing/social-media-publisher/SKILL.md",
-      "contentHash": "aec84a5e0d2762bef616207551181f23ba1f9bb1146d8db1b7c76b6a77a16339"
-    },
-    {
-      "name": "sourcing-selection",
-      "path": "skills/30-strategy/sourcing-selection/SKILL.md",
-      "contentHash": "7af8e7dfb775cc712b80d3561612068fd4180be7eb531fce5e1fca466a1933a3"
-    },
-    {
-      "name": "storyboard-grid-writer",
-      "path": "skills/40-creative/storyboard-grid-writer/SKILL.md",
-      "contentHash": "de27b06fc36db55ecbe075b0551e8cd5074bdd2efb63edda309d4c4ea26a01e3"
+      "contentHash": "15130aa85c048280a852810ec51e86225ed52a5734d9879909780f0c9fb8f24c"
     },
     {
       "name": "street-interview-ad",
       "path": "skills/40-creative/street-interview-ad/SKILL.md",
-      "contentHash": "e6a43c5b0ed3b6c9fa41ac6de31e0149fb67e1287f59c5f0a13fb7bc8b5e6836"
-    },
-    {
-      "name": "subtitle-packager",
-      "path": "skills/40-creative/subtitle-packager/SKILL.md",
-      "contentHash": "a9998bb2c11f20e457b186b7d7cf2e0b6840b17ecca84f056db724525008da80"
+      "contentHash": "a958b155f0e0cd509e81e9dba50eb3541d47c091bba977f17d4c84942a76fec7"
     },
     {
       "name": "tiktok-research",
       "path": "skills/20-research/tiktok-research/SKILL.md",
-      "contentHash": "ff4ceb554c8a2e9fd64035f68227035a27a9170398faa25ea1261e2a4e9dbf9f"
+      "contentHash": "260b0eca3a139001c7db44594058b4c162a6c30f00aa410aea1fe411135d5c0f"
     },
     {
       "name": "ugc-ad",
       "path": "skills/40-creative/ugc-ad/SKILL.md",
-      "contentHash": "c8d79dfa5dcb56e33a71b49c41ae4fac80df7b78c1dee15dc4e975f7d3289a46"
-    },
-    {
-      "name": "ugc-flow",
-      "path": "skills/40-creative/ugc-flow/SKILL.md",
-      "contentHash": "eddf71b5bf48b30e4c8b24a2bfca0322472ef280cefbdfa5157d46b88b08a3e5"
+      "contentHash": "9b0b22b3b1f68d59798b14cbf2427a2fa51186678d97c327c41807b49c0f74df"
     },
     {
       "name": "video-batch-runner",
       "path": "skills/40-creative/video-batch-runner/SKILL.md",
-      "contentHash": "88c781deabbe6171e1a195134770186162aca4fcd3bdde90db5f4a2ca25f62c5"
+      "contentHash": "c57b08b3210cb8c09b1e26af117316ffa7099772cea15e8f73fdb480aef54489"
     },
     {
       "name": "video-transcription",
       "path": "skills/40-creative/video-transcription/SKILL.md",
-      "contentHash": "9a0ae212a56ac82446efa869035847a9fbcf56023ccac0fc224145b03794122d"
+      "contentHash": "4762064ba149c0a81df6f107e0cc54cd66ca76c3578d78c78223f453eafc8f9d"
     },
     {
       "name": "voice-batch-runner",
       "path": "skills/40-creative/voice-batch-runner/SKILL.md",
-      "contentHash": "f5567845f5faf02f696d32180ac49e3fcfbbc2b279ff6450e6a884a7cfae1048"
-    },
-    {
-      "name": "workflow-creation",
-      "path": "skills/40-creative/workflow-creation/SKILL.md",
-      "contentHash": "1afda5507addfd85c49679f867a411fba89884c705ec425bb4426a77ffe54230"
+      "contentHash": "7f57574fd92029917b481bf49801bd9f58187fb6daf9c78d6f773abd19eb6215"
     },
     {
       "name": "x-research",
       "path": "skills/20-research/x-research/SKILL.md",
-      "contentHash": "8c0bb59a551ed157cefbac1314f94573ddf4b9ef0d4804dc1765f88a2ecf4db2"
+      "contentHash": "910cda98fbb4938c74b5d7c7794e5d495401cc75f8ec868a9dc5029b18e4a6e1"
     },
     {
       "name": "youtube-research",
       "path": "skills/20-research/youtube-research/SKILL.md",
-      "contentHash": "c41f7d6a89e7cd697de8922e978fd81bcd8c3b66d814b200219f1bdaa174fb31"
+      "contentHash": "8d73648c6bf077008e5eae04a97e8708850d1d1e416e407c4f6a4717e4718cd8"
     }
   ]
 }

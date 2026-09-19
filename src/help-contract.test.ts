@@ -41,7 +41,7 @@ test('every public help path and alias is offline and leaves account state untou
     POSTPLUS_ACCESS_TOKEN: '', POSTPLUS_REFRESH_TOKEN: '', NODE_USE_ENV_PROXY: '0', NODE_OPTIONS: '', https_proxy: 'unsupported://help-must-not-connect', HTTPS_PROXY: 'unsupported://help-must-not-connect' };
   try {
     // Four bounded children at a time; each runs the actual source entrypoint.
-    const cases = paths.flatMap(path => [[...path, '--help'], [...path, '-h'], ['help', ...path]]);
+    const cases = [...paths.flatMap(path => [[...path, '--help'], [...path, '-h'], ['help', ...path]]), ['list'], ['list', '--json']];
     for (let i = 0; i < cases.length; i += 4) {
       await Promise.all(cases.slice(i, i + 4).map(async args => {
         const { stdout, stderr } = await exec(process.execPath,
@@ -55,6 +55,24 @@ test('every public help path and alias is offline and leaves account state untou
     assert.equal((await stat(config)).mode, initial.mode);
     assert.deepEqual((await readdir(directory)).sort(), ['config.json', 'offline.mjs']);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('bundled discovery is available even when the account config location is unusable', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'postplus-discovery-config-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const occupied = join(directory, 'occupied');
+  await writeFile(occupied, 'Keep this existing file.');
+  const env = { ...process.env, HOME: directory, POSTPLUS_CONFIG_DIR: occupied };
+  for (const args of [['list'], ['list', '--json']]) {
+    const { stdout, stderr } = await exec(process.execPath, ['--import', 'tsx', resolve('src/index.ts'), ...args], { env });
+    assert.equal(stderr, '');
+    assert.ok(stdout.length > 0);
+    if (args.includes('--json')) assert.ok(JSON.parse(stdout).skills.length > 0);
+  }
+  // Control: commands that use account state must still reject the invalid location.
+  await assert.rejects(exec(process.execPath, ['--import', 'tsx', resolve('src/index.ts'), 'status', '--json'], { env }));
+  assert.equal(await readFile(occupied, 'utf8'), 'Keep this existing file.');
+  assert.deepEqual(await readdir(directory), ['occupied']);
 });
 
 test('invalid options suggest the nearest valid command help and diagnostics explain scope', async (t) => {
@@ -105,4 +123,19 @@ test('unauthenticated doctor preserves the login action and local checks in JSON
     assert.ok(report.checks.some((check:any)=>check.id==='local_dependencies'));
     return true;
   });
+});
+
+
+test('package discovery and maintenance help keep the original task without shared onboarding', async () => {
+  const { stdout: top } = await exec(process.execPath, ['--import', 'tsx', 'src/index.ts', '--help']);
+  const catalog = JSON.parse(await readFile('bundled-skills/skills/catalog.json', 'utf8'));
+  assert.ok(top.includes(catalog.productBrief.paragraphs[0]));
+  assert.match(top, /postplus install → postplus list/);
+  for (const command of ['install', 'update']) {
+    const { stdout } = await exec(process.execPath, ['--import', 'tsx', 'src/index.ts', command, '--help', '--json']);
+    const help = JSON.parse(stdout);
+    assert.match(help.next, /paste the original request/);
+    assert.match(help.next, /Otherwise, describe the task/);
+    assert.doesNotMatch(help.next, /Help me get started|postplus-shared/);
+  }
 });

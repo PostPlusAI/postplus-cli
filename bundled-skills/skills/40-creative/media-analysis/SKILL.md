@@ -1,6 +1,6 @@
 ---
 name: media-analysis
-description: Analyze a media link, local video or image, or images already in the conversation. Use for full video and audio understanding, native TikTok or Instagram carousel review, visual questions, screenshots, key frames, and timecoded evidence; choose the needed analysis internally.
+description: Analyze videos, images, or carousels with visible and audible evidence. Answer visual questions, inspect frames, or compare references shot by shot when requested.
 metadata:
   postplus:
     familyId: media-production
@@ -11,6 +11,10 @@ metadata:
 
 Analyze the user's link, local file, or visible images and deliver readable
 findings with the actual visual evidence. Choose the necessary work internally.
+
+For multi-reference comparison or requested detailed shot-by-shot evidence, read
+[multi-source shot analysis](references/multi-source-shot-analysis.md). This branch
+keeps sources independent before synthesis; ordinary analysis skips it.
 
 ## Choose the work
 
@@ -38,11 +42,9 @@ postplus media analyze video-analysis \
   --output ./result.md
 ```
 
-**Bounded recovery:** Current PostPlus CLIs perform one compatible update and one task retry when no agent-session restart is required. Count a CLI-managed automatic update toward the one allowed recovery attempt. Only if an older CLI reports an update requirement without attempting recovery, run `postplus update` once; retry the task only after success and when no restart is required. Update is auth-independent. If maintenance or that retry fails, stop and report its error; a suggested action is not permission for a second automatic update or task retry.
-
-For a missing or invalid CLI session, run `postplus auth login` yourself; share its exact browser URL for the user to **Connect**, and retry once only after CLI-confirmed success. Never approve the connection for the user, expose polling secrets, or automatically restart a cancelled/expired login. Track login and compatibility recovery separately for the same task; neither resets the other's used allowance, and a failed recovery stops the task. A local usage rejection before remote work may be corrected once using the current command's help and existing user input.
-
-For `postplus_cli_balance_required` with an `open_url` user action, share its exact label and URL and wait for account action. Do not invent checkout links or blindly resubmit after payment. Continue existing work only through its documented status or checkpoint. Never resubmit when remote work may have started, bypass approval, change intent or switch providers to hide failure. Mention an update only when the CLI actually reports one.
+Follow the CLI's structured result and reported next action; do not infer recovery from free-text messages.
+Wait for explicit user approval when requested; an action does not authorize spending, publishing, or overwriting.
+Resume the same operation through its returned checkpoint or action; never resubmit uncertain work, repeat exhausted recovery, or switch providers to bypass failure.
 <!-- END GENERATED EXECUTION EXAMPLE -->
 
 Omit `--prompt` for the default shot table and production notes described in

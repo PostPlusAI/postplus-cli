@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { formatSkillDiscovery } from './skill-discovery.js';
 import { PostPlusFailure, writeFailure, toFailureFact, formatFailure } from './failure-contract.js';
 import { buildVerbTargetIndex } from './hosted-manifest-index.js';
 import { readFile } from 'node:fs/promises';
@@ -48,6 +49,7 @@ import {
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
 import {
+  POSTPLUS_SKILLS_SESSION_ACTION,
   formatSkillBaselineVerifyReport,
   runPostPlusSkillUninstall,
   runPostPlusSkillUpdate,
@@ -89,9 +91,12 @@ Run \`postplus help\` for all commands.
 `);
 }
 
-function printHelp(): void {
+async function printHelp(): Promise<void> {
+  // Discovery uses this package only, even when runtime catalog overrides exist.
+  const catalog = await loadPublicSkillCatalog(undefined, {});
   process.stdout.write(`PostPlus CLI
-Install and maintain PostPlus skills, inspect readiness, and run supported tasks.
+${catalog.productBrief?.paragraphs[0] ?? 'Install and maintain PostPlus skills, inspect readiness, and run supported tasks.'}
+Start: postplus install → postplus list → describe the result you want to your agent.
 Use postplus <command> --help, -h, or postplus help <command> [subcommand].
 
 Usage:
@@ -131,7 +136,9 @@ Usage:
 
 First-time setup:
   postplus install
-  postplus auth login
+  postplus list
+  Follow the returned session action, then describe the result you want to your agent.
+  Sign in with postplus auth login only when the chosen task requests authentication.
 
 To keep Skills inside the current project:
   postplus install --current-directory
@@ -195,22 +202,8 @@ async function runList(json: boolean): Promise<number> {
     return 0;
   }
 
-  const lines = [
-    'PostPlus skills',
-    '',
-    `Source: ${catalog.source}`,
-    `Install (global): ${catalog.installCommand}`,
-    `Install (current directory): ${formatPostPlusSkillsInstallCommand(catalog.source, 'current-directory')}`,
-    '',
-  ];
+  process.stdout.write(`${formatSkillDiscovery(catalog)}\n`);
 
-  for (const entry of catalog.skills) {
-    lines.push(
-      entry.path ? `- ${entry.skillId}: ${entry.path}` : `- ${entry.skillId}`,
-    );
-  }
-
-  process.stdout.write(`${lines.join('\n')}\n`);
   return 0;
 }
 
@@ -607,15 +600,15 @@ async function main(): Promise<void> {
   const args = inputArgs[0] === 'help' && inputArgs[1] && !inputArgs[1].startsWith('-')
     ? [...inputArgs.slice(1), '--help'] : inputArgs;
   const [command, ...rest] = args;
-  // Asking how to use a command must not inspect or mutate account state.
-  if (command && !args.some(isHelpArg)) await assertConfigFilePermissions();
+  // Help and bundled capability discovery do not inspect or mutate account state.
+  if (command && command !== 'list' && !args.some(isHelpArg)) await assertConfigFilePermissions();
   const json = rest.includes('--json');
 
   switch (command) {
     case undefined:
     case '--help':
     case '-h':
-      printHelp();
+      await printHelp();
       process.exitCode = 0;
       return;
     case '--version':
@@ -638,7 +631,7 @@ async function main(): Promise<void> {
       } else if (helpTopic === 'workflow') {
         await runWorkflowCommand(['help']);
       } else {
-        printHelp();
+        await printHelp();
       }
       process.exitCode = 0;
       return;
@@ -773,7 +766,7 @@ async function runMainWithRecovery(): Promise<void> {
         throw new PostPlusFailure(recovery.restartAgentSessionRequired ? 'PostPlus updated; this task needs a new agent session.' : 'PostPlus could not complete the required update.', {
           code: recovery.restartAgentSessionRequired ? 'postplus_agent_restart_required' : 'postplus_client_upgrade_failed',
           stage: 'compatibility-recovery', service: 'cli', retryable: false,
-          action: recovery.restartAgentSessionRequired ? 'Start a new agent session and resume the task.' : 'Stop automatic recovery and report this failure; do not run another update or resubmit the task.',
+          action: recovery.restartAgentSessionRequired ? POSTPLUS_SKILLS_SESSION_ACTION : 'Stop automatic recovery and report this failure; do not run another update or resubmit the task.',
         }, { cause: error });
       }
       process.exitCode = recovery.exitCode === 0 ? 0 : 1;
@@ -792,7 +785,7 @@ runMainWithRecovery().then(() => {
 });
 
 function printSkillMutationHelp(command: string, json: boolean): number {
-  const help = { purpose: command === 'install' ? 'Install the matching bundled skills; reuse already correct content.' : command === 'update' ? 'Update the CLI and reconcile its matching managed skills.' : 'Remove managed PostPlus skills while protecting local changes.', examples: [`postplus ${command}`, `postplus ${command} --current-directory`], next: command === 'uninstall' ? 'Success means managed skills have been removed after protecting local changes. Start a new agent session to stop using previously loaded skills.' : 'Success means every supported installation target has been verified against this CLI bundle. It does not refresh the current agent session. Follow the reported action. Changes may require a new agent session; --yes authorizes backup and replacement only with user approval.', command: `postplus ${command}`, usage: `postplus ${command} [--current-directory] [--json] [--yes]`, options: { '--current-directory': 'Target this project.', '--json': 'Return machine-readable output.', '--yes': command === 'uninstall' ? 'Authorize backup and removal of locally changed managed skills.' : 'Authorize backup and replacement of locally modified managed skills.' } };
+  const help = { purpose: command === 'install' ? 'Install the matching bundled skills; reuse already correct content.' : command === 'update' ? 'Update the CLI and reconcile its matching managed skills.' : 'Remove managed PostPlus skills while protecting local changes.', examples: [`postplus ${command}`, `postplus ${command} --current-directory`], next: command === 'uninstall' ? 'Success means managed skills have been removed after protecting local changes. Start a new agent session to stop using previously loaded skills.' : 'Success means every supported installation target has been verified against this CLI bundle. It does not refresh the current agent session. Follow the reported action. Changes may require a new agent session; --yes authorizes backup and replacement only with user approval. ' + POSTPLUS_SKILLS_SESSION_ACTION, command: `postplus ${command}`, usage: `postplus ${command} [--current-directory] [--json] [--yes]`, options: { '--current-directory': 'Target this project.', '--json': 'Return machine-readable output.', '--yes': command === 'uninstall' ? 'Authorize backup and removal of locally changed managed skills.' : 'Authorize backup and replacement of locally modified managed skills.' } };
   if (json) process.stdout.write(`${JSON.stringify(help)}\n`);
   else process.stdout.write(`${help.purpose}\n\nUsage: ${help.usage}\n\nOptions:\n${Object.entries(help.options).map(([flag, detail]) => `${flag}  ${detail}`).join('\n')}\n\nExamples:\n${help.examples.join('\n')}\n\nNext: ${help.next}\n`);
   return 0;
@@ -835,10 +828,10 @@ function assertOnlyOptions(args: string[], allowed: string[], command: string): 
 
 function printReadOnlyHelp(command: 'list' | 'version', json: boolean): number {
   const help = { command: `postplus ${command}`,
-    purpose: command === 'list' ? 'List released skills available in this CLI bundle.' : 'Show the installed CLI version.',
+    purpose: command === 'list' ? 'Discover what PostPlus can do, grouped by the task you want to complete.' : 'Show the installed CLI version.',
     usage: `postplus ${command}${command === 'list' ? ' [--json]' : ''}`,
     options: command === 'list' ? '--json: structured output; --help, -h: help' : '--help, -h: help',
-    examples: [`postplus ${command}`], next: command === 'list' ? 'Use postplus doctor --skill <skill-id> for task requirements.' : 'Use postplus status for readiness and update information.' };
+    examples: [`postplus ${command}`], next: command === 'list' ? 'Describe a task from the examples to your agent. Use postplus list --json for full skill details.' : 'Use postplus status for readiness and update information.' };
   process.stdout.write(json ? `${JSON.stringify(help)}\n` : `${help.purpose}\nUsage: ${help.usage}\nOptions: ${help.options}\nExamples: ${help.examples.join('\n')}\nNext: ${help.next}\n`);
   return 0;
 }

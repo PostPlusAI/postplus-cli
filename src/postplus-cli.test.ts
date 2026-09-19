@@ -1532,7 +1532,6 @@ describe('doctor and status', () => {
             detail: 'Missing 1/2: ffmpeg for media-analysis',
             fix: 'Run the affected PostPlus skill in a local agent.',
             metadata: {
-              bootstrapRule: 'postplus-shared',
               missingDependencies: [
                 {
                   dependency: 'ffmpeg',
@@ -3156,12 +3155,14 @@ describe('public skill catalog', () => {
             routeKeys: ['facebook-post-by-url', 'instagram-posts'],
           },
           skillId: 'demo-skill',
+          name: 'demo-skill',
           path: 'skills/demo-skill/SKILL.md',
         },
         {
           localDependencies: [],
           requirements: createEmptySkillRequirements(),
           skillId: 'second-skill',
+          name: 'second-skill',
           path: 'skills/second-skill/SKILL.md',
         },
       ]);
@@ -4858,10 +4859,13 @@ describe('skill management commands', () => {
           'claude-code',
         ),
       );
-      assert.deepEqual(
-        calls[1],
-        buildPostPlusSkillUninstallArgs(['retired-skill'], 'global'),
-      );
+      assert.deepEqual(calls[1]!.slice(0, 3), [
+        SKILLS_INSTALLER_ENTRY, 'remove', '--postplus-retirement-plan',
+      ]);
+      const retirementPlan = JSON.parse(await readFile(calls[1]![3]!, 'utf8'));
+      assert.deepEqual(retirementPlan, {
+        schemaVersion: 1, scope: 'global', retiredNames: ['retired-skill'], entries: [],
+      });
       assert.deepEqual((await readManagedSkillBaseline())?.skillNames, [
         'demo-skill',
         'new-skill',
@@ -4869,7 +4873,7 @@ describe('skill management commands', () => {
       assert.equal((await readManagedSkillBaseline())?.releaseId, 'skills-2026-09-02.1');
       assert.equal(config?.cliVersion, CURRENT_CLI_VERSION);
       assert.deepEqual(successMessages, [
-        'PostPlus Skills updated: 2 current, 1 retired removed (global). Skills are ready on disk. Start a new agent session to use the verified skills. Then say: "Help me get started with PostPlus" (or "带我开始使用 PostPlus").',
+        'PostPlus Skills updated: 2 current, 1 retired removed (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.',
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -4915,7 +4919,7 @@ describe('skill management commands', () => {
       assert.equal(exitCode, 0);
       assert.equal(installCalls.length, 1);
       assert.deepEqual(successMessages, [
-        'PostPlus is ready: 1 official Skills installed and verified (global). Skills are ready on disk. Start a new agent session to use the verified skills. Then say: "Help me get started with PostPlus" (or "带我开始使用 PostPlus").',
+        'PostPlus is ready: 1 official Skills installed and verified (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.',
       ]);
       assert.doesNotMatch(successMessages.join('\n'), /PostPlus update/u);
     } finally {
@@ -5050,7 +5054,7 @@ describe('skill management commands', () => {
 
       assert.equal(exitCode, 0);
       assert.deepEqual(successMessages, [
-        'PostPlus Skills updated: 1 current, 0 retired removed (global). Skills are ready on disk. Start a new agent session to use the verified skills. Then say: "Help me get started with PostPlus" (or "带我开始使用 PostPlus").',
+        'PostPlus Skills updated: 1 current, 0 retired removed (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.',
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -5662,10 +5666,13 @@ describe('skill management commands', () => {
 
       assert.equal(exitCode, 0);
       assert.equal(calls.length, 2);
-      assert.deepEqual(
-        calls[1],
-        buildPostPlusSkillUninstallArgs(['retired-skill'], 'global'),
-      );
+      assert.deepEqual(calls[1]!.slice(0, 3), [
+        SKILLS_INSTALLER_ENTRY, 'remove', '--postplus-retirement-plan',
+      ]);
+      const retirementPlan = JSON.parse(await readFile(calls[1]![3]!, 'utf8'));
+      assert.deepEqual(retirementPlan, {
+        schemaVersion: 1, scope: 'global', retiredNames: ['retired-skill'], entries: [],
+      });
       assert.doesNotMatch(calls.flat().join(' '), /local-user-skill/);
     } finally {
       globalThis.fetch = originalFetch;

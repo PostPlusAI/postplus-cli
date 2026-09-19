@@ -1,6 +1,6 @@
 ---
 name: pinterest-search
-description: Route and run bounded public Pinterest image search that turns a keyword into normalized image, pin, and title records for moodboards, visual references, and creative inspiration.
+description: Find public Pinterest images from a keyword for moodboards and visual inspiration. Return usable image links, source pins, and titles.
 metadata:
   postplus:
     familyId: pinterest
@@ -13,12 +13,7 @@ Use this skill when the user wants public Pinterest image evidence — image
 addresses, moodboard source lists, or visual inspiration links — starting from a
 keyword.
 
-Apply shared rulebook and user-guidance rules from `postplus-shared`.
-When a supported command completes but evidence is empty, sparse, noisy,
-off-topic, or the wrong record type, apply the `postplus-shared` reference
-`research-quality-recovery.md`; hard execution errors still fail fast.
-Apply `references/shared-contract.md` first, then `references/search.md` for the
-keyword discovery workflow.
+Read `references/search.md` only when the keyword workflow needs clarification.
 
 ## Job
 
@@ -31,7 +26,7 @@ scope, count, strongest results, and next action.
 
 | User asks for | Apply |
 | --- | --- |
-| Any Pinterest image search from a keyword | `references/shared-contract.md`, then `references/search.md` |
+| Any Pinterest image search from a keyword | `references/search.md` only if needed |
 | Broader pass: more results, filter variation, or a second keyword | `references/search.md` |
 | Board scrape, profile scrape, pin-URL scrape, shopping/product fields, engagement metrics | Not supported on the current public surface. Say so and stop |
 | Non-Pinterest image sources | Hand off; run only the Pinterest lane here |
@@ -52,18 +47,14 @@ hidden filters, or retry strategy.
 
 ## Run Discipline
 
-1. Apply `references/shared-contract.md`.
-2. Apply `references/search.md`.
-3. Run the narrowest collection that can answer the first pass; start at the
+1. Use the command below; read `references/search.md` only if needed.
+2. Run the narrowest collection that can answer the first pass; start at the
    minimum limit of 20.
-4. Normalize output to `{ image_url, pin_url, title }` and deduplicate by image
+3. Normalize output to `{ image_url, pin_url, title }` and deduplicate by image
    address.
-5. Stop after the first pass and report scope, count, strongest results, limits,
+4. Stop after the first pass and report scope, count, strongest results, limits,
    and next action.
 
-The result record shape for the route is documented in the
-`postplus-shared` reference `dataset-item-schemas.md`; consult it before
-writing result-processing code, and probe a single record only to verify.
 
 Do not present a bounded first pass as the full Pinterest catalog. Use only the
 public filters shown by the route.
@@ -74,15 +65,27 @@ public filters shown by the route.
   <all|videos> --limit <n> --wait --output <result.json>`; the minimum limit is
   20.
 - Readiness diagnostics: `postplus doctor --skill pinterest-search`.
-- If the owned CLI command still fails after any bounded recovery allowed by the executing PostPlus skill, report the exact error and stop. Do not bypass
-  the failure with metadata-only answers, readiness probing, local payload
-  rewrites, alternate services, or unpublished tools.
+
 - Inspect flags with `postplus research run pinterest-search --help` only when
   needed.
 - Keep the first pass bounded; expand only after inspecting the first result.
-- If the CLI returns a quote-confirmation challenge, run
+- If the CLI returns a quote-confirmation challenge, obtain user approval for its scope and cost before running
   `postplus quote confirm --json --challenge-file <challenge.json>` and retry
   with the returned token.
+
+Only if platform scope or evidence interpretation remains unclear, consult
+[platform contract](references/shared-contract.md); it is not a preflight.
+
+## Evidence Quality
+
+1. Keep usable image records and source pin URLs; discard records without an image and deduplicate by image URL.
+2. If a completed pass is sparse or off-topic, try one focused keyword or supported kind change within scope.
+3. Allow at most two changed follow-up passes after successful but insufficient results, within approved scope and budget; do not repeat an identical request or hide a failed/pending operation.
+4. Stop when sufficient, at the bound, or when another pass would not help. Report useful evidence and uncertainty; preserve raw results and source links.
+
+image_url is the asset, pin_url is its source page; missing titles stay missing and visual inspiration is not engagement evidence.
+Full machine fields belong to `postplus research schema --route <route> --json`;
+consult it only when required for processing, not before every request.
 
 <!-- BEGIN GENERATED EXECUTION EXAMPLE -->
 ```bash
@@ -92,9 +95,7 @@ postplus research run pinterest-search \
   --output ./result.json
 ```
 
-**Bounded recovery:** Current PostPlus CLIs perform one compatible update and one task retry when no agent-session restart is required. Count a CLI-managed automatic update toward the one allowed recovery attempt. Only if an older CLI reports an update requirement without attempting recovery, run `postplus update` once; retry the task only after success and when no restart is required. Update is auth-independent. If maintenance or that retry fails, stop and report its error; a suggested action is not permission for a second automatic update or task retry.
-
-For a missing or invalid CLI session, run `postplus auth login` yourself; share its exact browser URL for the user to **Connect**, and retry once only after CLI-confirmed success. Never approve the connection for the user, expose polling secrets, or automatically restart a cancelled/expired login. Track login and compatibility recovery separately for the same task; neither resets the other's used allowance, and a failed recovery stops the task. A local usage rejection before remote work may be corrected once using the current command's help and existing user input.
-
-For `postplus_cli_balance_required` with an `open_url` user action, share its exact label and URL and wait for account action. Do not invent checkout links or blindly resubmit after payment. Continue existing work only through its documented status or checkpoint. Never resubmit when remote work may have started, bypass approval, change intent or switch providers to hide failure. Mention an update only when the CLI actually reports one.
+Follow the CLI's structured result and reported next action; do not infer recovery from free-text messages.
+Wait for explicit user approval when requested; an action does not authorize spending, publishing, or overwriting.
+Resume the same operation through its returned checkpoint or action; never resubmit uncertain work, repeat exhausted recovery, or switch providers to bypass failure.
 <!-- END GENERATED EXECUTION EXAMPLE -->

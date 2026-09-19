@@ -4,11 +4,7 @@ Use public X evidence only. PostPlus owns execution, credit guards, and polling.
 
 ## Routes
 
-| Need | Route | Flags |
-| --- | --- | --- |
-| Posts, timelines, direct URLs, replies | `x-posts` | repeat query/handle/URL, sort, limit |
-| Known account facts | `x-profiles` | repeat handle, limit |
-| Keyword account recall | `x-user-search` | repeat query, limit |
+Route names and first-pass bounds are in this skill’s SKILL.md.
 
 Examples:
 
@@ -29,7 +25,7 @@ accounts with `x-profiles`.
 - Keep multiple markets/queries separately attributable.
 - Preserve post/profile URL, observed timestamp, visible metrics, and raw JSON.
 - Treat public metrics as observations, not proof of reach or conversion.
-- Execution failures follow `postplus-shared/references/shared-public-skill-rules.md`; stop after its permitted recovery is exhausted. Successful but insufficient evidence follows `postplus-shared/references/research-quality-recovery.md` within the existing scope and budget.
+- Follow the CLI action for execution failures; successful but insufficient evidence follows the quality limits in this skill’s SKILL.md.
 - Resume with `postplus research run --resume-from result.json`; never resubmit.
 
 Protected accounts, DMs, hidden analytics, complete follower graphs, exhaustive

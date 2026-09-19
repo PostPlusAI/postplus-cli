@@ -1,6 +1,6 @@
 ---
 name: voice-batch-runner
-description: Generate and manage persona-aware voice assets for short-form video production, including voice design, script-specific audio takes, and future reusable voice identities. Use this when persona registries and scripts already exist and you need local audio assets, voice manifests, and reviewable voice iterations without losing continuity across many videos.
+description: Execute approved voice design or cloning requests from scripts and persona references. Return reusable audio takes and saved run results with consistent voice identity.
 metadata:
   postplus:
     familyId: media-production
@@ -57,20 +57,16 @@ metadata:
   route (`voice_design` or `voice_clone_take`), source basis, and output path.
 - After generation, review realism, persona fit, pacing, ad-like delivery,
   reuse potential, and for cloned output, timbre/accent drift from the reference.
-- If pending, return the manifest path, the `output.data.id`
-  generation handle, and the poll command
-  `postplus media poll --handle <output.data.id>`. The poll waits in-command
-  (up to 45s per invocation, checking every 8s); rerun it while pending
-  instead of writing a tighter retry loop.
+- If pending, preserve the result path and follow the returned CLI action or
+  resume command for the same operation; do not submit a replacement job.
+  Stop and report at the CLI wait/recovery boundary.
 - Save a finished take with `postplus media-file download`, using the completed
   result's artifact reference when present or its output URL otherwise.
 
 ## Stop Conditions
 - Stop when required user intent, source evidence, or owned input artifacts are
   missing and guessing would change the result.
-- If an owned CLI or script command still fails after any bounded recovery allowed by the executing PostPlus skill, report the exact error and stop. Do
-  not bypass the failure with metadata-only answers, readiness probing, local
-  payload rewrites, alternate execution paths, or unpublished tools.
+
 - Batch isolation: when producing a batch of independent items, a per-item
   content/safety rejection is isolated to that item. It is identified
   only by the typed code `postplus_cli_hosted_media_content_policy_blocked`,
@@ -92,10 +88,8 @@ metadata:
   it directly.
 - Readiness diagnostics: `postplus doctor --skill voice-batch-runner`.
 - Poll a pending voice take: `postplus media poll --handle <output.data.id>`
-  (waits in-command up to 45s per invocation; rerun while pending).
-- If an owned CLI or script command still fails after any bounded recovery allowed by the executing PostPlus skill, report the exact error and stop. Do
-  not bypass the failure with metadata-only answers, readiness probing, local
-  payload rewrites, alternate execution paths, or unpublished tools.
+  only when that is the returned action; honor its wait/recovery boundary.
+
 - Use `postplus media schema --json` only when constructing or repairing an unknown request shape.
 - Run the hosted submit with the generated command below; do not use another execution interface.
 
@@ -108,11 +102,9 @@ postplus media create voice-design \
   --output ./result.json
 ```
 
-**Bounded recovery:** Current PostPlus CLIs perform one compatible update and one task retry when no agent-session restart is required. Count a CLI-managed automatic update toward the one allowed recovery attempt. Only if an older CLI reports an update requirement without attempting recovery, run `postplus update` once; retry the task only after success and when no restart is required. Update is auth-independent. If maintenance or that retry fails, stop and report its error; a suggested action is not permission for a second automatic update or task retry.
-
-For a missing or invalid CLI session, run `postplus auth login` yourself; share its exact browser URL for the user to **Connect**, and retry once only after CLI-confirmed success. Never approve the connection for the user, expose polling secrets, or automatically restart a cancelled/expired login. Track login and compatibility recovery separately for the same task; neither resets the other's used allowance, and a failed recovery stops the task. A local usage rejection before remote work may be corrected once using the current command's help and existing user input.
-
-For `postplus_cli_balance_required` with an `open_url` user action, share its exact label and URL and wait for account action. Do not invent checkout links or blindly resubmit after payment. Continue existing work only through its documented status or checkpoint. Never resubmit when remote work may have started, bypass approval, change intent or switch providers to hide failure. Mention an update only when the CLI actually reports one.
+Follow the CLI's structured result and reported next action; do not infer recovery from free-text messages.
+Wait for explicit user approval when requested; an action does not authorize spending, publishing, or overwriting.
+Resume the same operation through its returned checkpoint or action; never resubmit uncertain work, repeat exhausted recovery, or switch providers to bypass failure.
 <!-- END GENERATED EXECUTION EXAMPLE -->
 
-- If the CLI returns a quote-confirmation challenge, run `postplus quote confirm --json --challenge-file <challenge.json>` and retry with the returned token.
+- If the CLI returns a quote-confirmation challenge, obtain user approval for its scope and cost before running `postplus quote confirm --json --challenge-file <challenge.json>` and retry with the returned token.

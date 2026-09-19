@@ -1,6 +1,6 @@
 ---
 name: tiktok-research
-description: Route and run bounded public TikTok research for organic videos, comments, creators, profiles, related videos, and paid ad examples.
+description: Research public TikTok videos, comments, creators, profiles, related videos, and paid ad examples for audience evidence and creative benchmarks.
 metadata:
   postplus:
     familyId: tiktok
@@ -13,15 +13,12 @@ Use this as the TikTok research entrypoint when the user wants public TikTok
 evidence for a growth, marketing, creator, audience, competitor, or paid
 creative decision.
 
-TikTok music/archive download is not part of the released public surface. Apply
-shared rulebook and user-guidance rules from `postplus-shared`.
-When a supported command completes but evidence is empty, sparse, noisy,
-off-topic, or the wrong record type, apply the `postplus-shared` reference
-`research-quality-recovery.md`; hard execution errors still fail fast.
+TikTok music/archive download is not part of the released public surface.
 
 ## Reference Index
 
-Always apply `references/shared-contract.md` before running a route.
+Read only the one route reference matching the request. The local contract is
+optional detail when platform scope remains unclear.
 
 | User asks for | Apply |
 | --- | --- |
@@ -33,10 +30,10 @@ Always apply `references/shared-contract.md` before running a route.
 | Product demo fit, ecommerce angle, buyer objection, content-to-offer fit | `references/product-content-fit.md` |
 | Launch campaign, hashtag challenge, branded activity, competitor campaign | `references/campaign-scout.md` |
 | Market, region, language, cross-border localization, local angle comparison | `references/market-localization-scout.md` |
-| Profile facts only | Apply `references/shared-contract.md`, then run a bounded `tiktok-profiles` or `tiktok-users` lookup |
+| Profile facts only | Run a bounded `tiktok-profiles` or `tiktok-users` lookup |
 | Mixed paid and organic | Run separated paid and organic lanes; never fill one lane with the other |
 | Shop, LIVE, private analytics, backend audience, GMV, conversion, hidden contacts, exact targeting, spend, ROAS | Stop or ask for a supported public TikTok scope |
-| Music/archive download or audio extraction | Not provided on the current public surface. Say so and stop; analyze user-provided local files through `media-router` instead |
+| Music/archive download or audio extraction | Not provided on the current public surface. Say so and stop; analyze user-provided local files through `media-analysis` instead |
 | Cross-platform request | Run only the TikTok lane here; hand off other platforms |
 
 ## First Question
@@ -63,39 +60,57 @@ archive details.
 ## Run Discipline
 
 1. Route the request with the table above.
-2. Apply `references/shared-contract.md`.
-3. Apply the selected workflow reference.
-4. Run the narrowest collection chain that can answer the first pass.
-5. Stop after the first pass and report scope, evidence, limits, and next
+2. Read only the selected workflow reference.
+3. Run the narrowest collection chain that can answer the first pass.
+4. Stop after the first pass and report scope, evidence, limits, and next
    action.
 
-Result record shapes for every research route are documented in the
-`postplus-shared` reference `dataset-item-schemas.md`; consult it before
-writing result-processing code, and probe a single record only to verify.
 
 Do not present a public sample as full TikTok truth. Do not use paid ads as
 organic creator evidence. Do not use organic videos as paid ad proof. Use only
 the filters shown by the selected route.
 
-For local testing, optimize for a fast real first pass. Use the route cards in
-`references/shared-contract.md`; do not inspect fixtures or product mappings.
+For local testing, optimize for a fast real first pass. Use the command selection below; do not inspect fixtures or product mappings.
 
 ## Public Command Boundary
 
 - Choose the smallest matching command or workflow from the user input and run
   it directly.
 - Readiness diagnostics: `postplus doctor --skill tiktok-research`.
-- If an owned CLI or script command still fails after any bounded recovery allowed by the executing PostPlus skill, report the exact error and stop. Do
-  not bypass the failure with metadata-only answers, readiness probing, local
-  payload rewrites, alternate services, or unpublished tools.
+
 - Inspect a route with `postplus research run <route> --help` only when its
   semantic flags are not already clear.
 - Run `postplus research run <route> --<query/url/handle/hashtag flags> --limit
   <n> --wait --output <result.json>`.
 - Keep the first pass bounded; expand only after inspecting the first result.
-- If the CLI returns a quote-confirmation challenge, run
+- If the CLI returns a quote-confirmation challenge, obtain user approval for its scope and cost before running
   `postplus quote confirm --json --challenge-file <challenge.json>` and retry
   with the returned token.
+
+## Command Selection
+
+| Evidence need | Route | Semantic input | First pass |
+| --- | --- | --- | --- |
+| Organic videos | `tiktok-videos` | query/handle/hashtag/URL, country, limit | 20 videos |
+| Comments/audience voice | `tiktok-comments` | repeat `--url`, `--limit` | 1-5 videos, 20 comments |
+| Known profiles | `tiktok-profiles` | repeat `--handle`, `--limit` | 1-5 profiles |
+| Account recall | `tiktok-users` | repeat `--query`, `--limit` | 20 accounts |
+| Related videos | `tiktok-related-videos` | repeat `--url`, country, limit | 20 videos |
+| Paid examples | `tiktok-ads-top` | `--limit` | 20 ads |
+
+Only if platform scope or evidence interpretation remains unclear, consult
+[platform contract](references/shared-contract.md); it is not a preflight.
+
+## Evidence Quality
+
+1. Check whether results are organic videos, comments, profiles, or paid examples; never substitute one lane for another.
+2. Change one supported seed, market, or query when a completed result misses; collect comments only from relevant shortlisted video URLs.
+3. Allow at most two changed follow-up passes after successful but insufficient results, within approved scope and budget; do not repeat an identical request or hide a failed/pending operation.
+4. Stop when sufficient, at the bound, or when another pass would not help. Report useful evidence and uncertainty; preserve raw results and source links.
+
+Captions and views are not audience voice or sales; preserve the paid/organic source and observed date.
+Full machine fields belong to `postplus research schema --route <route> --json`;
+consult it only when required for processing, not before every request.
 
 <!-- BEGIN GENERATED EXECUTION EXAMPLE -->
 ```bash
@@ -104,9 +119,7 @@ postplus research run tiktok-ads-top \
   --output ./result.json
 ```
 
-**Bounded recovery:** Current PostPlus CLIs perform one compatible update and one task retry when no agent-session restart is required. Count a CLI-managed automatic update toward the one allowed recovery attempt. Only if an older CLI reports an update requirement without attempting recovery, run `postplus update` once; retry the task only after success and when no restart is required. Update is auth-independent. If maintenance or that retry fails, stop and report its error; a suggested action is not permission for a second automatic update or task retry.
-
-For a missing or invalid CLI session, run `postplus auth login` yourself; share its exact browser URL for the user to **Connect**, and retry once only after CLI-confirmed success. Never approve the connection for the user, expose polling secrets, or automatically restart a cancelled/expired login. Track login and compatibility recovery separately for the same task; neither resets the other's used allowance, and a failed recovery stops the task. A local usage rejection before remote work may be corrected once using the current command's help and existing user input.
-
-For `postplus_cli_balance_required` with an `open_url` user action, share its exact label and URL and wait for account action. Do not invent checkout links or blindly resubmit after payment. Continue existing work only through its documented status or checkpoint. Never resubmit when remote work may have started, bypass approval, change intent or switch providers to hide failure. Mention an update only when the CLI actually reports one.
+Follow the CLI's structured result and reported next action; do not infer recovery from free-text messages.
+Wait for explicit user approval when requested; an action does not authorize spending, publishing, or overwriting.
+Resume the same operation through its returned checkpoint or action; never resubmit uncertain work, repeat exhausted recovery, or switch providers to bypass failure.
 <!-- END GENERATED EXECUTION EXAMPLE -->
