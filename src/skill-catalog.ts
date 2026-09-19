@@ -1,3 +1,10 @@
+import { PostPlusFailure } from './failure-contract.js';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { BUNDLED_SKILLS_ROOT, readSkillsManifest, SkillsBundleError } from './skills-bundle.js';
+import { fetchWithNetworkDiagnostics } from './network-diagnostics.js';
+
 export const POSTPLUS_SKILLS_REPO = 'PostPlusAI/postplus-skills';
 export const POSTPLUS_SKILLS_SOURCE_ENV = 'POSTPLUS_SKILLS_SOURCE';
 export const POSTPLUS_SKILLS_CATALOG_URL_ENV = 'POSTPLUS_SKILLS_CATALOG_URL';
@@ -12,7 +19,6 @@ export const POSTPLUS_SKILLS_AGENT_TARGETS = [
   'openclaw',
   'hermes-agent',
 ] as const;
-const POSTPLUS_SKILLS_AGENT_ARGS = POSTPLUS_SKILLS_AGENT_TARGETS.join(' ');
 export const POSTPLUS_SKILLS_INSTALL_COMMAND = formatPostPlusSkillsInstallCommand();
 export const POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND =
   formatPostPlusSkillsInstallCommand(
@@ -22,13 +28,15 @@ export const POSTPLUS_SKILLS_CURRENT_DIRECTORY_INSTALL_COMMAND =
 export const POSTPLUS_SKILLS_LIST_COMMAND = formatPostPlusSkillsListCommand();
 export type PostPlusSkillsInstallScope = 'global' | 'current-directory';
 
-const POSTPLUS_SKILLS_CATALOG_URL =
-  'https://raw.githubusercontent.com/PostPlusAI/postplus-skills/main/skills/catalog.json';
 
 export type PublicSkillCatalogEntry = {
   requirements: PublicSkillRequirements;
   localDependencies: string[];
   skillId: string;
+  name?: string;
+  description?: string;
+  category?: string;
+  example?: string;
   path: string | null;
 };
 
@@ -71,67 +79,71 @@ export type PublicSkillCatalogReport = {
   catalogUrl: string;
   installCommand: string;
   listCommand: string;
+  categories?: Record<string, { title: string }>;
   productBrief?: PublicProductBrief;
   releaseNotes?: PublicReleaseNotes;
   skills: PublicSkillCatalogEntry[];
+  contentHashes?: Record<string, string>;
 };
 
 export async function loadPublicSkillCatalog(
-  fetchFn: typeof fetch = fetch,
+  fetchFn?: typeof fetch,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<PublicSkillCatalogReport> {
-  const catalogUrl = resolvePostPlusSkillsCatalogUrl(env);
   const skillsSource = resolvePostPlusSkillsSource(env);
-  const response = await fetchFn(catalogUrl, {
-    headers: {
-      accept: 'application/json',
-    },
-    signal: AbortSignal.timeout(15000),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `Failed to load PostPlus skill catalog (${response.status}): ${response.statusText}`,
-    );
+  const overrideUrl = env[POSTPLUS_SKILLS_CATALOG_URL_ENV]?.trim();
+  const catalogUrl = fetchFn && !overrideUrl
+    ? 'https://raw.githubusercontent.com/PostPlusAI/postplus-skills/main/skills/catalog.json'
+    : resolvePostPlusSkillsCatalogUrl(env);
+  let raw: string;
+  let contentHashes: Record<string, string> | undefined;
+  if (overrideUrl || fetchFn) {
+    const request = fetchFn ?? ((url, init) => fetchWithNetworkDiagnostics(String(url), init ?? {}, {
+      debug: false, label: 'skills_catalog', redirectPolicy: 'follow-https',
+    }));
+    const response = await request(catalogUrl, {
+      headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) throw new Error(`Failed to load PostPlus skill catalog (${response.status}): ${response.statusText}`);
+    raw = await response.text();
+  } else {
+    const manifest = await readSkillsManifest(skillsSource);
+    raw = await readFile(join(skillsSource, 'skills/catalog.json'), 'utf8');
+    contentHashes = Object.fromEntries(manifest.skills.map((skill) => [skill.name, skill.contentHash]));
+    const catalog = parsePublicSkillCatalog(parseJsonResponse(raw, catalogUrl));
+    if (catalog.releaseId !== manifest.releaseId || catalog.skills.length !== manifest.skills.length ||
+        catalog.skills.some((skill) => !manifest.skills.some((entry) => entry.name === skill.skillId && entry.path === skill.path))) {
+      throw new SkillsBundleError('The bundled skill catalog does not match its manifest.');
+    }
   }
-
-  const raw = await response.text();
-  const payload = parseJsonResponse(raw, catalogUrl);
-  const catalog = parsePublicSkillCatalog(payload);
-
+  const catalog = parsePublicSkillCatalog(parseJsonResponse(raw, catalogUrl));
   return {
-    ...catalog,
-    catalogUrl,
+    ...catalog, catalogUrl,
+    ...(contentHashes ? { contentHashes } : {}),
     installCommand: formatPostPlusSkillsInstallCommand(skillsSource),
     listCommand: formatPostPlusSkillsListCommand(skillsSource),
     source: skillsSource,
   };
 }
 
-export function resolvePostPlusSkillsSource(
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  return env[POSTPLUS_SKILLS_SOURCE_ENV]?.trim() || POSTPLUS_SKILLS_REPO;
+export function resolvePostPlusSkillsSource(env: NodeJS.ProcessEnv = process.env): string {
+  return env[POSTPLUS_SKILLS_SOURCE_ENV]?.trim() || BUNDLED_SKILLS_ROOT;
 }
 
-export function resolvePostPlusSkillsCatalogUrl(
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  return env[POSTPLUS_SKILLS_CATALOG_URL_ENV]?.trim() || POSTPLUS_SKILLS_CATALOG_URL;
+export function resolvePostPlusSkillsCatalogUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return env[POSTPLUS_SKILLS_CATALOG_URL_ENV]?.trim() ||
+    pathToFileURL(join(resolvePostPlusSkillsSource(env), 'skills/catalog.json')).href;
 }
 
 export function formatPostPlusSkillsInstallCommand(
-  source = POSTPLUS_SKILLS_REPO,
+  _source = BUNDLED_SKILLS_ROOT,
   scope: PostPlusSkillsInstallScope = 'global',
 ): string {
-  const scopeArgs = scope === 'global' ? ' --global' : '';
-  return `for agent in ${POSTPLUS_SKILLS_AGENT_ARGS}; do npx -y skills add ${source}${scopeArgs} --full-depth --skill '*' --agent "$agent" --yes; done`;
+  return `postplus install${scope === 'global' ? '' : ' --current-directory'}`;
 }
 
-export function formatPostPlusSkillsListCommand(
-  source = POSTPLUS_SKILLS_REPO,
-): string {
-  return `npx -y skills add ${source} --list --full-depth`;
+export function formatPostPlusSkillsListCommand(_source = BUNDLED_SKILLS_ROOT): string {
+  return 'postplus list';
 }
 
 function parseJsonResponse(raw: string, url: string): unknown {
@@ -157,7 +169,7 @@ function parsePublicSkillCatalog(
   payload: unknown,
 ): Pick<
   PublicSkillCatalogReport,
-  'productBrief' | 'releaseId' | 'releaseNotes' | 'skills' | 'source'
+  'categories' | 'productBrief' | 'releaseId' | 'releaseNotes' | 'skills' | 'source'
 > {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('PostPlus public skill catalog is invalid.');
@@ -186,6 +198,7 @@ function parsePublicSkillCatalog(
     throw new Error('PostPlus public skill catalog has no skills array.');
   }
 
+  const categories = parseDiscoveryCategories(record.discoveryCategories);
   const skills = record.skills.map((value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new Error('PostPlus public skill catalog has an invalid skill.');
@@ -212,7 +225,13 @@ function parsePublicSkillCatalog(
       throw new Error('PostPlus public skill catalog has an invalid skill.');
     }
 
+    const hasDiscovery = categories !== undefined || ['description', 'category', 'example'].some(key => key in skill);
+    if (hasDiscovery && (!categories || ['description', 'category', 'example'].some(key =>
+      typeof skill[key] !== 'string' || !String(skill[key]).trim() || String(skill[key]).length > 1000) ||
+      !Object.hasOwn(categories, String(skill.category)))) invalidDiscovery();
     return {
+      name: skillId,
+      ...(hasDiscovery ? { description: String(skill.description).trim(), category: String(skill.category), example: String(skill.example).trim() } : {}),
       localDependencies: requirements.localDependencies,
       skillId,
       path,
@@ -229,12 +248,32 @@ function parsePublicSkillCatalog(
   const productBrief = parsePublicProductBrief(record.productBrief);
 
   return {
+    ...(categories ? { categories } : {}),
     ...(productBrief ? { productBrief } : {}),
     releaseId,
     ...(releaseNotes ? { releaseNotes } : {}),
     skills,
     source,
   };
+}
+
+function invalidDiscovery(): never {
+  throw new PostPlusFailure('The skill catalog has invalid discovery information.', {
+    code: 'postplus_skills_catalog_invalid', stage: 'skills_catalog', service: 'local', retryable: false,
+    action: 'Reinstall PostPlus CLI from the official package.',
+  });
+}
+
+function parseDiscoveryCategories(value: unknown): PublicSkillCatalogReport['categories'] {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length) invalidDiscovery();
+  const result: Record<string, { title: string }> = {};
+  for (const [id, category] of Object.entries(value)) {
+    if (!/^[a-z][a-z0-9-]*$/.test(id) || !category || typeof category !== 'object' || Array.isArray(category) ||
+      typeof category.title !== 'string' || !category.title.trim() || category.title.length > 160) invalidDiscovery();
+    result[id] = { title: category.title.trim() };
+  }
+  return result;
 }
 
 function parsePublicProductBrief(value: unknown): PublicProductBrief | null {

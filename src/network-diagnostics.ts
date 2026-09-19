@@ -1,8 +1,10 @@
+import { PostPlusFailure } from './failure-contract.js';
+import { createProxyDispatcher, explicitProxyConfiguration } from './proxy-configuration.js';
 const MAX_DEBUG_BODY_CHARS = 2_048;
 const MAX_ERROR_CAUSES = 4;
 const DEFAULT_MAX_REDIRECTS = 5;
 
-type RedirectPolicy = 'error' | 'follow-https';
+type RedirectPolicy = 'error' | 'follow-https' | 'manual';
 
 export type NetworkRequestOptions = {
   debug?: boolean;
@@ -13,12 +15,18 @@ export type NetworkRequestOptions = {
 
 export class PostPlusNetworkRequestError extends Error {
   readonly code = 'postplus_cli_cloud_transport_failed';
+  readonly stage = 'request';
+  readonly service: string;
+  readonly retryable: boolean;
+  readonly correlationId = null;
+  readonly action: string;
   readonly method: string;
   readonly targetHost: string;
 
   constructor(input: {
     cause?: unknown;
     detail?: string;
+    action?: string;
     method: string;
     targetUrl: string;
   }) {
@@ -30,6 +38,10 @@ export class PostPlusNetworkRequestError extends Error {
       input.cause === undefined ? undefined : { cause: input.cause },
     );
     this.name = 'PostPlusNetworkRequestError';
+    this.service = /^(localhost|127\.0\.0\.1|\[::1\])(?::|$)/u.test(targetHost) ? 'local-studio' : /(?:^|\.)postplus\.(?:io|test)(?::|$)/u.test(targetHost) ? 'postplus-cloud' : 'external-http';
+    const certificateFailure = isTlsFailure(input.cause);
+    this.retryable = input.method !== 'PREFLIGHT' && !certificateFailure && !/redirect/iu.test(detail);
+    this.action = input.action ?? (certificateFailure ? TLS_FAILURE_ACTION : 'Check network and proxy settings; use the task’s recovery instructions if work has already started.');
     this.method = input.method;
     this.targetHost = targetHost;
   }
@@ -41,7 +53,7 @@ export async function fetchWithNetworkDiagnostics(
   options: NetworkRequestOptions,
 ): Promise<Response> {
   let currentUrl = new URL(inputUrl);
-  assertEnvironmentProxyReady(currentUrl);
+
   let method = (init.method ?? 'GET').toUpperCase();
   let body = init.body;
   const headers = Object.fromEntries(new Headers(init.headers).entries());
@@ -53,6 +65,10 @@ export async function fetchWithNetworkDiagnostics(
       `request method=${method} target=${formatDebugUrl(currentUrl, options)}`,
     );
 
+    const dispatcher = await createProxyDispatcher({}, currentUrl).catch((cause: unknown) => {
+      if (cause instanceof PostPlusFailure) throw cause;
+      throw new PostPlusNetworkRequestError({cause,method:'PREFLIGHT',targetUrl:currentUrl.toString(),action:cause instanceof PostPlusFailure ? cause.details.action : undefined});
+    });
     let response: Response;
     try {
       response = await fetch(currentUrl, {
@@ -61,7 +77,8 @@ export async function fetchWithNetworkDiagnostics(
         headers,
         method,
         redirect: 'manual',
-      });
+        dispatcher,
+      } as unknown as RequestInit);
     } catch (error) {
       const wrapped = new PostPlusNetworkRequestError({
         cause: error,
@@ -70,6 +87,8 @@ export async function fetchWithNetworkDiagnostics(
       });
       writeDebug(options, `error ${wrapped.message}`);
       throw wrapped;
+    } finally {
+      void dispatcher.close().catch(() => dispatcher.destroy());
     }
 
     writeDebug(
@@ -77,7 +96,7 @@ export async function fetchWithNetworkDiagnostics(
       `response status=${response.status}${response.statusText ? ` ${response.statusText}` : ''} target=${formatDebugUrl(currentUrl, options)}`,
     );
 
-    if (!isRedirectStatus(response.status)) {
+    if (!isRedirectStatus(response.status) || options.redirectPolicy === 'manual') {
       if (!response.ok) {
         await writeDebugResponseBody(options, response);
       }
@@ -142,62 +161,21 @@ export async function fetchWithNetworkDiagnostics(
   }
 }
 
-/**
- * Node only honors HTTP(S)_PROXY for built-in fetch when environment proxy
- * support is enabled before process startup. Failing here turns an otherwise
- * repeated 15-second timeout into one actionable configuration error. NO_PROXY
- * targets remain direct and are not blocked.
- */
-export function assertEnvironmentProxyReady(target: URL): void {
-  const proxy =
-    readEnv('HTTPS_PROXY') ??
-    readEnv('https_proxy') ??
-    readEnv('ALL_PROXY') ??
-    readEnv('all_proxy') ??
-    readEnv('HTTP_PROXY') ??
-    readEnv('http_proxy');
-  if (!proxy || targetIsExcludedFromProxy(target)) {
-    return;
-  }
-  const enabled = readEnv('NODE_USE_ENV_PROXY')?.toLowerCase();
-  if (enabled === '1' || enabled === 'true') {
-    return;
-  }
-  throw new PostPlusNetworkRequestError({
-    detail:
-      'Proxy environment variables are configured, but Node fetch environment-proxy support is disabled. Restart the command with NODE_USE_ENV_PROXY=1.',
-    method: 'PREFLIGHT',
-    targetUrl: target.toString(),
-  });
+/** Validate explicit settings; dispatchers activate them without a startup flag. */
+export function assertEnvironmentProxyReady(_target: URL): void {
+  explicitProxyConfiguration(process.env);
 }
 
-function targetIsExcludedFromProxy(target: URL): boolean {
-  const raw = readEnv('NO_PROXY') ?? readEnv('no_proxy');
-  if (!raw) {
-    return false;
-  }
-  const host = target.hostname.toLowerCase();
-  const hostWithPort = target.host.toLowerCase();
-  return raw.split(',').some((entry) => {
-    const token = entry.trim().toLowerCase();
-    if (!token) {
-      return false;
-    }
-    if (token === '*') {
-      return true;
-    }
-    const normalized = token.replace(/^https?:\/\//u, '');
-    if (normalized.includes(':')) {
-      return hostWithPort === normalized;
-    }
-    const suffix = normalized.replace(/^\./u, '');
-    return host === suffix || host.endsWith(`.${suffix}`);
-  });
-}
+export const TLS_FAILURE_ACTION = 'Verify the server certificate or restart with NODE_EXTRA_CA_CERTS pointing to an approved CA file; keep certificate verification enabled.';
 
-function readEnv(name: string): string | null {
-  const value = process.env[name]?.trim();
-  return value ? value : null;
+export function isTlsFailure(error: unknown): boolean {
+  const seen = new Set<object>();
+  while (error && typeof error === 'object' && !seen.has(error)) {
+    seen.add(error);
+    if (/^(?:ERR_TLS|ERR_SSL|CERT_|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT)/u.test(readErrorField(error, 'code') ?? '')) return true;
+    error = 'cause' in error ? error.cause : null;
+  }
+  return false;
 }
 
 export function isNetworkFailure(error: unknown): boolean {
@@ -211,6 +189,7 @@ export function isNetworkFailure(error: unknown): boolean {
     const code = readErrorField(current, 'code');
 
     if (
+      isTlsFailure(current) ||
       code === 'postplus_cli_cloud_transport_failed' ||
       name === 'AbortError' ||
       name === 'TimeoutError' ||
@@ -423,3 +402,14 @@ function sanitizeUrlQueries(
       }
     });
 }
+
+/** Fetch-compatible adapter for injectable transports. Redirects remain manual
+ * when callers validate them themselves (authentication and signed uploads). */
+export const diagnosticFetch: typeof fetch = async (input, init = {}) => {
+  if (input instanceof Request) {
+    throw new TypeError('PostPlus transport requires a URL and explicit request options.');
+  }
+  return fetchWithNetworkDiagnostics(input, {
+    ...init, signal: init.signal ?? AbortSignal.timeout(15_000),
+  }, { label: 'request', redirectPolicy: init.redirect === 'manual' ? 'manual' : 'error' });
+};

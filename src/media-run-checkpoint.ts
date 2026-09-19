@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
+import { PostPlusFailure } from './failure-contract.js';
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import { PostPlusClientUpgradeRequiredError } from './client-compatibility.js';
 import {
@@ -159,7 +160,27 @@ export async function readMediaRunCheckpoint(
   const info = await stat(filePath);
   if (!info.isFile() || info.size > 65536)
     throw new Error('Invalid media recovery checkpoint.');
-  const record: unknown = JSON.parse(await readFile(filePath, 'utf8'));
+  // Read errors retain their filesystem identity, especially ENOENT used by
+  // first preparation. Invalid JSON must never be treated as an absent record.
+  const raw = await readFile(filePath, 'utf8');
+  let record: unknown;
+  try {
+    record = JSON.parse(raw);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    throw new PostPlusFailure('Invalid media recovery checkpoint: JSON is invalid or truncated.', {
+      code: 'postplus_media_checkpoint_invalid',
+      stage: 'media-checkpoint-read',
+      service: 'filesystem',
+      retryable: false,
+      resumeAvailable: false,
+      action: 'Preserve this checkpoint and contact PostPlus support to recover the original operation; do not delete it or submit a replacement task.',
+    }, {
+      // Native JSON errors can quote private checkpoint values. Preserve the
+      // error category without exposing prompts or upload credentials.
+      cause: new SyntaxError('Invalid or truncated JSON in the media recovery checkpoint.'),
+    });
+  }
   if (!record || typeof record !== 'object' || Array.isArray(record))
     throw new Error('Invalid media recovery checkpoint.');
   const data = record as Record<string, unknown>;

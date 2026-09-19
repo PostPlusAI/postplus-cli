@@ -27,9 +27,8 @@ const stableArchive = 'postplus-cli.tar.gz';
 const packageRoot = resolve(distDir, 'package', 'postplus-cli');
 
 function assertSupportedRuntimeDependencies() {
-  // A's cross-platform command runner is the only runtime dependency. Media
-  // acquisition continues to use Node's native HTTP/proxy support.
-  if (JSON.stringify(packageJson.dependencies) !== JSON.stringify({ 'cross-spawn': '7.0.6' })) {
+  // Pin and audit the command runner plus the unified HTTP/proxy transport.
+  if (JSON.stringify(packageJson.dependencies) !== JSON.stringify({ 'cross-spawn': '7.0.6', undici: '7.29.1' })) {
     throw new Error('Review release packaging before changing runtime dependencies.');
   }
   const dependencyFields = ['optionalDependencies', 'peerDependencies'];
@@ -58,8 +57,8 @@ function copyRuntimeDependencies() {
     const metadata = JSON.parse(readFileSync(manifestPath, 'utf8'));
     const source = dirname(manifestPath);
     const target = resolve(targetParent, 'node_modules', name);
-    if (name === 'cross-spawn' && metadata.version !== packageJson.dependencies[name]) {
-      throw new Error('Installed cross-spawn does not match the pinned runtime version.');
+    if (name in packageJson.dependencies && metadata.version !== packageJson.dependencies[name]) {
+      throw new Error(`Installed ${name} does not match the pinned runtime version.`);
     }
     // Copy the actual local pnpm-resolved closure, including licenses. Nested
     // dependencies avoid flattening distinct versions or following global npm.
@@ -137,7 +136,7 @@ function copyReleaseFiles() {
   }
 
   for (const fileName of ['package.json', ...packageJson.files.filter((name) => !name.startsWith('build/'))]) {
-    cpSync(resolve(repoRoot, fileName), resolve(packageRoot, fileName));
+    cpSync(resolve(repoRoot, fileName), resolve(packageRoot, fileName), { recursive: true });
   }
 
   mkdirSync(resolve(packageRoot, 'scripts'), { recursive: true });
@@ -169,6 +168,10 @@ function writeSha256(fileName) {
   writeFileSync(resolve(distDir, `${fileName}.sha256`), `${hash}  ${fileName}\n`);
 }
 
+const { readSkillsManifest } = await import('../build/skills-bundle.js');
+await readSkillsManifest();
+
+await import('./check-skills-runtime.mjs');
 assertSupportedRuntimeDependencies();
 assertBuildExists();
 assertBuildOnlyContainsReleaseFiles();

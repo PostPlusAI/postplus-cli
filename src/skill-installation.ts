@@ -210,11 +210,16 @@ export async function resolvePostPlusSkillsScope(): Promise<PostPlusSkillsInstal
     // An unreadable/deleted cwd or invalid lock must not redirect a project
     // update into the user's global installation.
     await realpath(process.cwd());
+    // Bundled installs have a local source in the third-party lock. The owned
+    // project baseline identifies their scope without relying on a GitHub URL.
+    const baseline = await readManagedSkillBaseline('current-directory');
+    if (baseline.releaseId !== null) return 'current-directory';
     const project = await readPostPlusInstallerLockedSkillEntries(
       'current-directory',
     );
     return project.length > 0 ? 'current-directory' : 'global';
   } catch (cause) {
+    if (cause instanceof PostPlusSkillsStateError) throw cause;
     throw new PostPlusSkillsStateError('scope', cause);
   }
 }
@@ -242,6 +247,7 @@ export class PostPlusSkillsStateError extends Error {
 type ManagedSkillBaseline = {
   releaseId: string | null;
   skillNames: string[];
+  contentHashes?: Record<string, string>;
 };
 
 export async function readManagedSkillBaseline(
@@ -263,7 +269,12 @@ export async function readManagedSkillBaseline(
     ) {
       throw new Error('Invalid installation baseline.');
     }
-    return { releaseId: record.releaseId, skillNames: record.skillNames };
+    if (record.contentHashes !== undefined && (
+      !record.contentHashes || typeof record.contentHashes !== 'object' || Array.isArray(record.contentHashes) ||
+      Object.entries(record.contentHashes).some(([name, hash]) => !record.skillNames.includes(name) || typeof hash !== 'string' || !/^[a-f0-9]{64}$/.test(hash))
+    )) throw new Error('Invalid baseline content identities.');
+    return { releaseId: record.releaseId, skillNames: record.skillNames,
+      ...(record.contentHashes ? { contentHashes: record.contentHashes } : {}) };
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === 'ENOENT')
       return { releaseId: null, skillNames: [] };
@@ -272,7 +283,7 @@ export async function readManagedSkillBaseline(
 }
 
 export async function writeManagedSkillBaseline(
-  input: { releaseId: string; skillNames: string[] },
+  input: { releaseId: string; skillNames: string[]; contentHashes?: Record<string, string> },
   scope?: PostPlusSkillsInstallScope,
 ): Promise<void> {
   await stageManagedSkillBaseline(input, scope, true);
@@ -289,7 +300,7 @@ export async function assertPostPlusSkillsBaselineWritable(
 }
 
 async function stageManagedSkillBaseline(
-  input: { releaseId: string; skillNames: string[] },
+  input: { releaseId: string; skillNames: string[]; contentHashes?: Record<string, string> },
   scope: PostPlusSkillsInstallScope | undefined,
   commit: boolean,
 ): Promise<void> {
@@ -313,6 +324,7 @@ async function stageManagedSkillBaseline(
         `${JSON.stringify(
           {
             releaseId: input.releaseId,
+            ...(input.contentHashes ? { contentHashes: input.contentHashes } : {}),
             skillNames: [
               ...new Set(
                 input.skillNames

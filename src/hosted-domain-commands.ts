@@ -139,8 +139,9 @@ export async function runHostedDomainCommand(
         `research ${subcommand} was removed. Migrate to \`postplus research run <route> --<semantic flags> --wait --output <result.json>\`; JSON request files and --max-charge-usd are no longer accepted.`,
       );
     }
+    if (subcommand !== undefined && !isHelp(subcommand)) throw new Error(`Unknown command: research ${subcommand}`);
     printResearchHelp();
-    return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+    return 0;
   }
 
   if (subcommand === 'schema') {
@@ -193,8 +194,9 @@ export async function runHostedDomainCommand(
     return runPublishOperation(subcommand, rest, context);
   }
 
+  if (subcommand !== undefined && !isHelp(subcommand)) throw new Error(`Unknown command: ${domain} ${subcommand}`);
   printDomainVerbHelp(domain);
-  return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+  return 0;
 }
 
 // Manifest-driven verb grammar: `postplus media <verb> <endpointKey> ...`. The
@@ -213,6 +215,10 @@ async function runMediaVerb(
   }
 
   const [targetKey, ...rest] = args;
+  if (args.some(isHelp) && (!targetKey || isHelp(targetKey) || targetKey.startsWith('-'))) {
+    printDomainVerbHelp('media');
+    return 0;
+  }
   if (!targetKey || targetKey.startsWith('--')) {
     throw new Error(
       `postplus media ${verb} requires a target key. Run \`postplus media schema --json\` to list targets.`,
@@ -629,8 +635,9 @@ export async function runMediaFileCommand(
   if (subcommand === 'download') {
     return runMediaFileDownload(rest, context);
   }
+  if (subcommand !== undefined && !isHelp(subcommand)) throw new Error(`Unknown command: media-file ${subcommand}`);
   printMediaFileHelp();
-  return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+  return 0;
 }
 
 /**
@@ -1075,6 +1082,14 @@ Usage:
 
 Upload returns a reusable PostPlus media reference. Normal generation commands
 prepare local role files automatically.
+
+Examples:
+  postplus media-file upload --input-file ./reference.png --json
+  postplus media-file download --reference <postplus-media://...> --output-file ./result.mp4
+
+Next:
+  Reuse the returned media reference as an input, or inspect the downloaded artifact.
+  --help, -h shows help without reading files or transferring media.
 `);
 }
 
@@ -1212,6 +1227,10 @@ async function runMediaPoll(
   args: string[],
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
+  if (args.some(isHelp)) {
+    printDomainVerbHelp('media');
+    return 0;
+  }
   const flags = parseFlags(args, new Set(['debug', 'json']));
   const resumePath = flags.values.get('resume-from');
   if (
@@ -1594,6 +1613,10 @@ async function runMediaEstimate(
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
   const [endpointKey, ...rest] = args;
+  if (args.some(isHelp) && (!endpointKey || isHelp(endpointKey) || endpointKey.startsWith('-'))) {
+    printDomainVerbHelp('media');
+    return 0;
+  }
   if (!endpointKey || endpointKey.startsWith('--')) {
     throw new Error(
       'postplus media estimate requires an endpoint key. Run `postplus media schema --json` to list endpoints.',
@@ -1609,7 +1632,7 @@ async function runMediaEstimate(
 
   if (rest.some(isHelp)) {
     process.stdout.write(
-      `PostPlus CLI - media estimate ${endpointKey}\n\n  Read-only PostPlus credit estimate. Takes the same public inputs as the matching media submit command for ${endpointKey}.\n  Usage:\n    postplus media estimate ${endpointKey} ${resolved.surface === 'flags' ? '--<role-or-intent flags>' : '--request <input.json>'} [--json] [--output <result.json>]\n`,
+      `PostPlus CLI - media estimate ${endpointKey}\n\n  Read-only PostPlus credit estimate. Takes the same public inputs as the matching media submit command for ${endpointKey}.\n  Usage:\n    postplus media estimate ${endpointKey} ${resolved.surface === 'flags' ? '--<role-or-intent flags>' : '--request <input.json>'} [--json] [--output <result.json>]\n\n  Examples:\n    postplus media schema --endpoint ${endpointKey} --json\n\n  Next:\n    Supply the matching submit inputs to estimate credits; approve spending separately before submitting.\n`,
     );
     return 0;
   }
@@ -1866,12 +1889,18 @@ async function runResearchRun(
   const [first, ...rest] = args;
   const verb = 'run';
   const targets = RESEARCH_VERB_TARGETS.get(verb);
-  const hasRoute = Boolean(first && !first.startsWith('--'));
+  const hasRoute = Boolean(first && !first.startsWith('-') && !isHelp(first));
   const routeKey = hasRoute ? first : null;
   const resumeArgs = hasRoute ? rest : args;
   const isResume = resumeArgs.some(
     (arg) => arg === '--resume-from' || arg === '--run-handle',
   );
+
+  if (args.some(isHelp) && (!hasRoute || isResume)) {
+    if (routeKey) assertKnownResearchRoute(targets, routeKey);
+    printResearchHelp();
+    return 0;
+  }
 
   if (!hasRoute || isResume) {
     const flags = parseFlags(resumeArgs, new Set(['json']));
@@ -2615,11 +2644,23 @@ Usage:
 connect_nodes); the server validates and never silently repairs. launch is
 refused without --confirm: quote first, then pass the quote's reservedCredits
 as --max-reserved-credits and --confirm to acknowledge the spend.
+
+Examples:
+  postplus workflow list --json
+  postplus workflow launch --help
+
+Next:
+  Inspect the workflow, request a quote, and obtain approval before launch.
+  --help, -h shows help without reading inputs or submitting requests.
 `);
 }
 
 export async function runWorkflowCommand(args: string[]): Promise<number> {
   const [subcommand, ...rest] = args;
+  if (subcommand && ['list', 'show', 'runs', 'run-show', 'create', 'propose', 'save', 'quote', 'launch'].includes(subcommand) && rest.some(isHelp)) {
+    printWorkflowHelp();
+    return 0;
+  }
   switch (subcommand) {
     case 'list':
       return runWorkflowList(rest);
@@ -2640,8 +2681,9 @@ export async function runWorkflowCommand(args: string[]): Promise<number> {
     case 'launch':
       return runWorkflowLaunch(rest);
     default:
+      if (subcommand !== undefined && !isHelp(subcommand)) throw new Error(`Unknown command: workflow ${subcommand}`);
       printWorkflowHelp();
-      return subcommand === undefined || isHelp(subcommand) ? 0 : 1;
+      return 0;
   }
 }
 
@@ -2650,6 +2692,11 @@ async function runHostedSchema(
   args: string[],
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
+  if (args.some(isHelp)) {
+    if (domain === 'research') printResearchHelp();
+    else printDomainVerbHelp(domain);
+    return 0;
+  }
   const flags = parseFlags(args, new Set(['json']));
   const allowedFlags =
     domain === 'media'
@@ -2797,6 +2844,15 @@ Usage:
   postplus research schema [--route <route>] [--json]
 
 Run \`postplus research run <route> --help\` for route-specific flags.
+Collect public research evidence or resume an existing hosted research run.
+
+Examples:
+  postplus research schema --json
+  postplus research run --resume-from ./result.json --json
+
+Next:
+  Choose a route from the schema and inspect its help before submitting a request.
+  --help, -h never submits a request or reads a resume file.
 `);
 }
 
@@ -2819,6 +2875,16 @@ function printDomainVerbHelp(domain: Exclude<HostedDomain, 'research'>): void {
 
 Usage:
 ${verbUsage}  postplus ${domain} schema${domain === 'media' ? ' [--endpoint <endpoint-key>]' : ''} [--json]
+
+${domain === 'media' ? 'Create or analyze media, estimate credits, and retrieve an existing run.' : 'Submit an explicitly prepared publishing operation.'}
+
+Examples:
+  postplus ${domain} schema --json
+  postplus ${domain === 'media' ? 'media poll --handle <run-id> --json' : 'publish schema --help'}
+
+Next:
+  Inspect the selected ${domain === 'media' ? 'endpoint' : 'operation'} help before executing it.
+  --help, -h shows local help without authentication or business requests.
 `);
 }
 
@@ -2855,6 +2921,13 @@ function printMediaEndpointHelp(
   The command polls the same durable run until completion or timeout by default;
   --wait remains accepted for scripts written against the earlier preview.
   Runner-managed (minted by the CLI; never in the body): operationId, quoteConfirmationToken
+
+  Examples:
+    postplus ${domain} ${verb} ${targetKey} --video ./reference.mp4 --json
+    postplus ${domain} schema --endpoint ${targetKey} --json
+
+  Next:
+    Review the returned analysis or follow its resume action if still running.
 `);
     return;
   }
@@ -2905,6 +2978,10 @@ function printMediaEndpointHelp(
     }
   }
 
+  lines.push('', '  Examples:',
+    `    postplus media schema --endpoint ${targetKey} --json`,
+    `    postplus media ${verb} ${targetKey} ${isFlagsSurface ? formatFlagsUsage(fields) : '--request <input.json>'} --json`,
+    '', '  Next:', '    Supply the required inputs and review the credit estimate before submitting.');
   process.stdout.write(`${lines.join('\n')}\n`);
 }
 
@@ -3007,6 +3084,10 @@ function printResearchRouteHelp(
   lines.push(
     '',
     '  Request translation, credit safeguards, and polling internals are handled by PostPlus.',
+    '', '  Examples:',
+    `    postplus research schema --route ${routeKey} --json`,
+    `    postplus research run ${routeKey} ${formatFlagsUsage(contract.fields)} --wait --output <result.json>`,
+    '', '  Next:', '    Provide the required research inputs, then inspect the returned evidence and run status.',
   );
   process.stdout.write(`${lines.join('\n')}\n`);
 }
@@ -3024,6 +3105,12 @@ function printOpaquePublishHelp(targetKey: string): void {
   Usage:
 ${usage}
 
+  Examples:
+${usage}
+    postplus publish schema --json
+
+  Next:
+    Prepare and review the operation payload before authorizing publication.
   --request <file>  ${inputShape}.
   Runner-managed (minted by the CLI; never in the body): operationId, quoteConfirmationToken
 `);

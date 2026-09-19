@@ -1,3 +1,4 @@
+import { toFailureFact, stopAutomaticRecovery, formatFailure } from './failure-contract.js';
 // Existing hosted HTTP, product errors, output persistence and bounded status waits.
 // This module owns no command routing or provider submission policy.
 import { randomUUID } from 'node:crypto';
@@ -20,7 +21,7 @@ import {
   type LargeCreditQuoteConfirmationChallenge,
   readLargeCreditQuoteConfirmationChallenge,
 } from './quote-confirmation.js';
-import { clearUpdateCheckCache } from './update-check.js';
+import { clearUpdateCheckCache, POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV } from './update-check.js';
 
 // In-process execution context for the hosted-lib path (src/hosted-lib.ts). When
 // present it makes the SAME resolve/dispatch core run without any disk or
@@ -265,19 +266,25 @@ async function runHostedCommand(input: {
     }
 
     if (error instanceof HostedProductRequestError) {
-      if (shouldPreserveHostedOutput(input.preserveOutputOnProductError)) {
-        if (input.json) {
-          await writeResult({ error: error.productError }, null, true);
-        }
-        writePreservedOutputRecovery(input.preservedOutputRecovery);
-      } else {
-        await writeResult(
-          { error: error.productError },
-          input.outputPath,
-          input.json,
-        );
+      const exhausted = process.env[POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV] === '1';
+      const { userAction, ...productFacts } = error.productError;
+      const stopped = exhausted ? stopAutomaticRecovery(toFailureFact(error.productError, {service:'postplus-cloud'})) : null;
+      const preserve = shouldPreserveHostedOutput(input.preserveOutputOnProductError);
+      if (stopped && preserve) {
+        stopped.recovery!.nextActionAfterUserResolution = input.preservedOutputRecovery?.() ?? stopped.recovery!.nextActionAfterUserResolution;
       }
-      process.stderr.write(`${error.message}\n`);
+      // Preserve typed account links, but move imperative retry strings under
+      // the exhausted recovery state rather than presenting two competing actions.
+      const productError = stopped
+        ? {...productFacts, ...stopped, ...(typeof userAction === 'object' ? {userAction} : {})}
+        : error.productError;
+      if (preserve) {
+        if (input.json) await writeResult({ error: productError }, null, true);
+        if (!stopped) writePreservedOutputRecovery(input.preservedOutputRecovery);
+      } else if (!stopped || input.outputPath || input.json) {
+        await writeResult({ error: productError }, input.outputPath, input.json);
+      }
+      process.stderr.write(`${stopped ? formatFailure(stopped) : error.message}\n`);
       return 1;
     }
 

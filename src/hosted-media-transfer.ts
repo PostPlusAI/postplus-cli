@@ -1,3 +1,4 @@
+import { diagnosticFetch } from './network-diagnostics.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import {
@@ -182,6 +183,8 @@ type UploadCheckpointFile = {
 };
 
 type DownloadCheckpoint = {
+  // Missing only in legacy records, which must never be resumed.
+  contentSha256?: string;
   checkpointId: string;
   etag: string | null;
   lastModified: string | null;
@@ -432,12 +435,15 @@ export async function downloadHostedMediaFile(input: {
       checkpoint.checkpointId !== checkpointId ||
       checkpoint.sourceHash !== sourceHash ||
       !partialStat ||
-      partialStat.size !== checkpoint.receivedBytes
+      partialStat.size !== checkpoint.receivedBytes ||
+      typeof checkpoint.contentSha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/u.test(checkpoint.contentSha256) ||
+      (await sha256File(partialOutput)) !== checkpoint.contentSha256
     ) {
       throw downloadError({
         checkpointId,
         code: 'integrity_mismatch',
-        detail: 'The partial download and its checkpoint do not match.',
+        detail: 'The partial download has no trusted content digest or does not match its checkpoint.',
         resumeAvailable: false,
         retryable: false,
         stage: 'stream-bytes',
@@ -580,6 +586,7 @@ export async function downloadHostedMediaFile(input: {
     responseShape.totalBytes !== null
       ? {
           checkpointId,
+          contentSha256: checkpoint?.contentSha256 ?? createHash('sha256').digest('hex'),
           etag: responseShape.etag,
           lastModified: responseShape.lastModified,
           receivedBytes,
@@ -648,7 +655,8 @@ export async function downloadHostedMediaFile(input: {
     const partialStat = await stat(partialOutput).catch(() => null);
     receivedBytes = partialStat?.size ?? receivedBytes;
     if (checkpoint) {
-      checkpoint.receivedBytes = receivedBytes;
+      await snapshotDownloadCheckpoint(partialOutput, checkpoint);
+      receivedBytes = checkpoint.receivedBytes;
       await writeDownloadCheckpoint(checkpointPath, checkpoint);
     } else {
       await Promise.all([
@@ -680,7 +688,8 @@ export async function downloadHostedMediaFile(input: {
     receivedBytes !== responseShape.totalBytes
   ) {
     if (checkpoint) {
-      checkpoint.receivedBytes = receivedBytes;
+      await snapshotDownloadCheckpoint(partialOutput, checkpoint);
+      receivedBytes = checkpoint.receivedBytes;
       await writeDownloadCheckpoint(checkpointPath, checkpoint);
     }
     throw downloadError({
@@ -700,7 +709,8 @@ export async function downloadHostedMediaFile(input: {
 
   await input.validate?.(partialOutput);
   if (checkpoint) {
-    checkpoint.receivedBytes = receivedBytes;
+    await snapshotDownloadCheckpoint(partialOutput, checkpoint);
+    receivedBytes = checkpoint.receivedBytes;
     await writeDownloadCheckpoint(checkpointPath, checkpoint);
   }
   await commitDownloadedFile({
@@ -721,7 +731,7 @@ async function uploadWithPut(input: {
   options: UploadOptions;
   signedUpload: Extract<SignedHostedUpload, { method: 'PUT' }>;
 }) {
-  const fetchFn = input.options.fetchFn ?? fetch;
+  const fetchFn = input.options.fetchFn ?? diagnosticFetch;
   const idleTimeoutMs = input.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   const controller = new AbortController();
   let transferredBytes = 0;
@@ -806,7 +816,7 @@ async function uploadWithTus(input: {
   options: UploadOptions;
   signedUpload: Extract<SignedHostedUpload, { method: 'TUS' }>;
 }) {
-  const fetchFn = input.options.fetchFn ?? fetch;
+  const fetchFn = input.options.fetchFn ?? diagnosticFetch;
   const sleepMs = input.options.sleepMs ?? sleep;
   const connectTimeoutMs =
     input.options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
@@ -1399,6 +1409,22 @@ async function readDownloadCheckpoint(
       cause: error,
     });
   }
+}
+
+// Hash only after the write stream has settled, so the digest describes the
+// local file rather than chunks observed upstream of the filesystem writer.
+async function snapshotDownloadCheckpoint(
+  partialOutput: string,
+  checkpoint: DownloadCheckpoint,
+): Promise<void> {
+  const before = await stat(partialOutput);
+  const contentSha256 = await sha256File(partialOutput);
+  const after = await stat(partialOutput);
+  if (!before.isFile() || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || before.ino !== after.ino) {
+    throw new Error('The partial download changed while recording its content digest; preserve it and rerun with --restart.');
+  }
+  checkpoint.receivedBytes = after.size;
+  checkpoint.contentSha256 = contentSha256;
 }
 
 async function writeDownloadCheckpoint(

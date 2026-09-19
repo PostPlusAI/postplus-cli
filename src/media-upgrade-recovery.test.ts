@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,6 +9,50 @@ import { promisify } from 'node:util';
 import { setLocalSession } from './local-state.js';
 
 const exec = promisify(execFile);
+
+async function writeFixtureCommand(bin: string, name: string, executable: string, args: string[]) {
+  if (process.platform === 'win32') {
+    await writeFile(path.join(bin, `${name}.cmd`),
+      `@"${executable}" ${args.map((arg) => `"${arg}"`).join(' ')} %*\r\n`);
+  } else {
+    const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+    await writeFile(path.join(bin, name),
+      `#!/bin/sh\nexec ${[executable, ...args].map(quote).join(' ')} "$@"\n`,
+      { mode: 0o700 });
+  }
+}
+
+test('recovery fixture handles space paths and fails closed when its runtime is missing', {
+  skip: process.platform === 'win32',
+}, async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "postplus fixture's space-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const bin = path.join(root, 'bin');
+  const laterBin = path.join(root, 'later-bin');
+  await mkdir(bin);
+  await mkdir(laterBin);
+  const node = path.join(root, 'node with spaces');
+  await symlink(process.execPath, node);
+  const script = path.join(root, 'fixture script.cjs');
+  await writeFile(script, 'console.log(JSON.stringify(process.argv.slice(2)));');
+  await writeFixtureCommand(bin, 'postplus', node, [script]);
+  await writeFixtureCommand(laterBin, 'postplus', process.execPath, ['-e',
+    'console.log("UNEXPECTED later PATH command");']);
+  const env = { ...process.env, PATH: `${bin}${path.delimiter}${laterBin}` };
+  const args = ['update', 'space argument', "quote'argument", '$HOME;echo unsafe'];
+  const result = await exec('postplus', args, { env });
+  assert.deepEqual(JSON.parse(result.stdout), args);
+  await rm(node);
+  await assert.rejects(exec('postplus', args, { env }), (error: unknown) => {
+    const failure = error as { code: number; stdout: string };
+    assert.ok([126, 127].includes(failure.code), `Expected shell launch failure, got ${failure.code}`);
+    assert.equal(failure.stdout, '', 'must not execute the later PATH command');
+    return true;
+  });
+  await rm(path.join(bin, 'postplus'));
+  await assert.rejects(exec('postplus', args, { env: { ...env, PATH: bin } }),
+    { code: 'ENOENT' });
+});
 
 // Real CLI processes and A's real update/replay runner; only provider HTTP and
 // the installer are mocked. No test may reach a network or real installation.
@@ -93,35 +137,35 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
       };
     `);
     const entry = path.resolve('src/index.ts');
-    const shim = `
-      const { readFileSync, writeFileSync, readdirSync } = require('node:fs');
-      const { spawnSync } = require('node:child_process');
-      const statePath = ${JSON.stringify(statePath)};
-      const args = process.argv.slice(2);
-      if (args[0] === 'update') {
+    // The wrong installation on PATH must never receive update or task replay.
+    const wrongCliMarker = path.join(root, 'wrong-cli');
+    await writeFixtureCommand(bin, 'postplus', process.execPath, ['-e',
+      `require('node:fs').writeFileSync(${JSON.stringify(wrongCliMarker)}, 'called'); process.exit(99)`]);
+    const updateMock = path.join(root, 'update-mock.mjs');
+    await writeFile(updateMock, `
+      import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+      if (process.argv[2] === 'update') {
+        const statePath = ${JSON.stringify(statePath)};
         const state = JSON.parse(readFileSync(statePath, 'utf8'));
         state.updates++; writeFileSync(statePath, JSON.stringify(state));
         ${scenario === 'corrupt' ? `const dir = ${JSON.stringify(path.join(config, 'media-runs'))};
-          writeFileSync(require('node:path').join(dir, readdirSync(dir)[0]), '{}');` : ''}
-        console.log('Mock installer completed');
-      } else {
-        const result = spawnSync(${JSON.stringify(process.execPath)},
-          ['--import', 'tsx', '--import', ${JSON.stringify(mock)}, ${JSON.stringify(entry)}, ...args],
-          { env: process.env, stdio: 'inherit' });
-        process.exitCode = result.status ?? 1;
+          writeFileSync(dir + '/' + readdirSync(dir)[0], '{}');` : ''}
+        console.log(JSON.stringify({ok:true})); process.exit(0);
       }
-    `;
-    const shimJs = path.join(bin, 'postplus.cjs');
-    await writeFile(shimJs, shim);
-    if (process.platform === 'win32') {
-      await writeFile(path.join(bin, 'postplus.cmd'), `@"${process.execPath}" "${shimJs}" %*\r\n`);
-    } else {
-      await writeFile(path.join(bin, 'postplus'), `#!${process.execPath}\n${shim}`, { mode: 0o700 });
+    `);
+    // Only explicitly allowed tools enter the child PATH. A broken or missing
+    // fixture must never resolve to the user's installed PostPlus CLI.
+    for (const command of ['ffmpeg', 'ffprobe']) {
+      const located = await exec(process.platform === 'win32' ? 'where.exe' : 'which', [command]);
+      const executable = located.stdout.trim().split(/\r?\n/)[0]!;
+      assert.ok(path.isAbsolute(executable), `Expected an absolute ${command} path`);
+      await writeFixtureCommand(bin, command, executable, []);
     }
     const output = path.join(root, 'original report.md');
     const env = { ...process.env, POSTPLUS_CONFIG_DIR: config,
       POSTPLUS_API_BASE_URL: 'https://postplus.test',
-      POSTPLUS_CLIENT_RECOVERY_ATTEMPT: '', PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+      POSTPLUS_CLIENT_RECOVERY_ATTEMPT: '', PATH: bin,
+      NODE_OPTIONS: `--import=${JSON.stringify(mock)} --import=${JSON.stringify(updateMock)}` };
     const run = async (args: string[]) => {
       try {
         const result = await exec(process.execPath, ['--import', 'tsx', '--import', mock, entry, ...args], { env });
@@ -136,6 +180,7 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
       : ['media', 'analyze', 'video-analysis', '--video', video,
       '--prompt', 'Retain original intent & text', '--output', output, '--json'];
     let result = await run(original);
+    await assert.rejects(readFile(wrongCliMarker), {code:'ENOENT'});
     const checkpointDir = path.join(config, 'media-runs');
     const files = await readdir(checkpointDir);
     assert.equal(files.length, 1, 'automatic replay must never create a second identity');
@@ -152,8 +197,15 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
     assert.equal((await readdir(checkpointDir)).length, 1);
     if (scenario === 'corrupt' || scenario === 'repeat') {
       assert.equal(result.code, 1, result.stderr);
-      assert.match(result.stderr, scenario === 'corrupt' ? /Invalid media recovery checkpoint/ : /not retried again/);
-      assert.equal(result.stdout, '', 'installer output cannot contaminate JSON');
+      const failure = JSON.parse(result.stdout);
+      assert.equal(failure.ok, false);
+      if (scenario === 'corrupt') assert.match(JSON.stringify(failure.error), /Invalid media recovery checkpoint/);
+      else {
+        assert.match(result.stderr, /not retried again/);
+        assert.equal(failure.error.code, 'postplus_client_upgrade_failed');
+        assert.match(failure.error.action, /do not run another update/);
+        assert.doesNotMatch(failure.error.action, /Run postplus update/);
+      }
     } else {
       assert.equal(result.code, 0, result.stderr);
       if (scenario === 'generation') {

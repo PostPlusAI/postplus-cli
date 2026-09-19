@@ -3,3 +3,6 @@ build
 dist/
 .turbo
 .local/
+# The pinned installer runtime is a shipped artifact, not a local build cache.
+!vendor/skills-runtime/dist/
+!vendor/skills-runtime/dist/cli.mjs

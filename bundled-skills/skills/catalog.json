@@ -1,0 +1,746 @@
+{
+  "schemaVersion": 2,
+  "releaseId": "skills-2026-09-18.1-cli-mechanism-hardening",
+  "productBrief": {
+    "schemaVersion": 1,
+    "paragraphs": [
+      "PostPlus helps your agent turn public research, product facts, and media references into useful marketing decisions and creative assets.",
+      "Describe the result you want. The matching skill guides the task directly, while the CLI handles execution, account access, cost confirmation, and clear recovery actions.",
+      "Human judgment stays central: you set the direction, approve important decisions, and review the result. Current capabilities are listed by the CLI from its bundled catalog."
+    ]
+  },
+  "releaseNotes": {
+    "schemaVersion": 1,
+    "releaseId": "skills-2026-09-18.1-cli-mechanism-hardening",
+    "title": "Reliable installation and clear recovery.",
+    "summary": "Install the skills paired with your CLI, reuse correct installations, and get a clear next step when work cannot continue.",
+    "highlights": [
+      "Skills ship with the CLI. Once the package is available, skill installation and content checks do not need GitHub.",
+      "Installation verifies supported agent targets, skips correct content, and repairs missing targets without repeating completed work.",
+      "Local changes and content without a trusted prior fingerprint are protected until backup and replacement are approved.",
+      "Public command help is available without login or business requests, with examples and useful next steps.",
+      "Failures retain structured diagnostics; exhausted automatic recovery stops instead of starting another update or task retry.",
+      "Shared guidance is shorter and selected by task. Disk installation and a refreshed agent session are reported separately."
+    ]
+  },
+  "source": "PostPlusAI/postplus-skills",
+  "discoveryCategories": {
+    "research": {
+      "title": "Research and discover"
+    },
+    "analyze": {
+      "title": "Analyze and develop briefs"
+    },
+    "advertise": {
+      "title": "Design ads"
+    },
+    "generate": {
+      "title": "Generate images, video, and voice"
+    },
+    "transcribe": {
+      "title": "Transcribe and create subtitles"
+    },
+    "publish": {
+      "title": "Prepare and publish"
+    },
+    "workspace": {
+      "title": "Supporting project workspace"
+    }
+  },
+  "skills": [
+    {
+      "familyId": "routing-contracts",
+      "familyName": "Routing & Contracts",
+      "name": "audio-generation",
+      "description": "Plan TTS, voice cloning, voice change, translated dub, or lip-sync audio. Resolve voice and reference policy before handing a ready request to voice-batch-runner.",
+      "category": "generate",
+      "example": "Plan a translated dub that preserves the speaker’s approved voice.",
+      "path": "skills/10-routing/audio-generation/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "audio-transcription",
+      "description": "Transcribe local or remote audio into text and timestamps. Convert an existing timed transcript locally into SRT or ASS without another transcription job.",
+      "category": "transcribe",
+      "example": "Transcribe this interview audio and give me an SRT subtitle file.",
+      "path": "skills/40-creative/audio-transcription/SKILL.md",
+      "status": "released",
+      "supportedModels": [
+        {
+          "key": "transcription",
+          "name": "Whisper",
+          "source": "endpointKey"
+        }
+      ],
+      "requirements": {
+        "capabilities": [
+          "media"
+        ],
+        "endpointKeys": [
+          "transcription"
+        ]
+      }
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "authority-ad",
+      "description": "Design or review expert-led, insider, case-story, or interview ads that explain a problem mechanism using approved evidence and a credible product solution.",
+      "category": "advertise",
+      "example": "Write an expert-led ad explaining the problem this product solves.",
+      "path": "skills/40-creative/authority-ad/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "before-after-ad",
+      "description": "Design or review before-and-after ads with matched comparisons, approved transformation evidence, and a clear product role. Produce a grounded shot script.",
+      "category": "advertise",
+      "example": "Create a before-and-after ad using these approved product results.",
+      "path": "skills/40-creative/before-after-ad/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "benchmark-to-brief",
+      "description": "Turn existing benchmark reports, pattern tables, or audience evidence into grounded campaign briefs, concepts, hooks, and test plans.",
+      "category": "analyze",
+      "example": "Turn this competitor research into a campaign brief and three testable concepts.",
+      "path": "skills/40-creative/benchmark-to-brief/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "cartoon-ad",
+      "description": "Design or review animated ads that explain a product through visual arguments, metaphors, and grounded proof. Produce a script ready for creative production.",
+      "category": "advertise",
+      "example": "Make an animated ad concept that explains this product visually.",
+      "path": "skills/40-creative/cartoon-ad/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "commercial-ad",
+      "description": "Design or review product commercials with a controlled visual mechanism, observable product behavior, sound, and payoff. Produce a brief or shot script.",
+      "category": "advertise",
+      "example": "Write a short product commercial with a striking reveal and clear proof.",
+      "path": "skills/40-creative/commercial-ad/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "educational-ad",
+      "description": "Design or review educational and explainer ads that answer a viewer question with clear reasoning, visual evidence, and an earned product introduction.",
+      "category": "advertise",
+      "example": "Explain this customer problem in an educational ad for our product.",
+      "path": "skills/40-creative/educational-ad/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "platform-research",
+      "familyName": "LinkedIn, Facebook, and YouTube",
+      "name": "facebook-research",
+      "description": "Research public Facebook pages, groups, posts, reels, comments, ads, events, marketplace listings, and profiles for audience or competitor evidence.",
+      "category": "research",
+      "example": "Compare the public posts and comments on these competitor Facebook pages.",
+      "path": "skills/20-research/facebook-research/SKILL.md",
+      "status": "released",
+      "supportedModels": [],
+      "requirements": {
+        "capabilities": [
+          "research"
+        ],
+        "routeKeys": [
+          "facebook-ads-library",
+          "facebook-comments",
+          "facebook-events",
+          "facebook-group-posts",
+          "facebook-groups",
+          "facebook-marketplace",
+          "facebook-pages",
+          "facebook-post-by-url",
+          "facebook-posts",
+          "facebook-profile-posts",
+          "facebook-reels",
+          "facebook-search"
+        ]
+      }
+    },
+    {
+      "familyId": "marketplace-sourcing",
+      "familyName": "Marketplace, Sourcing, and Growth",
+      "name": "google-trends-research",
+      "description": "Research Google Trends keyword momentum, regional interest, and related queries. Use search-interest evidence without treating it as sales or total demand.",
+      "category": "research",
+      "example": "Compare search interest in these product ideas across two markets.",
+      "path": "skills/20-research/google-trends-research/SKILL.md",
+      "status": "released",
+      "supportedModels": [],
+      "requirements": {
+        "capabilities": [
+          "research"
+        ],
+        "routeKeys": [
+          "google-trends-fast"
+        ]
+      }
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "image-batch-runner",
+      "description": "Execute ready image briefs and edits, including product or persona images and batch variants. Use resolved references and return image assets with saved run results.",
+      "category": "generate",
+      "example": "Generate these approved image variants using the supplied references.",
+      "path": "skills/40-creative/image-batch-runner/SKILL.md",
+      "status": "released",
+      "supportedModels": [
+        {
+          "key": "image-nano-banana-2-edit",
+          "name": "Nano Banana 2 Edit",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-nano-banana-2-text",
+          "name": "Nano Banana 2 Text To Image",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-nano-banana-pro-edit-1k",
+          "name": "Nano Banana Pro Edit",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-nano-banana-pro-edit-2k",
+          "name": "Nano Banana Pro Edit",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-nano-banana-pro-edit-4k",
+          "name": "Nano Banana Pro Edit",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-nano-banana-pro-text-1k",
+          "name": "Nano Banana Pro Text To Image",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-nano-banana-pro-text-2k",
+          "name": "Nano Banana Pro Text To Image",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-nano-banana-pro-text-4k",
+          "name": "Nano Banana Pro Text To Image",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-gpt-image-2-edit",
+          "name": "Openai Gpt Image 2 Edit",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-gpt-image-2-text",
+          "name": "Openai Gpt Image 2 Text To Image",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-seedream-v5-lite-text",
+          "name": "Seedream v5.0 Lite",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-seedream-v5-lite-edit",
+          "name": "Seedream v5.0 Lite Edit",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-seedream-v5-lite-edit-sequential",
+          "name": "Seedream v5.0 Lite Edit Sequential",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-seedream-v5-lite-sequential",
+          "name": "Seedream v5.0 Lite Sequential",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-higgsfield-soul-text",
+          "name": "Soul Standard",
+          "source": "endpointKey"
+        }
+      ],
+      "requirements": {
+        "capabilities": [
+          "media"
+        ],
+        "endpointKeys": [
+          "image-gpt-image-2-edit",
+          "image-gpt-image-2-text",
+          "image-higgsfield-soul-text",
+          "image-nano-banana-2-edit",
+          "image-nano-banana-2-text",
+          "image-nano-banana-pro-edit-1k",
+          "image-nano-banana-pro-edit-2k",
+          "image-nano-banana-pro-edit-4k",
+          "image-nano-banana-pro-text-1k",
+          "image-nano-banana-pro-text-2k",
+          "image-nano-banana-pro-text-4k",
+          "image-seedream-v5-lite-edit",
+          "image-seedream-v5-lite-edit-sequential",
+          "image-seedream-v5-lite-sequential",
+          "image-seedream-v5-lite-text"
+        ]
+      }
+    },
+    {
+      "familyId": "routing-contracts",
+      "familyName": "Routing & Contracts",
+      "name": "image-generation",
+      "description": "Plan image creation or edits from prompts, products, or references. Resolve task type, model, and reference rules before handing ready requests to image-batch-runner.",
+      "category": "generate",
+      "example": "Plan three product images using these photos and our launch brief.",
+      "path": "skills/10-routing/image-generation/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "instagram",
+      "familyName": "Instagram",
+      "name": "instagram-research",
+      "description": "Research public Instagram accounts, posts, Reels, comments, hashtags, and creators for audits, benchmarks, audience voice, or collaboration shortlists.",
+      "category": "research",
+      "example": "Find Instagram creators whose recent posts fit this product.",
+      "path": "skills/20-research/instagram-research/SKILL.md",
+      "status": "released",
+      "supportedModels": [],
+      "requirements": {
+        "capabilities": [
+          "research"
+        ],
+        "routeKeys": [
+          "instagram-comments",
+          "instagram-email-search",
+          "instagram-hashtags",
+          "instagram-posts",
+          "instagram-profiles",
+          "instagram-search"
+        ]
+      }
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "lifestyle-ad",
+      "description": "Design lifestyle ads where product capability supports a desirable human state. Produce or review shot scripts with grounded product behavior and subtle proof.",
+      "category": "advertise",
+      "example": "Turn these product features into a calm, aspirational lifestyle ad.",
+      "path": "skills/40-creative/lifestyle-ad/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "media-analysis",
+      "description": "Analyze videos, images, or carousels with visible and audible evidence. Answer visual questions, inspect frames, or compare references shot by shot when requested.",
+      "category": "analyze",
+      "example": "Explain what happens in this video and show the frames supporting your analysis.",
+      "path": "skills/40-creative/media-analysis/SKILL.md",
+      "status": "released",
+      "supportedModels": [
+        {
+          "key": "video-analysis",
+          "name": "Gemini 3.8 Flash",
+          "source": "modelKey"
+        }
+      ],
+      "requirements": {
+        "capabilities": [
+          "media"
+        ],
+        "localDependencies": [
+          "ffmpeg",
+          "ffprobe"
+        ],
+        "modelKeys": [
+          "video-analysis"
+        ]
+      }
+    },
+    {
+      "familyId": "pinterest",
+      "familyName": "Pinterest",
+      "name": "pinterest-search",
+      "description": "Find public Pinterest images from a keyword for moodboards and visual inspiration. Return usable image links, source pins, and titles.",
+      "category": "research",
+      "example": "Find minimalist kitchen images for a moodboard, with source links.",
+      "path": "skills/20-research/pinterest-search/SKILL.md",
+      "status": "released",
+      "supportedModels": [],
+      "requirements": {
+        "capabilities": [
+          "research"
+        ],
+        "routeKeys": [
+          "pinterest-search"
+        ]
+      }
+    },
+    {
+      "familyId": "workspace-publishing",
+      "familyName": "Workspace, Publishing, and Meta",
+      "name": "postplus-workspace",
+      "description": "Maintain a project folder with approved product facts, campaign context, and reusable results. Use for ongoing work, not required for one-off tasks.",
+      "category": "workspace",
+      "example": "Keep the approved product facts and results in this project folder.",
+      "path": "skills/00-shared/postplus-workspace/SKILL.md",
+      "status": "released",
+      "supportedModels": [],
+      "requirements": {
+        "localDependencies": [
+          "python3"
+        ]
+      }
+    },
+    {
+      "familyId": "reddit",
+      "familyName": "Reddit",
+      "name": "reddit-search",
+      "description": "Research public Reddit posts, comments, communities, and explicitly requested profiles for pain points, product opinions, and discussion evidence.",
+      "category": "research",
+      "example": "Find the problems people discuss about portable coffee makers on Reddit.",
+      "path": "skills/20-research/reddit-search/SKILL.md",
+      "status": "released",
+      "supportedModels": [],
+      "requirements": {
+        "capabilities": [
+          "research"
+        ],
+        "routeKeys": [
+          "reddit-post-comments",
+          "reddit-search",
+          "reddit-subreddit-posts",
+          "reddit-user-activity"
+        ]
+      }
+    },
+    {
+      "familyId": "routing-contracts",
+      "familyName": "Routing & Contracts",
+      "name": "reference-decode",
+      "description": "Turn reference videos, frames, or contact sheets into reusable hook and visual rules for new creative prompts, with clear imitation boundaries.",
+      "category": "analyze",
+      "example": "Extract reusable visual and hook rules from these reference frames.",
+      "path": "skills/10-routing/reference-decode/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "workspace-publishing",
+      "familyName": "Workspace, Publishing, and Meta",
+      "name": "social-media-publisher",
+      "description": "Prepare and manage social publishing requests through PostPlus, with explicit approval before publishing or other account changes.",
+      "category": "publish",
+      "example": "Prepare these posts for our connected channels and show me what needs approval.",
+      "path": "skills/50-publishing/social-media-publisher/SKILL.md",
+      "status": "released",
+      "supportedModels": [],
+      "requirements": {
+        "accountConnections": [
+          "social-publishing-workspace"
+        ],
+        "capabilities": [
+          "publishing"
+        ]
+      }
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "street-interview-ad",
+      "description": "Design or review street-interview and vox-pop ads using candid conversation, a clear question, product interaction, and grounded proof.",
+      "category": "advertise",
+      "example": "Write a street-interview ad that tests this product claim with a demonstration.",
+      "path": "skills/40-creative/street-interview-ad/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "tiktok",
+      "familyName": "TikTok",
+      "name": "tiktok-research",
+      "description": "Research public TikTok videos, comments, creators, profiles, related videos, and paid ad examples for audience evidence and creative benchmarks.",
+      "category": "research",
+      "example": "Find TikTok product demos and the questions viewers ask in their comments.",
+      "path": "skills/20-research/tiktok-research/SKILL.md",
+      "status": "released",
+      "supportedModels": [],
+      "requirements": {
+        "capabilities": [
+          "research"
+        ],
+        "routeKeys": [
+          "tiktok-ads-top",
+          "tiktok-comments",
+          "tiktok-profiles",
+          "tiktok-related-videos",
+          "tiktok-users",
+          "tiktok-videos"
+        ]
+      }
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "ugc-ad",
+      "description": "Design or review creator-led product ads, testimonials, demos, tutorials, unboxings, or POV concepts with believable interaction and approved proof.",
+      "category": "advertise",
+      "example": "Write a natural creator-led product demo based on this brief.",
+      "path": "skills/40-creative/ugc-ad/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "video-batch-runner",
+      "description": "Generate videos from briefs, prompts, images, audio, or reference clips. Choose a supported model, submit one or many clips, resume runs, and download results.",
+      "category": "generate",
+      "example": "Generate a short video from this approved script and reference image.",
+      "path": "skills/40-creative/video-batch-runner/SKILL.md",
+      "status": "released",
+      "supportedModels": [
+        {
+          "key": "video-seedance-2-image",
+          "name": "Doubao Seedance 2 0 260128",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-text",
+          "name": "Doubao Seedance 2 0 260128",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-fast-image",
+          "name": "Doubao Seedance 2 0 Fast 260128",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-fast-text",
+          "name": "Doubao Seedance 2 0 Fast 260128",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-mini-image",
+          "name": "Doubao Seedance 2 0 Mini 260615",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-mini-text",
+          "name": "Doubao Seedance 2 0 Mini 260615",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-5-edit",
+          "name": "Doubao Seedance 2.5",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-5-extend",
+          "name": "Doubao Seedance 2.5",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-5-first-frame",
+          "name": "Doubao Seedance 2.5",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-5-first-last-frame",
+          "name": "Doubao Seedance 2.5",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-5-reference",
+          "name": "Doubao Seedance 2.5",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-5-text",
+          "name": "Doubao Seedance 2.5",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-infinitetalk",
+          "name": "InfiniteTalk",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-kling-v2-6-pro-motion-control",
+          "name": "Kwaivgi Kling v2.6 Pro Motion Control",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-kling-v3-0-pro-image",
+          "name": "Kwaivgi Kling v3.0 Pro Image To Video",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-kling-v3-0-pro-text",
+          "name": "Kwaivgi Kling v3.0 Pro Text To Video",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-kling-v3-0-std-image",
+          "name": "Kwaivgi Kling v3.0 Std Image To Video",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-kling-v3-0-std-text",
+          "name": "Kwaivgi Kling v3.0 Std Text To Video",
+          "source": "endpointKey"
+        }
+      ],
+      "requirements": {
+        "capabilities": [
+          "media"
+        ],
+        "endpointKeys": [
+          "video-infinitetalk",
+          "video-kling-v2-6-pro-motion-control",
+          "video-kling-v3-0-pro-image",
+          "video-kling-v3-0-pro-text",
+          "video-kling-v3-0-std-image",
+          "video-kling-v3-0-std-text",
+          "video-seedance-2-5-edit",
+          "video-seedance-2-5-extend",
+          "video-seedance-2-5-first-frame",
+          "video-seedance-2-5-first-last-frame",
+          "video-seedance-2-5-reference",
+          "video-seedance-2-5-text",
+          "video-seedance-2-fast-image",
+          "video-seedance-2-fast-text",
+          "video-seedance-2-image",
+          "video-seedance-2-mini-image",
+          "video-seedance-2-mini-text",
+          "video-seedance-2-text"
+        ]
+      }
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "video-transcription",
+      "description": "Transcribe speech in local or remote videos with timestamps. Convert existing timed transcripts locally into SRT or ASS; use media-analysis for visual understanding.",
+      "category": "transcribe",
+      "example": "Create a timed transcript and subtitles for this video.",
+      "path": "skills/40-creative/video-transcription/SKILL.md",
+      "status": "released",
+      "supportedModels": [
+        {
+          "key": "transcription-video",
+          "name": "Whisper With Video",
+          "source": "endpointKey"
+        }
+      ],
+      "requirements": {
+        "capabilities": [
+          "media"
+        ],
+        "endpointKeys": [
+          "transcription-video"
+        ]
+      }
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "voice-batch-runner",
+      "description": "Execute approved voice design or cloning requests from scripts and persona references. Return reusable audio takes and saved run results with consistent voice identity.",
+      "category": "generate",
+      "example": "Generate these approved voice takes from the scripts and voice reference.",
+      "path": "skills/40-creative/voice-batch-runner/SKILL.md",
+      "status": "released",
+      "supportedModels": [
+        {
+          "key": "voice-clone",
+          "name": "Qwen3 TTS Voice Clone",
+          "source": "endpointKey"
+        },
+        {
+          "key": "voice-design",
+          "name": "Qwen3 TTS Voice Design",
+          "source": "endpointKey"
+        }
+      ],
+      "requirements": {
+        "capabilities": [
+          "media"
+        ],
+        "endpointKeys": [
+          "voice-clone",
+          "voice-design"
+        ]
+      }
+    },
+    {
+      "familyId": "x",
+      "familyName": "X",
+      "name": "x-research",
+      "description": "Research public X posts, threads, replies, and accounts for audience language, creator discovery, competitor benchmarks, and campaign evidence.",
+      "category": "research",
+      "example": "Find X discussions and replies about this product category.",
+      "path": "skills/20-research/x-research/SKILL.md",
+      "status": "released",
+      "supportedModels": [],
+      "requirements": {
+        "capabilities": [
+          "research"
+        ],
+        "routeKeys": [
+          "x-posts",
+          "x-profiles",
+          "x-user-search"
+        ]
+      }
+    },
+    {
+      "familyId": "platform-research",
+      "familyName": "LinkedIn, Facebook, and YouTube",
+      "name": "youtube-research",
+      "description": "Research public YouTube channels, video metrics, and comment samples; obtain downloadable video records when requested. Use for content and audience evidence.",
+      "category": "research",
+      "example": "Summarize this YouTube channel and the questions in its video comments.",
+      "path": "skills/20-research/youtube-research/SKILL.md",
+      "status": "released",
+      "supportedModels": [],
+      "requirements": {
+        "capabilities": [
+          "research"
+        ],
+        "routeKeys": [
+          "youtube-channel-summary",
+          "youtube-comments",
+          "youtube-video-download",
+          "youtube-videos"
+        ]
+      }
+    }
+  ]
+}

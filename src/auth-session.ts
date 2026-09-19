@@ -1,3 +1,4 @@
+import { PostPlusFailure } from './failure-contract.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
 import {
   readPostPlusCompatibilityError,
@@ -5,6 +6,7 @@ import {
 } from './client-compatibility.js';
 import { requireHostedBaseUrl } from './hosted-release.js';
 import {
+  assertLocalAuthUnchanged,
   readLocalConfig,
   resolveApiBaseUrlState,
   resolveCliSessionTokenState,
@@ -65,7 +67,7 @@ export async function resolveFreshRemoteAuth(
     ]);
 
   if (!cliSessionTokenState.present || !cliSessionTokenState.value) {
-    throw new Error('Run `postplus auth login` before using PostPlus auth.');
+    throw new PostPlusFailure('Run `postplus auth login` before using PostPlus auth.', { code: 'postplus_auth_required', stage: 'authentication', service: 'postplus-cloud', retryable: false, action: 'Run postplus auth login.' });
   }
   options.signal?.throwIfAborted();
 
@@ -109,12 +111,16 @@ export async function refreshRemoteAuthSession(input?: {
   persistApiBaseUrl?: boolean;
   signal?: AbortSignal;
 }): Promise<RemoteAuthRefreshResult> {
+  const expectedAuthConfig = await readLocalConfig();
+  if (input?.cliSessionToken !== undefined) {
+    assertLocalAuthUnchanged(expectedAuthConfig, { ...expectedAuthConfig, cliSessionToken: input.cliSessionToken });
+  }
   const [apiBaseUrl, apiBaseUrlState, cliSessionTokenState] = await Promise.all(
     [
       input?.apiBaseUrl ?? requireHostedBaseUrl(),
       resolveApiBaseUrlState(),
       input?.cliSessionToken === undefined
-        ? resolveCliSessionTokenState()
+        ? { value: expectedAuthConfig?.cliSessionToken?.trim() ?? null }
         : null,
     ],
   );
@@ -124,9 +130,7 @@ export async function refreshRemoteAuthSession(input?: {
       : input.cliSessionToken;
 
   if (!cliSessionToken) {
-    throw new Error(
-      'Run `postplus auth login` before refreshing PostPlus auth.',
-    );
+    throw new PostPlusFailure('Run `postplus auth login` before refreshing PostPlus auth.', { code: 'postplus_auth_required', stage: 'authentication', service: 'postplus-cloud', retryable: false, action: 'Run postplus auth login.' });
   }
 
   const response = await sendAuthedCloudRequest({
@@ -159,6 +163,7 @@ export async function refreshRemoteAuthSession(input?: {
   input?.signal?.throwIfAborted();
 
   await setLocalSession({
+    expectedAuthConfig,
     accountId: payload.accountId,
     accountName: payload.accountName,
     accountSlug: payload.accountSlug,

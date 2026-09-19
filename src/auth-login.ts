@@ -1,3 +1,5 @@
+import { PostPlusFailure, withResponseMetadata } from './failure-contract.js';
+import { diagnosticFetch } from './network-diagnostics.js';
 import { spawn } from 'node:child_process';
 
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
@@ -171,7 +173,7 @@ export function formatCloudAuthLoginPrompt(input: {
 
 export async function startCloudAuthLogin(apiBaseUrl: string) {
   const compatibilityHeaders = await buildPostPlusClientCompatibilityHeaders();
-  const response = await fetch(
+  const response = await diagnosticFetch(
     `${apiBaseUrl}/api/postplus-cli/auth/login/start`,
     {
       method: 'POST',
@@ -189,8 +191,8 @@ export async function startCloudAuthLogin(apiBaseUrl: string) {
     // Only this pre-start boundary may update and replay auth login. Poll/ACK
     // must not trigger a new authorization after the user has already begun.
     const compatibilityError = readPostPlusCompatibilityError(payload);
-    if (compatibilityError) throw compatibilityError;
-    throw new Error(formatRemoteAuthLoginError(payload));
+    if (compatibilityError) throw withResponseMetadata(compatibilityError, response);
+    throw withResponseMetadata(new PostPlusFailure(formatRemoteAuthLoginError(payload), { code: 'postplus_auth_rejected', stage: 'authentication', service: 'postplus-cloud', retryable: response.status >= 500, action: 'Run postplus auth login after resolving the reported response.' }), response);
   }
 
   if (!isCliAuthLoginStartSuccessPayload(payload)) {
@@ -303,7 +305,7 @@ export async function pollCloudAuthLogin(input: {
     body: { pollSecret: input.pollSecret, requestId: input.requestId },
   });
   if (!response.ok) {
-    throw new Error(formatRemoteAuthLoginError(payload));
+    throw withResponseMetadata(new PostPlusFailure(formatRemoteAuthLoginError(payload), { code: 'postplus_auth_rejected', stage: 'authentication', service: 'postplus-cloud', retryable: response.status >= 500, action: 'Run postplus auth login after resolving the reported response.' }), response);
   }
 
   if (isCliAuthLoginCompletedPayload(payload)) {
@@ -365,7 +367,7 @@ export async function acknowledgeCloudAuthLogin(input: {
     payload.ok === true
   )
     return;
-  if (!response.ok) throw new Error(formatRemoteAuthLoginError(payload));
+  if (!response.ok) throw withResponseMetadata(new PostPlusFailure(formatRemoteAuthLoginError(payload), { code: 'postplus_auth_rejected', stage: 'authentication-acknowledge', service: 'postplus-cloud', retryable: false, action: 'Run postplus auth validate to check the saved connection.' }), response);
   throw new Error(
     'PostPlus did not confirm credential delivery. The CLI has not reported a successful connection.',
   );
@@ -379,10 +381,11 @@ async function readRepeatableHandoffResponse(input: {
   body: { requestId: string; pollSecret: string; cliSessionToken?: string };
 }): Promise<{ response: Response; payload: unknown }> {
   const headers = await buildPostPlusClientCompatibilityHeaders();
+  let lastFailure: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     let response: Response;
     try {
-      response = await fetch(
+      response = await diagnosticFetch(
         `${input.apiBaseUrl}/api/postplus-cli/auth/login/${input.action}`,
         {
           method: 'POST',
@@ -396,7 +399,8 @@ async function readRepeatableHandoffResponse(input: {
           signal: AbortSignal.timeout(15_000),
         },
       );
-    } catch {
+    } catch (error) {
+      lastFailure = error;
       if (attempt === 0) continue;
       break;
     }
@@ -413,22 +417,26 @@ async function readRepeatableHandoffResponse(input: {
     let payload: unknown;
     try {
       payload = await response.json();
-    } catch {
+    } catch (error) {
+      lastFailure = withResponseMetadata(error instanceof Error ? error : new Error(String(error)), response);
       if (response.status >= 400 && response.status < 500)
         return { response, payload: null };
       if (attempt === 0) continue;
       break;
     }
     if (response.status >= 500) {
+      lastFailure = withResponseMetadata(new Error(`Authentication service returned HTTP ${response.status}.`), response);
       if (attempt === 0) continue;
       break;
     }
     return { response, payload };
   }
-  throw new Error(
+  throw new PostPlusFailure(
     input.action === 'acknowledge'
       ? 'Your credential was saved, but PostPlus could not confirm the connection. Run `postplus auth validate` to check cloud access; no new login was started.'
       : 'PostPlus could not read the approval response after one retry. No new login was started.',
+    { code: 'postplus_auth_handoff_unconfirmed', stage: `authentication-${input.action}`, service: 'postplus-cloud', retryable: false, action: input.action === 'acknowledge' ? 'Run postplus auth validate to check the saved connection.' : 'Check network access before starting a new login.' },
+    { cause: lastFailure },
   );
 }
 

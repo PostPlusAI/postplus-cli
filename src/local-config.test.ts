@@ -95,8 +95,10 @@ describe('local configuration persistence', { concurrency: false }, () => {
     );
   }
   it('preserves the old config on atomic replacement failure, without deleting the target', async () => {
-    mock.method(fs.promises, 'rename', async () => {
-      throw denied();
+    const originalRename = fs.promises.rename;
+    mock.method(fs.promises, 'rename', async (from, to) => {
+      if (String(to) === join(root, 'config.json')) throw denied();
+      return originalRename(from, to);
     });
     syncBuiltinESMExports();
     await assert.rejects(
@@ -123,6 +125,14 @@ describe('local configuration persistence', { concurrency: false }, () => {
       assert.ok(!error.message.includes('synthetic-secret'));
       return true;
     });
+  });
+  it('does not replace corrupt configuration during a write', async () => {
+    for (const contents of ['{broken', 'null', '[]']) {
+      await fs.promises.writeFile(join(root, 'config.json'), contents);
+      await assert.rejects(writeLocalConfig({cliSessionToken:'replacement'}), {code:'postplus_cli_config_read_failed'});
+      assert.equal(await originalRead(join(root, 'config.json'), 'utf8'), contents);
+      assert.deepEqual(await fs.promises.readdir(root), ['config.json']);
+    }
   });
   it('does not treat Windows POSIX mode bits as ACLs, but retains write denial', async () => {
     assert.equal(usesPosixConfigPermissions('win32'), false);
@@ -206,8 +216,10 @@ describe('local configuration persistence', { concurrency: false }, () => {
       if (route.endsWith('/whoami')) return Response.json(account);
       throw new Error(`Unexpected route ${route}`);
     });
-    mock.method(fs.promises, 'rename', async () => {
-      throw denied();
+    const originalRename = fs.promises.rename;
+    mock.method(fs.promises, 'rename', async (from, to) => {
+      if (String(to) === join(root, 'config.json')) throw denied();
+      return originalRename(from, to);
     });
     syncBuiltinESMExports();
     await assert.rejects(

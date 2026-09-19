@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "releaseId": "skills-2026-09-18.1-cli-mechanism-hardening",
+  "title": "Reliable installation and clear recovery.",
+  "summary": "Install the skills paired with your CLI, reuse correct installations, and get a clear next step when work cannot continue.",
+  "highlights": [
+    "Skills ship with the CLI. Once the package is available, skill installation and content checks do not need GitHub.",
+    "Installation verifies supported agent targets, skips correct content, and repairs missing targets without repeating completed work.",
+    "Local changes and content without a trusted prior fingerprint are protected until backup and replacement are approved.",
+    "Public command help is available without login or business requests, with examples and useful next steps.",
+    "Failures retain structured diagnostics; exhausted automatic recovery stops instead of starting another update or task retry.",
+    "Shared guidance is shorter and selected by task. Disk installation and a refreshed agent session are reported separately."
+  ]
+}

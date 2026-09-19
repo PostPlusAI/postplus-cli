@@ -9,6 +9,7 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -61,7 +62,7 @@ test('actual release archive contains exactly the declared files and install env
     'tar must not contain macOS metadata outside the release manifest',
   );
   const expected = [
-    ...releaseFiles,
+    ...releaseFiles.flatMap((name) => statSync(join(repoRoot, name)).isDirectory() ? filesUnder(join(repoRoot, name), `${name}/`) : [name]),
     'package.json',
     'scripts/install.sh',
     'scripts/install.ps1',
@@ -86,7 +87,7 @@ test('actual release archive contains exactly the declared files and install env
     });
   assert.deepEqual(packages.sort(), [
     'cross-spawn@7.0.6', 'isexe@2.0.0', 'path-key@3.1.1',
-    'shebang-command@2.0.0', 'shebang-regex@3.0.0', 'which@2.0.2',
+    'shebang-command@2.0.0', 'shebang-regex@3.0.0', 'undici@7.29.1', 'which@2.0.2',
   ]);
   assert.equal(
     readFileSync(join(packageRoot, 'NOTICE'), 'utf8'),
@@ -101,9 +102,7 @@ test('finalize removes only unpublished declarations; package rejects missing de
     'build',
     'scripts',
     'package.json',
-    'README.md',
-    'LICENSE',
-    'NOTICE',
+    ...releaseFiles.filter((name) => !name.startsWith('build/')),
   ]) {
     cpSync(join(repoRoot, item), join(fixture, item), { recursive: true });
   }
@@ -191,6 +190,23 @@ const result: Promise<unknown> = runHostedRequest(input);
   assert.equal(types.status, 0, types.stdout + types.stderr);
 });
 
+function assertFullBundleJourney(entry) {
+  const environment = { ...process.env, POSTPLUS_TEST_RELEASE_CLI: entry };
+  delete environment.NODE_TEST_CONTEXT;
+  const result = spawnSync(process.execPath, ['--import', 'tsx', '--test', 'src/skills-release-acceptance.test.ts'], {
+    cwd: repoRoot,
+    env: environment,
+    encoding: 'utf8',
+    timeout: 180_000,
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /network attempts=0/);
+}
+
+test('standalone archive installs and verifies its complete skills bundle offline', () => {
+  assertFullBundleJourney(join(packageRoot, 'build', 'index.js'));
+});
+
 test('npm archive installs offline into an isolated prefix and runs without workspace dependencies', () => {
   const packed = JSON.parse(execFileSync('npm', ['pack', '--ignore-scripts', '--offline', '--json', '--pack-destination', scratch], {
     cwd: repoRoot, encoding: 'utf8',
@@ -209,6 +225,7 @@ test('npm archive installs offline into an isolated prefix and runs without work
   assert.equal(version.trim(), manifest.version);
   const help = execFileSync(process.execPath, [entry, 'help'], { cwd: prefix, env, encoding: 'utf8' });
   assert.match(help, /PostPlus/);
+  assertFullBundleJourney(entry);
 });
 
 test('unpacked CLI rejects unsupported Node before command or network work', () => {

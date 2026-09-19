@@ -1,3 +1,4 @@
+import { diagnosticFetch } from './network-diagnostics.js';
 import { spawn } from 'node:child_process';
 import {
   access,
@@ -54,7 +55,7 @@ export async function runStudioCommand(args: string[]): Promise<number> {
     return 0;
   }
 
-  if (rest.some((arg) => ['help', '--help', '-h'].includes(arg))) {
+  if (['init', 'open', 'status'].includes(subcommand) && rest.some((arg) => ['help', '--help', '-h'].includes(arg))) {
     printStudioHelp();
     return 0;
   }
@@ -78,9 +79,7 @@ export async function runStudioCommand(args: string[]): Promise<number> {
       return 0;
     }
     default:
-      process.stderr.write(`Unknown studio command: ${subcommand}\n\n`);
-      printStudioHelp();
-      return 1;
+      throw new Error(`Unknown command: studio ${subcommand}`);
   }
 }
 
@@ -94,6 +93,14 @@ Usage:
 
 Local Studio is a public local workspace included in the PostPlus CLI package.
 Studio creates a visible "PostPlus Studio" folder inside the selected working directory and opens the bundled local dashboard.
+
+Examples:
+  postplus studio init --workdir ./campaign
+  postplus studio open --workdir ./campaign --no-browser
+
+Next:
+  Open the printed dashboard URL; use postplus studio status to inspect the workspace.
+  --help, -h shows help without creating files or starting a server.
 `);
 }
 
@@ -404,7 +411,7 @@ async function waitForStudioServer(baseUrl: string, logPath: string): Promise<vo
 
 async function canFetchStudioServer(baseUrl: string): Promise<boolean> {
   try {
-    const response = await fetch(`${baseUrl.replace(/\/$/u, '')}/api/health`, {
+    const response = await diagnosticFetch(`${baseUrl.replace(/\/$/u, '')}/api/health`, {
       signal: AbortSignal.timeout(1200),
     });
     return response.ok;
