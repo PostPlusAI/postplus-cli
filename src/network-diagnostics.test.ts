@@ -7,6 +7,16 @@ import { assertEnvironmentProxyReady, fetchWithNetworkDiagnostics, isNetworkFail
 import { toFailureFact } from './failure-contract.js';
 
 const target = new URL('https://api.postplus.test/resource');
+
+test('loopback requests are classified as local Studio diagnostics', () => {
+  const error = new PostPlusNetworkRequestError({
+    method: 'GET',
+    targetUrl: 'http://127.0.0.1:3978/api/health',
+  });
+
+  assert.equal(error.service, 'local-studio');
+});
+
 for (const scheme of ['http', 'https', 'socks5']) {
   for (const key of ['ALL_PROXY', 'all_proxy']) {
     test(`${key} ${scheme} alone fails even with environment proxy enabled`, (t) => {

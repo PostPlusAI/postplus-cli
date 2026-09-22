@@ -69,7 +69,7 @@ export function toFailureFact(
   const originalMessage =
     error instanceof Error ? error.message : string(source.message);
   const invalidArguments =
-    /^(?:Unknown (?:option|command|media endpoint|research route|media verb|[a-z-]+ target)|Missing (?:value for|required option)|Unexpected positional argument|--[a-z][a-z0-9-]* (?:must|requires)|(?:postplus )?(?:auth|quote|runs|skills|media|research|publish|workflow|studio)[^\n]* requires)/u.test(
+    /^(?:Unknown (?:option|command|media endpoint|research route|media verb|[a-z-]+ target)|Missing (?:value for|required option)|Unexpected positional argument|--[a-z][a-z0-9-]* (?:must|requires)|(?:postplus )?(?:auth|quote|runs|skills|media|research|publish|studio)[^\n]* requires)/u.test(
       originalMessage ?? "",
     );
   const code =

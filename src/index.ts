@@ -32,7 +32,6 @@ import {
 import {
   runHostedDomainCommand,
   runMediaFileCommand,
-  runWorkflowCommand,
 } from './hosted-domain-commands.js';
 import { assertConfigFilePermissions } from './local-state.js';
 import {
@@ -121,11 +120,9 @@ Usage:
   postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
   postplus publish schema [--json]
   postplus publish <operation> --request <input.json> [--output <result.json>]
-  postplus workflow list|show|runs|run-show|create|propose|save|quote|launch ... [--json]
-  postplus workflow help
+  postplus studio init|open|status   Open bundled Local Studio
   postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <credits>]
   postplus skills verify [--json]
-  postplus studio init|open|status   Open bundled Local Studio
   postplus install [--current-directory]
   postplus update [--current-directory]
   postplus uninstall [--current-directory]
@@ -628,8 +625,6 @@ async function main(): Promise<void> {
         await runSkillsCommand(['help']);
       } else if (helpTopic === 'studio') {
         await runStudioCommand(['help']);
-      } else if (helpTopic === 'workflow') {
-        await runWorkflowCommand(['help']);
       } else {
         await printHelp();
       }
@@ -668,9 +663,6 @@ async function main(): Promise<void> {
         'publish',
         rest,
       )) as number;
-      return;
-    case 'workflow':
-      process.exitCode = await runWorkflowCommand(rest);
       return;
     case 'quote':
       process.exitCode = await runQuoteCommand(rest);
@@ -857,7 +849,7 @@ function helpCommandForArgs(args: string[]): string {
   const parts = ['postplus', command];
   const children: Record<string, string[]> = {
     auth: ['login', 'refresh', 'revoke', 'status', 'validate', 'logout'], skills: ['verify'], quote: ['confirm'],
-    runs: ['list', 'show'], studio: ['init', 'open', 'status'], workflow: ['list', 'show', 'runs', 'run-show', 'create', 'propose', 'save', 'quote', 'launch'],
+    runs: ['list', 'show'], studio: ['init', 'open', 'status'],
     research: ['schema', 'run'], media: ['schema', 'poll', 'prepare', 'estimate', ...buildVerbTargetIndex('media').keys()],
     publish: ['schema', ...[...buildVerbTargetIndex('publish').values()].flatMap((targets) => [...targets.keys()])],
     'media-file': ['upload', 'download'],

@@ -88,8 +88,7 @@ export type RunHostedCapabilityEnvelopeInput = {
    * The raw `/api/postplus-cli/hosted/capability` request body (capability,
    * operation, operationId, verb fields). The Web boundary owns validation —
    * this entry is a pure in-process transport for a trusted host (eve-agent)
-   * that builds the envelope itself (e.g. the `workflow` verbs the workspace
-   * tools drive); the bin counterpart for the same verbs is `postplus workflow`.
+   * that builds the envelope itself.
    */
   body: Record<string, unknown>;
   /** The account's fresh session auth, supplied by the trusted host runtime. */

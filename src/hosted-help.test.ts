@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runBalanceCommand, runRunsCommand } from './hosted-account-commands.js';
-import { runHostedDomainCommand, runWorkflowCommand, runMediaFileCommand } from './hosted-domain-commands.js';
+import { runHostedDomainCommand, runMediaFileCommand } from './hosted-domain-commands.js';
 import { runStudioCommand } from './studio.js';
 
 test('nested hosted help returns before authentication, requests, input reads, or local mutations', async () => {
@@ -15,7 +15,6 @@ test('nested hosted help returns before authentication, requests, input reads, o
       const commands: Array<() => Promise<unknown>> = [
         () => runBalanceCommand([flag]),
         ...['list', 'show'].map(command => () => runRunsCommand([command, flag])),
-        ...['list', 'show', 'runs', 'run-show', 'create', 'propose', 'save', 'quote', 'launch'].map(command => () => runWorkflowCommand([command, flag])),
         ...['init', 'open', 'status'].map(command => () => runStudioCommand([command, '--workdir', '/nonexistent/help-must-not-create', flag])),
         ...['upload', 'download'].map(command => () => runMediaFileCommand([command, flag])),
         ...(['research', 'media', 'publish'] as const).map(domain => () => runHostedDomainCommand(domain, ['schema', flag])),

@@ -198,7 +198,7 @@ async function initializeStudio(workdir: string) {
   await writeJsonIfMissing(join(studioRoot, 'project.json'), {
     project_id: DEFAULT_STUDIO_ID,
     name: 'PostPlus Studio',
-    goal: 'Run PostPlus workflows in a local visual Studio workspace.',
+    goal: 'Organize creative assets and production pipelines in a local visual Studio workspace.',
     status: 'active',
     created_at: createdAt,
     updated_at: createdAt,
