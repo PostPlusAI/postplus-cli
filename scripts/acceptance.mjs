@@ -93,6 +93,17 @@ async function run(command, args, options = {}) {
   });
 }
 
+class CapturedCommandError extends Error {
+  constructor(command, args, exitCode, stdout, stderr) {
+    super(
+      `Command failed (${exitCode ?? 'unknown'}): ${command} ${args.join(' ')}\n${stderr}`,
+    );
+    this.exitCode = exitCode;
+    this.stderr = stderr;
+    this.stdout = stdout;
+  }
+}
+
 async function runCapture(command, args, options = {}) {
   return await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -112,13 +123,49 @@ async function runCapture(command, args, options = {}) {
       }
 
       reject(
-        new Error(
-          `Command failed (${code ?? 'unknown'}): ${command} ${args.join(' ')}\n${Buffer.concat(stderr).toString('utf8')}`,
+        new CapturedCommandError(
+          command,
+          args,
+          code,
+          Buffer.concat(stdout).toString('utf8'),
+          Buffer.concat(stderr).toString('utf8'),
         ),
       );
     });
     child.on('error', reject);
   });
+}
+
+function readJsonFailure(error) {
+  if (!(error instanceof CapturedCommandError)) {
+    throw error;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(error.stdout);
+  } catch {
+    throw new Error(
+      `Failed command did not write a JSON failure payload to stdout: ${error.message}`,
+    );
+  }
+
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    payload.ok !== false ||
+    !payload.error ||
+    typeof payload.error !== 'object' ||
+    typeof payload.error.code !== 'string' ||
+    typeof payload.error.stage !== 'string' ||
+    typeof payload.error.message !== 'string'
+  ) {
+    throw new Error(
+      `Failed command wrote an invalid JSON failure payload: ${error.stdout}`,
+    );
+  }
+
+  return payload.error;
 }
 
 await assertPathExists(
@@ -202,7 +249,7 @@ try {
       'Staging API override polluted the persisted production target.',
     );
   }
-  let mismatchFailure = '';
+  let mismatchFailure;
   try {
     await runCapture(
       process.execPath,
@@ -215,18 +262,22 @@ try {
       { env: configEnv },
     );
   } catch (error) {
-    mismatchFailure = error instanceof Error ? error.message : String(error);
+    mismatchFailure = readJsonFailure(error);
   }
   if (
-    !mismatchFailure.includes(
-      'session belongs to https://staging.postplus.example.com',
+    !mismatchFailure ||
+    mismatchFailure.code !== 'postplus_cli_failed' ||
+    mismatchFailure.stage !== 'auth' ||
+    !mismatchFailure.message.includes(
+      'The current PostPlus session belongs to [redacted-url] but this process targets [redacted-url]',
     ) ||
-    !mismatchFailure.includes(
-      'this process targets https://postplus.example.com',
+    !mismatchFailure.message.includes('Use an isolated POSTPLUS_CONFIG_DIR') ||
+    /https:\/\/staging\.postplus\.example\.com|https:\/\/postplus\.example\.com/u.test(
+      mismatchFailure.message,
     )
   ) {
     throw new Error(
-      'A staging-bound session was not rejected before production validation.',
+      'A staging-bound session was not rejected with the redacted structured auth failure contract.',
     );
   }
 
