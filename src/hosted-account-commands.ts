@@ -160,6 +160,12 @@ Next:
 // ---------------------------------------------------------------------------
 
 export type HostedRunSummary = {
+  billingMode?: 'personal_subscription';
+  execution?: {
+    resultStatus: string;
+    nextAction: string;
+    automaticRetryAllowed?: boolean;
+  };
   id: string;
   capability: string;
   status: string;
@@ -316,7 +322,28 @@ function normalizeRunSummary(value: unknown): HostedRunSummary {
     value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : {};
+  const execution =
+    record.execution && typeof record.execution === 'object'
+      ? (record.execution as Record<string, unknown>)
+      : null;
   return {
+    ...(record.billingMode === 'personal_subscription'
+      ? { billingMode: 'personal_subscription' as const }
+      : {}),
+    ...(execution && typeof execution.resultStatus === 'string'
+      ? {
+          execution: {
+            resultStatus: execution.resultStatus,
+            nextAction:
+              typeof execution.nextAction === 'string'
+                ? execution.nextAction
+                : '',
+            ...(execution.automaticRetryAllowed === false
+              ? { automaticRetryAllowed: false }
+              : {}),
+          },
+        }
+      : {}),
     id: readString(record.id) ?? '',
     capability: readString(record.capability) ?? '',
     status: readString(record.status) ?? '',
@@ -376,13 +403,16 @@ export function formatHostedRunsListReport(
   }
 
   for (const run of report.runs) {
-    const cost = run.billingPending
-      ? 'billing pending verification'
-      : run.status === 'completed' || (run.finalizedCredits ?? 0) > 0
-        ? `${run.finalizedCredits ?? 'unknown'} credits${run.estimatedOnly ? ' (estimated settlement)' : ''}`
-        : `~${run.reservedCredits ?? 'unknown'} credits reserved`;
+    const cost =
+      run.billingMode === 'personal_subscription'
+        ? 'included in personal subscription'
+        : run.billingPending
+          ? 'billing pending verification'
+          : run.status === 'completed' || (run.finalizedCredits ?? 0) > 0
+            ? `${run.finalizedCredits ?? 'unknown'} credits${run.estimatedOnly ? ' (estimated settlement)' : ''}`
+            : `~${run.reservedCredits ?? 'unknown'} credits reserved`;
     lines.push(
-      `- ${run.id}  [${run.status}]  ${run.capability}${run.target ? ` ${run.target}` : ''}  ${cost}${formatRunProgress(run) ? `  ${formatRunProgress(run)}` : ''}  ${run.updatedAt}`,
+      `- ${run.id}  [${run.execution?.resultStatus ?? run.status}]  ${run.capability}${run.target ? ` ${run.target}` : ''}  ${cost}${formatRunProgress(run) ? `  ${formatRunProgress(run)}` : ''}  ${run.updatedAt}`,
     );
   }
   lines.push('');
@@ -407,21 +437,25 @@ export function formatHostedRunDetailReport(report: HostedRunDetail): string {
   return [
     `PostPlus run ${report.id}`,
     '',
-    `Status: ${report.status}`,
+    `Status: ${report.execution?.resultStatus ?? report.status}`,
     formatRunProgress(report),
     `Capability: ${report.capability}${report.target ? ` ${report.target}` : ''}`,
-    report.billingPending
-      ? 'Billing: pending verification; do not submit another analysis.'
-      : settled
-        ? `Finalized: ${report.finalizedCredits ?? 'unknown'} PostPlus credits${report.estimatedOnly ? ' (estimated settlement; actual usage unconfirmed)' : ''}`
-        : `Reserved: ${report.reservedCredits ?? 'unknown'} PostPlus credits`,
+    report.billingMode === 'personal_subscription'
+      ? 'Billing: included in personal subscription'
+      : report.billingPending
+        ? 'Billing: pending verification; do not submit another analysis.'
+        : settled
+          ? `Finalized: ${report.finalizedCredits ?? 'unknown'} PostPlus credits${report.estimatedOnly ? ' (estimated settlement; actual usage unconfirmed)' : ''}`
+          : `Reserved: ${report.reservedCredits ?? 'unknown'} PostPlus credits`,
     `Created: ${report.createdAt}`,
     `Updated: ${report.updatedAt}`,
     report.hasError ? 'Error: see error field (postplus runs show --json)' : '',
     '',
-    report.status === 'completed' || report.status === 'failed'
-      ? 'This run is terminal.'
-      : `Still running. Refresh: postplus runs show ${report.id}`,
+    report.execution?.resultStatus === 'unknown'
+      ? 'Outcome unknown. Check this original task; do not resubmit automatically.'
+      : report.status === 'completed' || report.status === 'failed'
+        ? 'This run is terminal.'
+        : `Still running. Refresh: postplus runs show ${report.id}`,
   ]
     .filter((line) => line !== '')
     .join('\n');
