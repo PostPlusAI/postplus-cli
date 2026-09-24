@@ -790,6 +790,9 @@ async function runMainWithRecovery(): Promise<void> {
 }
 
 runMainWithRecovery().then(() => {
+  // Channel writes use exit 2 to mean that the provider outcome is unknown.
+  // Keep that distinct from a definite failure for Agent callers.
+  if (process.exitCode === 2 && process.argv[2] === 'channels') return;
   if (process.exitCode && process.exitCode !== 0) process.exitCode = 1;
 }).catch((error: unknown) => {
   writeFailure(error, { automaticRecovery: process.env[POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV] === '1', json: process.argv.includes('--json'), stage: process.argv[2] ?? 'command', helpCommand: helpCommandForArgs(process.argv.slice(2)) });
