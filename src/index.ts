@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runWorkspaceCommand } from './workspace-commands.js';
 import { formatSkillDiscovery } from './skill-discovery.js';
 import { PostPlusFailure, writeFailure, toFailureFact, formatFailure } from './failure-contract.js';
 import { buildVerbTargetIndex } from './hosted-manifest-index.js';
@@ -107,6 +108,7 @@ Usage:
   postplus auth validate [--json]
   postplus auth logout [--json]
   postplus doctor [--skill <skill-id>] [--json]
+  postplus workspace status|list|use <workspace-id> [--json]
   postplus balance [--json]
   postplus runs list [--status <status>] [--since <iso>] [--limit <n>] [--json]
   postplus runs show <run-id> [--json]
@@ -639,6 +641,9 @@ async function main(): Promise<void> {
     case 'doctor':
       if (rest.some(isHelpArg)) { process.exitCode = printDiagnosticHelp('doctor', json); return; }
       process.exitCode = await runDoctor(parseDiagnosticOptions(rest));
+      return;
+    case 'workspace':
+      process.exitCode = await runWorkspaceCommand(rest);
       return;
     case 'balance':
       process.exitCode = await runBalanceCommand(rest);

@@ -65,7 +65,8 @@
     "build/failure-contract.js",
     "vendor/skills-runtime",
     "build/media-evidence-retention.js",
-    "build/proxy-configuration.js"
+    "build/proxy-configuration.js",
+    "build/workspace-commands.js"
   ],
   "publishConfig": {
     "access": "public",
