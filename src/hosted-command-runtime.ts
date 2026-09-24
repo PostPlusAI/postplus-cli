@@ -390,6 +390,7 @@ export async function pollHostedRunUntilSettled(input: {
   readStatus: (payload: unknown) => string | null;
   waitBudgetMs: number;
   retryTransientErrors?: boolean;
+  stopWaiting?: (payload: unknown) => boolean;
 }): Promise<unknown> {
   const startedAt = performance.now();
   let consecutiveErrors = 0;
@@ -441,6 +442,7 @@ export async function pollHostedRunUntilSettled(input: {
       consecutiveErrors++;
       continue;
     }
+    if (input.stopWaiting?.(payload)) return payload;
     const status = input.readStatus(payload);
     if (!status || isTerminalRunStatus(status)) {
       return payload;

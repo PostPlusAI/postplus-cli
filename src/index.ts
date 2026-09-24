@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { runWorkspaceCommand } from './workspace-commands.js';
+import { runChannelsCommand } from './channel-commands.js';
 import { formatSkillDiscovery } from './skill-discovery.js';
 import { PostPlusFailure, writeFailure, toFailureFact, formatFailure } from './failure-contract.js';
 import { buildVerbTargetIndex } from './hosted-manifest-index.js';
@@ -109,6 +110,7 @@ Usage:
   postplus auth logout [--json]
   postplus doctor [--skill <skill-id>] [--json]
   postplus workspace status|list|use <workspace-id> [--json]
+  postplus channels list|show|connect|disconnect ... [--json]
   postplus balance [--json]
   postplus runs list [--status <status>] [--since <iso>] [--limit <n>] [--json]
   postplus runs show <run-id> [--json]
@@ -630,6 +632,8 @@ async function main(): Promise<void> {
         await runSkillsCommand(['help']);
       } else if (helpTopic === 'studio') {
         await runStudioCommand(['help']);
+      } else if (helpTopic === 'channels') {
+        await runChannelsCommand(['help']);
       } else if (helpTopic === 'workflow') {
         await runWorkflowCommand(['help']);
       } else {
@@ -644,6 +648,9 @@ async function main(): Promise<void> {
       return;
     case 'workspace':
       process.exitCode = await runWorkspaceCommand(rest);
+      return;
+    case 'channels':
+      process.exitCode = await runChannelsCommand(rest);
       return;
     case 'balance':
       process.exitCode = await runBalanceCommand(rest);
