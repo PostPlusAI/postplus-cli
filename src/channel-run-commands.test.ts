@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { channelRunExitCode, parseChannelRun } from './channel-run-commands.js';
+import {
+  channelRunExitCode,
+  parseChannelRun,
+  projectLiveChannelActions,
+} from './channel-run-commands.js';
+import { marketingChannelActions } from './generated/marketing-channel-manifest.generated.js';
 
 test('run grammar is projected from fixed public action fields', () => {
   const parsed = parseChannelRun([
@@ -445,4 +450,19 @@ test('target discovery commands require a connection but do not invent a target'
     assert.deepEqual(parsed.request.target, { kind: 'connection' });
     assert.deepEqual(parsed.request.parameters, {});
   }
+});
+
+test('live action projection rejects incomplete or duplicate server catalogs', () => {
+  const actions = marketingChannelActions.map((item) => ({
+    action: item.action,
+    deploymentEnabled: item.action === 'google-ads.accounts.list',
+  }));
+  const projected = projectLiveChannelActions({ actions });
+  assert.equal(projected.length, marketingChannelActions.length);
+  assert.deepEqual(
+    projected.filter((item) => item.deploymentEnabled).map((item) => item.action),
+    ['google-ads.accounts.list'],
+  );
+  assert.throws(() => projectLiveChannelActions({ actions: actions.slice(1) }));
+  assert.throws(() => projectLiveChannelActions({ actions: [...actions, actions[0]] }));
 });

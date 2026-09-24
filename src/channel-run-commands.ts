@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 import { marketingChannelActions } from './generated/marketing-channel-manifest.generated.js';
+import { resolveFreshRemoteAuth } from './auth-session.js';
+import { sendAuthedCloudRequest } from './authed-cloud-request.js';
 import {
   pollHostedRunUntilSettled,
   postHostedJson,
@@ -99,6 +101,22 @@ export function parseChannelRun(args: string[]) {
 export async function runChannelExecution(args: string[]): Promise<number> {
   const [operation, ...rest] = args;
   if (operation === 'actions') {
+    if (rest.length === 1 && rest[0] === '--live') {
+      const response = await sendAuthedCloudRequest({
+        auth: await resolveFreshRemoteAuth(),
+        pathName: '/api/postplus-cli/channels/actions',
+        retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
+      });
+      if (!response.ok)
+        throw new Error(
+          `Could not read enabled channel actions (${response.status}).`,
+        );
+      const projected = projectLiveChannelActions(await response.json());
+      process.stdout.write(`${JSON.stringify(projected, null, 2)}\n`);
+      return 0;
+    }
+    if (rest.length && !(rest.length === 1 && rest[0] === '--json'))
+      throw new Error('Use postplus channels actions [--live].');
     process.stdout.write(
       `${JSON.stringify(marketingChannelActions, null, 2)}\n`,
     );
@@ -144,6 +162,37 @@ export async function runChannelExecution(args: string[]): Promise<number> {
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return channelRunExitCode(result);
+}
+
+export function projectLiveChannelActions(value: unknown) {
+  if (!value || typeof value !== 'object' || !('actions' in value))
+    throw new Error('Invalid channel action availability response.');
+  const actions = value.actions;
+  if (!Array.isArray(actions))
+    throw new Error('Invalid channel action availability response.');
+  const availability = new Map<string, boolean>();
+  for (const item of actions) {
+    if (
+      !item ||
+      typeof item !== 'object' ||
+      typeof item.action !== 'string' ||
+      typeof item.deploymentEnabled !== 'boolean' ||
+      availability.has(item.action)
+    )
+      throw new Error('Invalid channel action availability response.');
+    availability.set(item.action, item.deploymentEnabled);
+  }
+  if (
+    availability.size !== marketingChannelActions.length ||
+    marketingChannelActions.some((item) => !availability.has(item.action))
+  )
+    throw new Error(
+      'Channel action catalog differs from this CLI version. Update PostPlus before executing channel actions.',
+    );
+  return marketingChannelActions.map((item) => ({
+    ...item,
+    deploymentEnabled: availability.get(item.action)!,
+  }));
 }
 function readRun(
   value: unknown,

@@ -39,7 +39,7 @@ export async function runChannelsCommand(args: string[]): Promise<number> {
     args.some((arg) => ['help', '--help', '-h'].includes(arg))
   ) {
     process.stdout.write(
-      'postplus channels list|show <connection-id>|connect <channel>|wait <connection-id>|disconnect <connection-id> [--json]\npostplus channels actions|run <action> --connection <id> [action flags] [--operation-id <id>] [--wait] | run-status <operation-id>\nConnections belong to you and can be reused across workspaces. Disconnect affects all your workspaces. Channel run exit 2 means result unknown: inspect the original operation; do not resubmit it.\n',
+      'postplus channels list|show <connection-id>|connect <channel>|wait <connection-id>|disconnect <connection-id> [--json]\npostplus channels actions [--live]|run <action> --connection <id> [action flags] [--operation-id <id>] [--wait] | run-status <operation-id>\nActions lists local contracts; --live also shows which actions this PostPlus environment currently admits. Connections belong to you and can be reused across workspaces. Disconnect affects all your workspaces. Channel run exit 2 means result unknown: inspect the original operation; do not resubmit it.\n',
     );
     return 0;
   }
