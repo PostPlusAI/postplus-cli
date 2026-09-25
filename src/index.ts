@@ -111,6 +111,7 @@ Usage:
   postplus doctor [--skill <skill-id>] [--json]
   postplus workspace status|list|use <workspace-id> [--json]
   postplus channels list|show|connect|disconnect ... [--json]
+  postplus channels tools list|show|run ... [--json]
   postplus balance [--json]
   postplus runs list [--status <status>] [--since <iso>] [--limit <n>] [--json]
   postplus runs show <run-id> [--json]

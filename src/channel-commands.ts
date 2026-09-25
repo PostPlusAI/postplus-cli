@@ -3,6 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
 import { runChannelExecution } from './channel-run-commands.js';
+import { runChannelToolCommand } from './channel-tool-commands.js';
 
 export function parseChannelCommand(args: string[]) {
   const tokens = args.filter((arg) => arg !== '--json');
@@ -39,12 +40,13 @@ export async function runChannelsCommand(args: string[]): Promise<number> {
     args.some((arg) => ['help', '--help', '-h'].includes(arg))
   ) {
     process.stdout.write(
-      'postplus channels list|show <connection-id>|connect <channel>|wait <connection-id>|disconnect <connection-id> [--json]\npostplus channels actions [--live]|run <action> --connection <id> [action flags] [--operation-id <id>] [--wait] | run-status <operation-id>\nActions lists local contracts; --live also shows which actions this PostPlus environment currently admits. Connections belong to you and can be reused across workspaces. Disconnect affects all your workspaces. Channel run exit 2 means result unknown: inspect the original operation; do not resubmit it.\n',
+      'postplus channels list|show <connection-id>|connect <channel>|wait <connection-id>|disconnect <connection-id> [--json]\npostplus channels actions [--live]|run <action> --connection <id> [action flags] [--operation-id <id>] [--wait] | run-status <operation-id>\npostplus channels tools list [--toolkit <id>] [--query <text>] [--offset <n>] [--limit <n>] | show <tool-slug> | run <tool-slug> --connection <id> --input-file <json-path> [--operation-id <id>] [--wait]\nTools shows the pinned Composio catalog and availability; an unavailable tool cannot run. Connections belong to you and can be reused across workspaces. Disconnect affects all your workspaces. Channel run exit 2 means result unknown: inspect the original operation; do not resubmit it.\n',
     );
     return 0;
   }
   if (['actions', 'run', 'run-status'].includes(args[0] ?? ''))
     return runChannelExecution(args);
+  if (args[0] === 'tools') return runChannelToolCommand(args.slice(1));
   if (args[0] === 'wait') {
     const tokens = args.filter((arg) => arg !== '--json');
     if (tokens.length !== 2 || !/^[0-9a-fA-F-]{36}$/.test(tokens[1] ?? ''))
