@@ -4,7 +4,26 @@ import { test } from 'node:test';
 import {
   buildChannelToolRequest,
   parseChannelToolCommand,
+  shouldPollChannelTool,
 } from './channel-tool-commands.js';
+
+test('completed tool read retains its immediate data when --wait is used', () => {
+  assert.equal(
+    shouldPollChannelTool(true, {
+      output: {
+        execution: { resultStatus: 'succeeded' },
+        result: { data: { rows: [1] } },
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    shouldPollChannelTool(true, {
+      output: { execution: { resultStatus: 'pending' } },
+    }),
+    true,
+  );
+});
 
 test('tool catalog queries preserve toolkit and search text', () => {
   assert.deepEqual(
@@ -47,6 +66,7 @@ test('tool run requires a personal connection and JSON input file', () => {
     operation: 'run',
     tool: 'GOOGLEADS_LIST_ACCESSIBLE_CUSTOMERS',
     connectionId: '11111111-1111-4111-8111-111111111111',
+    targetId: undefined,
     inputFile: '/tmp/tool-input.json',
     operationId: 'operation-123',
     wait: true,
@@ -67,6 +87,25 @@ test('tool run requires a personal connection and JSON input file', () => {
     () => buildChannelToolRequest(parsed, ['not-an-object']),
     /JSON object/,
   );
+  const exactTarget = parseChannelToolCommand([
+    'run',
+    'METAADS_LIST_LEADS',
+    '--connection',
+    '11111111-1111-4111-8111-111111111111',
+    '--input-file',
+    '/tmp/tool-input.json',
+    '--target-id',
+    'lead-form-123',
+  ]);
+  assert.equal(exactTarget.operation, 'run');
+  if (exactTarget.operation === 'run') {
+    assert.deepEqual(
+      buildChannelToolRequest(exactTarget, {
+        source_object_id: 'lead-form-123',
+      }).target,
+      { kind: 'external_id', id: 'lead-form-123' },
+    );
+  }
   assert.throws(
     () =>
       parseChannelToolCommand([

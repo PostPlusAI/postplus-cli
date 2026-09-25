@@ -66,7 +66,12 @@ export function parseChannelToolCommand(args: string[]) {
     if (
       [...values.keys()].some(
         (key) =>
-          !['--connection', '--input-file', '--operation-id'].includes(key),
+          ![
+            '--connection',
+            '--input-file',
+            '--operation-id',
+            '--target-id',
+          ].includes(key),
       )
     )
       throw new Error('Unknown channel tool run flag.');
@@ -78,13 +83,14 @@ export function parseChannelToolCommand(args: string[]) {
       operation: 'run' as const,
       tool: first,
       connectionId,
+      targetId: values.get('--target-id'),
       inputFile,
       operationId: values.get('--operation-id') ?? randomUUID(),
       wait: booleans.has('--wait'),
     };
   }
   throw new Error(
-    'Use channels tools list [--toolkit <id>] [--query <text>] [--offset <n>] [--limit <n>] | show <tool-slug> | run <tool-slug> --connection <id> --input-file <json-path> [--operation-id <id>] [--wait].',
+    'Use channels tools list [--toolkit <id>] [--query <text>] [--offset <n>] [--limit <n>] | show <tool-slug> | run <tool-slug> --connection <id> --input-file <json-path> [--target-id <id>] [--operation-id <id>] [--wait].',
   );
 }
 
@@ -103,6 +109,15 @@ function readRun(
     status?: string;
     execution?: { resultStatus?: string };
   };
+}
+
+export function shouldPollChannelTool(wait: boolean, value: unknown) {
+  return (
+    wait &&
+    !['succeeded', 'failed', 'unknown'].includes(
+      readRun(value)?.execution?.resultStatus ?? '',
+    )
+  );
 }
 
 export function buildChannelToolRequest(
@@ -124,7 +139,9 @@ export function buildChannelToolRequest(
     operationId: command.operationId,
     tool: command.tool,
     connectionId: command.connectionId,
-    target: { kind: 'connection' as const },
+    target: command.targetId
+      ? { kind: 'external_id' as const, id: command.targetId }
+      : { kind: 'connection' as const },
     arguments: argumentsValue,
   };
 }
@@ -160,12 +177,16 @@ export async function runChannelToolCommand(args: string[]): Promise<number> {
   };
   // The caller can inspect this ID if the submit response is lost.
   process.stderr.write(`Channel operation: ${command.operationId}\n`);
+  if (command.targetId)
+    process.stderr.write(`Target ID: ${command.targetId}\n`);
   let result = await postHostedJson({
     skillName: null,
     pathName: '/api/postplus-cli/hosted/capability',
     body,
   });
-  if (command.wait)
+  // A successful read carries its data only in the first response. Polling a
+  // completed run would replace that response with its metadata-only receipt.
+  if (shouldPollChannelTool(command.wait, result))
     result = await pollHostedRunUntilSettled({
       pollIntervalMs: 1000,
       waitBudgetMs: 60_000,
