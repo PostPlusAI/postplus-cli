@@ -68,9 +68,7 @@
     "build/proxy-configuration.js",
     "build/channel-commands.js",
     "build/workspace-commands.js",
-    "build/channel-run-commands.js",
-    "build/channel-tool-commands.js",
-    "build/generated/marketing-channel-manifest.generated.js"
+    "build/channel-tool-commands.js"
   ],
   "publishConfig": {
     "access": "public",

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { parseChannelCommand } from './channel-commands.js';
+import { parseChannelCommand, runChannelsCommand } from './channel-commands.js';
 
 test('channel shell sends only product identity and operation', () => {
   assert.deepEqual(parseChannelCommand(['connect', 'meta-ads', '--json']), {
@@ -30,4 +30,9 @@ test('channel shell rejects arbitrary tools, provider overrides and extra target
   ]) {
     assert.throws(() => parseChannelCommand(args));
   }
+});
+
+test('legacy channel action verbs fail before any hosted request', async () => {
+  for (const verb of ['actions', 'run', 'run-status'])
+    await assert.rejects(runChannelsCommand([verb]), /retired/);
 });

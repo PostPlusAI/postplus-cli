@@ -2,7 +2,6 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
-import { runChannelExecution } from './channel-run-commands.js';
 import { runChannelToolCommand } from './channel-tool-commands.js';
 
 export function parseChannelCommand(args: string[]) {
@@ -40,13 +39,15 @@ export async function runChannelsCommand(args: string[]): Promise<number> {
     args.some((arg) => ['help', '--help', '-h'].includes(arg))
   ) {
     process.stdout.write(
-      'postplus channels list|show <connection-id>|connect <channel>|wait <connection-id>|disconnect <connection-id> [--json]\npostplus channels tools list [--toolkit <id>] [--query <text>] [--offset <n>] [--limit <n>] | show <tool-slug> | run <tool-slug> --connection <id> --input-file <json-path> [--target-id <id>] [--operation-id <id>] [--wait]\nLegacy compatibility only (do not use for new Agent workflows): postplus channels actions [--live]|run <action> --connection <id> [action flags] [--operation-id <id>] [--wait] | run-status <operation-id>\nTools shows the pinned Composio catalog and PostPlus gate; enabled does not prove your third-party permission, which is checked on execution. For exact external targets, pass --target-id and the matching input field. Connections belong to you and can be reused across workspaces. Disconnect affects all your workspaces. Channel run exit 2 means result unknown: inspect the original operation; do not resubmit it.\n',
+      'postplus channels list|show <connection-id>|connect <channel>|wait <connection-id>|disconnect <connection-id> [--json]\npostplus channels tools list [--toolkit <id>] [--query <text>] [--offset <n>] [--limit <n>] | show <tool-slug> | run <tool-slug> --connection <id> --input-file <json-path> [--media-map-file <json-path>] [--target-id <id> --target-path <argument.path>] [--operation-id <id>] [--wait] | run --status <operation-id>\nTools shows the pinned Composio catalog and PostPlus gate; enabled does not prove your third-party permission, which is checked on execution. For exact external targets, provide an ID and the JSON argument path containing it. Media map JSON maps file argument paths to references from postplus media-file upload. Connections belong to you and can be reused across workspaces. Disconnect affects all your workspaces. Channel run exit 2 means result unknown: query the original operation with tools run --status; do not resubmit it.\n',
     );
     return 0;
   }
-  if (['actions', 'run', 'run-status'].includes(args[0] ?? ''))
-    return runChannelExecution(args);
   if (args[0] === 'tools') return runChannelToolCommand(args.slice(1));
+  if (['actions', 'run', 'run-status'].includes(args[0] ?? ''))
+    throw new Error(
+      'Legacy channel action commands have retired. Use channels tools list, show, run, or run --status <operation-id>.',
+    );
   if (args[0] === 'wait') {
     const tokens = args.filter((arg) => arg !== '--json');
     if (tokens.length !== 2 || !/^[0-9a-fA-F-]{36}$/.test(tokens[1] ?? ''))
