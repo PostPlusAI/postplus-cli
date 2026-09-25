@@ -105,6 +105,30 @@ function readRun(
   };
 }
 
+export function buildChannelToolRequest(
+  command: Extract<
+    ReturnType<typeof parseChannelToolCommand>,
+    { operation: 'run' }
+  >,
+  argumentsValue: unknown,
+) {
+  if (
+    !argumentsValue ||
+    typeof argumentsValue !== 'object' ||
+    Array.isArray(argumentsValue)
+  )
+    throw new Error('Tool input must be a JSON object.');
+  return {
+    capability: 'marketing-channels' as const,
+    operation: 'execute-tool' as const,
+    operationId: command.operationId,
+    tool: command.tool,
+    connectionId: command.connectionId,
+    target: { kind: 'connection' as const },
+    arguments: argumentsValue,
+  };
+}
+
 export async function runChannelToolCommand(args: string[]): Promise<number> {
   const command = parseChannelToolCommand(args);
   if (command.operation !== 'run') {
@@ -128,12 +152,7 @@ export async function runChannelToolCommand(args: string[]): Promise<number> {
   } catch {
     throw new Error('Tool input file must contain valid JSON.');
   }
-  if (
-    !argumentsValue ||
-    typeof argumentsValue !== 'object' ||
-    Array.isArray(argumentsValue)
-  )
-    throw new Error('Tool input must be a JSON object.');
+  const body = buildChannelToolRequest(command, argumentsValue);
   const statusRequest = {
     capability: 'marketing-channels',
     operation: 'status',
@@ -144,15 +163,7 @@ export async function runChannelToolCommand(args: string[]): Promise<number> {
   let result = await postHostedJson({
     skillName: null,
     pathName: '/api/postplus-cli/hosted/capability',
-    body: {
-      capability: 'marketing-channels',
-      operation: 'execute-tool',
-      operationId: command.operationId,
-      tool: command.tool,
-      connectionId: command.connectionId,
-      target: { kind: 'connection' },
-      arguments: argumentsValue,
-    },
+    body,
   });
   if (command.wait)
     result = await pollHostedRunUntilSettled({

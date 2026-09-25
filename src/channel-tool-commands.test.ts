@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { parseChannelToolCommand } from './channel-tool-commands.js';
+import {
+  buildChannelToolRequest,
+  parseChannelToolCommand,
+} from './channel-tool-commands.js';
 
 test('tool catalog queries preserve toolkit and search text', () => {
   assert.deepEqual(
@@ -48,6 +51,22 @@ test('tool run requires a personal connection and JSON input file', () => {
     operationId: 'operation-123',
     wait: true,
   });
+  assert.deepEqual(
+    buildChannelToolRequest(parsed, { customer_id: '1234567890' }),
+    {
+      capability: 'marketing-channels',
+      operation: 'execute-tool',
+      operationId: 'operation-123',
+      tool: 'GOOGLEADS_LIST_ACCESSIBLE_CUSTOMERS',
+      connectionId: '11111111-1111-4111-8111-111111111111',
+      target: { kind: 'connection' },
+      arguments: { customer_id: '1234567890' },
+    },
+  );
+  assert.throws(
+    () => buildChannelToolRequest(parsed, ['not-an-object']),
+    /JSON object/,
+  );
   assert.throws(
     () =>
       parseChannelToolCommand([
