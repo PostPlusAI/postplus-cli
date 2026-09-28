@@ -44,6 +44,8 @@ on every run. Reuse the original results when writing recommendations.
 | Meta Ads | `METAADS_GET_AD_ACCOUNTS`, `METAADS_GET_INSIGHTS` | Campaign/ad set/ad identity, attribution settings, creative association and supported breakdowns in [meta-ads.md](meta-ads.md). |
 | Website | `GOOGLE_ANALYTICS_RUN_REPORT` after field and compatibility checks | Traffic quality, event receipt and attribution differences in [measurement.md](measurement.md). Website sessions are not ad clicks. |
 | TikTok Ads | Only the applicable GMV Max, Smart+ material or video report | Use [tiktok-ads.md](tiktok-ads.md). State its exact coverage; these tools do not supply a universal account report. |
+| Reddit Ads | Business → ad account → campaigns, then `REDDIT_ADS_GET_A_REPORT` | Use [reddit-ads.md](reddit-ads.md). Preserve UTC/account-timezone mapping, `page.token`, and `metrics_updated_at`; confirm the returned SPEND unit before conversion. |
+| Pinterest Ads | Advertiser → campaigns, then `PINTEREST_ADS_GET_ANALYTICS` at the requested entity level | Use [pinterest-ads.md](pinterest-ads.md). `SPEND_IN_MICRO_DOLLAR` is a micro-unit; distinguish paid impressions, total clicks and outbound clicks. |
 
 For example, after preparing the account-specific JSON described in the Google
 reference, save the first successful response:
@@ -64,6 +66,8 @@ an execution receipt, not a second download of the report.
 | Google RMF | Inspect `B.columns`, `B.required_columns`, `B.date_range`, and then `B.results`. Check `B.truncated`; there is no page token. |
 | Meta Insights | `B.data[]`; `spend` is an account-currency amount, often a string. Select the agreed `actions[].action_type` and matching `action_values`; do not sum overlapping purchase categories. |
 | GA4 | Match `B.dimensionHeaders` / `B.metricHeaders` to each row's value arrays. Honor the metric type and report metadata. There is no fixed universal column order. |
+| Reddit Ads | Read `B.data.metrics[]`, `B.data.metrics_updated_at`, and `B.pagination.next_url`; preserve breakdowns and follow every page. |
+| Pinterest Ads | Read `B.entity_level` and `B.rows[]`; retain conversion windows and report time before comparison. |
 
 ## Prove coverage before calculating
 

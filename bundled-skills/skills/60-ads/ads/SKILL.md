@@ -36,7 +36,7 @@ account connection.
 | Daily/weekly report, period comparison, account anomaly | [Performance reports](references/performance-report.md) and the selected platform below. |
 | Google Search diagnosis, search terms, RSA submission, campaign or budget changes | [Google Ads](references/google-ads.md). |
 | Meta delivery, creative performance, lead costs, supported campaign changes | [Meta Ads](references/meta-ads.md). |
-| TikTok GMV Max, Smart+ material or video analysis | [TikTok Ads](references/tiktok-ads.md); preserve the specialty report's actual scope. |
+| TikTok GMV Max, Smart+ material or video analysis; supported Smart+ or GMV Max creation and exact budget changes | [TikTok Ads](references/tiktok-ads.md); preserve the specialty report and campaign type's actual scope. |
 | Reddit Ads account/campaign discovery, dated reports, or an exact campaign pause/resume | [Reddit Ads](references/reddit-ads.md). |
 | Pinterest Ads advertiser/campaign reports, or an exact campaign pause/resume or rename | [Pinterest Ads](references/pinterest-ads.md). |
 | Missing or conflicting ad conversions, campaign tracking or launch measurement | [Ad measurement](references/measurement.md); standalone GA4 and Search Console analysis belongs to the Measurement skill. |

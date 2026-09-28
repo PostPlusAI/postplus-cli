@@ -41,6 +41,66 @@ using `{"id":["<returned video ID>"],"parts":["snippet","status","processingDeta
 only if these parts remain accepted by `show`. Confirm processing and privacy;
 an upload response is not proof that the video is viewable.
 
+## YouTube: reply, update a thumbnail, or organize a playlist
+
+A reply needs the **actual parent comment ID**, not a video ID or displayed
+author name. Read the selected parent with `YOUTUBE_LIST_COMMENTS` using its
+`id` and `part:"snippet"`; confirm the video, text and account context. Then:
+
+<!-- tool-input: YOUTUBE_CREATE_COMMENT_REPLY -->
+```json
+{"parentId":"<VERIFIED_PARENT_COMMENT_ID>","textOriginal":"<APPROVED_REPLY>"}
+```
+
+```sh
+postplus channels tools show YOUTUBE_CREATE_COMMENT_REPLY --json
+postplus channels tools run YOUTUBE_CREATE_COMMENT_REPLY --connection <own-youtube-connection-id> --input-file youtube-reply.json --operation-id <reply-operation-id> --wait --json > youtube-reply-result.json
+```
+
+Check `output.result.data.id` and `snippet.parentId`; fetch the returned ID
+with `YOUTUBE_LIST_COMMENTS` to confirm the reply. Platform moderation or a
+disabled-comment video can still prevent visibility; do not post a new
+top-level comment after a reply failure without separate authorization.
+
+For a custom thumbnail, verify that this connected channel owns the exact
+video, is eligible for custom thumbnails, and that the approved image is a
+platform-readable HTTPS URL meeting the tool's format and size limits. A
+`postplus-media://` reference is not a public `thumbnailUrl`:
+
+<!-- tool-input: YOUTUBE_UPDATE_THUMBNAIL -->
+```json
+{"videoId":"<OWNED_VIDEO_ID>","thumbnailUrl":"https://example.com/approved-thumbnail.jpg"}
+```
+
+```sh
+postplus channels tools show YOUTUBE_UPDATE_THUMBNAIL --json
+postplus channels tools run YOUTUBE_UPDATE_THUMBNAIL --connection <own-youtube-connection-id> --input-file youtube-thumbnail.json --operation-id <thumbnail-operation-id> --wait --json > youtube-thumbnail-result.json
+```
+
+Read the returned `items[]` and then `YOUTUBE_GET_VIDEO_DETAILS_BATCH` for
+that video with `parts:["snippet"]`; compare the actual thumbnail variants
+after processing. If the platform returns only an accepted update, report
+that narrower state.
+
+For a new playlist, confirm title, description and the user's chosen
+visibility. Its enum is lower-case `private`, `unlisted`, or `public`—unlike
+video `privacyStatus` values in the upload example:
+
+<!-- tool-input: YOUTUBE_CREATE_PLAYLIST -->
+```json
+{"title":"<APPROVED_TITLE>","description":"<APPROVED_DESCRIPTION>","privacyStatus":"private"}
+```
+
+```sh
+postplus channels tools show YOUTUBE_CREATE_PLAYLIST --json
+postplus channels tools run YOUTUBE_CREATE_PLAYLIST --connection <own-youtube-connection-id> --input-file youtube-playlist.json --operation-id <playlist-operation-id> --wait --json > youtube-playlist-result.json
+```
+
+Check the returned playlist `id`, `snippet` and `status`, then locate that ID
+with `YOUTUBE_LIST_USER_PLAYLISTS` while paging as needed. Creation does not
+add videos. If the user also asks to add one, verify the exact playlist and
+video, then inspect `YOUTUBE_ADD_VIDEO_TO_PLAYLIST` as a separate write.
+
 ## TikTok URL or file
 
 Use a `tiktok` connection. `TIKTOK_QUERY_CREATOR_INFO` checks the creator and
@@ -66,6 +126,22 @@ two-step protocol. Save the `publish_id`, then call
 `{"publish_id":"<returned publish ID>"}`. Distinguish submission,
 processing, success, and actual visibility; current account eligibility may
 block a route even when the catalog lists it.
+
+For an upload-only request, save `tiktok-file.json` as
+`{"publish":false,"privacy_level":"SELF_ONLY"}`. For an authorized direct
+post, set `publish:true`, add the approved `caption`, and use a privacy value
+permitted by `TIKTOK_QUERY_CREATOR_INFO`; no second publish command follows.
+`file_to_upload` is a required input supplied by the media map at execution
+time, not by this JSON. Inspect its current schema:
+
+```sh
+postplus channels tools show TIKTOK_UPLOAD_VIDEO --json
+postplus channels tools run TIKTOK_UPLOAD_VIDEO --connection <own-tiktok-connection-id> --input-file tiktok-file.json --media-map-file tiktok-file-map.json --operation-id <upload-operation-id> --wait --json > tiktok-file-result.json
+```
+
+In the first response inspect `output.result.data.upload_completed`,
+`publish_id` and `published`. Follow the returned `publish_id` with
+`TIKTOK_FETCH_PUBLISH_STATUS`; an upload-only result is not a live post.
 
 ```sh
 postplus channels tools show TIKTOK_PUBLISH_VIDEO --json

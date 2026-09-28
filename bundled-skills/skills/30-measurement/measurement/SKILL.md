@@ -35,7 +35,18 @@ present the returned authorization link and wait on that same connection with
 only after authorization is active. A connection does not prove which property
 is intended or that this account can read it.
 
-Before a report, inspect the exact tool with `postplus channels tools show
+Discover the relevant operations before choosing a report:
+
+```sh
+postplus channels tools list --toolkit google_analytics --query report --limit 20 --json
+postplus channels tools list --toolkit google_search_console --query analytics --limit 20 --json
+```
+
+Use `--offset` to continue a truncated tool list. This discovers toolkit
+operations, not which dimensions a particular GA4 property can combine or
+whether this connection may run them. For GA4, metadata and compatibility
+checks in [GA4](references/ga4.md) answer the property-specific question.
+Before a report, inspect the selected tool with `postplus channels tools show
 <tool-slug> --json` and use its current input schema. Submit each JSON request
 with `postplus channels tools run <tool-slug> --connection <connection-id>
 --input-file <request.json> --operation-id <new-id> --wait --json > <result.json>`.

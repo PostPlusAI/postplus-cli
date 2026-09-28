@@ -1,6 +1,6 @@
 ---
 name: channel-messaging
-description: Draft, send, schedule, or verify a message in a specified Discord channel, Slack conversation or thread, or WhatsApp Business customer conversation using the user's connected channel.
+description: Draft or act in a specified Discord, Slack, or WhatsApp Business conversation, including supported sends, Slack file shares or edits, and follow-up verification.
 metadata:
   postplus:
     familyId: channel-messaging
@@ -19,8 +19,8 @@ because a destination is available.
 
 | User's task | Read |
 | --- | --- |
-| Notify or reply in a specified Discord server channel with the connected bot | [Discord](references/discord.md) |
-| Send, reply in a thread, schedule, or check a Slack message | [Slack](references/slack.md) |
+| Find a bot-accessible Discord server/channel, notify, or create and use a thread | [Discord](references/discord.md) |
+| Send, reply in a thread, schedule, share a file, edit, or check a Slack message | [Slack](references/slack.md) |
 | Reply in an eligible customer conversation or send an approved template | [WhatsApp Business](references/whatsapp-business.md) |
 
 Resolve five facts before any send: **who** receives it, **what** will be

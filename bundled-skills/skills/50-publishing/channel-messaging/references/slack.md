@@ -82,3 +82,61 @@ In CLI `output.result.data`, check `ok`, `channel`, `post_at`, and
 schedule, not delivery; after the scheduled time, verify in the channel or
 thread. If any write result is unknown, query its *original* operation ID and
 read the intended destination instead of submitting again.
+
+## Upload one file or edit one existing message
+
+For “send this local file,” confirm the exact conversation, optional parent
+thread, filename, rights and accompanying comment. Use
+`SLACK_UPLOAD_OR_CREATE_A_FILE_IN_SLACK`; its `channels` field holds **one
+conversation ID**, not a channel name or comma-separated broadcast list.
+Leaving it out can leave the file private to the uploader. Upload the local
+file into PostPlus first:
+
+```sh
+postplus media-file upload --input-file ./report.pdf --output slack-media-result.json
+```
+
+Copy the complete `output.mediaReference` URI into `slack-media-map.json` as
+`{"file":"<output.mediaReference>"}`; do not add another
+`postplus-media://` prefix. The file slot belongs in the media map, not as an
+invented `s3key` in the request. Save `slack-file.json`:
+
+<!-- tool-input: SLACK_UPLOAD_OR_CREATE_A_FILE_IN_SLACK -->
+```json
+{"channels":"<CONFIRMED_CONVERSATION_ID>","thread_ts":"<EXACT_PARENT_TS>","filename":"report.pdf","initial_comment":"<APPROVED_COMMENT>"}
+```
+
+Omit `thread_ts` for a top-level share. `content` is a separate text-file
+route; do not provide it together with a mapped `file`.
+
+```sh
+postplus channels tools show SLACK_UPLOAD_OR_CREATE_A_FILE_IN_SLACK --json
+postplus channels tools run SLACK_UPLOAD_OR_CREATE_A_FILE_IN_SLACK --connection <SLACK_CONNECTION_UUID> --input-file slack-file.json --media-map-file slack-media-map.json --operation-id <FILE_OPERATION_UUID> --wait --json > slack-file-result.json
+```
+
+In `output.result.data`, require platform `ok`, inspect the returned `file`
+or `files[]` ID and sharing information, then use
+`SLACK_RETRIEVE_DETAILED_INFORMATION_ABOUT_A_FILE` with
+`{"file":"<RETURNED_FILE_ID>"}`. If channel/thread visibility cannot be
+confirmed, report the upload separately from the requested share. A
+`upload_too_large` or deprecated-method error is a real failure; do not
+silently replace this task with a remote-link post.
+
+For “correct the message I just sent,” identify the *same* conversation and
+full message `ts` from a readback. `SLACK_UPDATES_A_SLACK_MESSAGE` uses one
+visible content mode. A plain Markdown edit is:
+
+<!-- tool-input: SLACK_UPDATES_A_SLACK_MESSAGE -->
+```json
+{"channel":"<CONFIRMED_CONVERSATION_ID>","ts":"<EXACT_MESSAGE_TS>","markdown_text":"<APPROVED_REPLACEMENT>"}
+```
+
+```sh
+postplus channels tools show SLACK_UPDATES_A_SLACK_MESSAGE --json
+postplus channels tools run SLACK_UPDATES_A_SLACK_MESSAGE --connection <SLACK_CONNECTION_UUID> --input-file slack-edit.json --operation-id <EDIT_OPERATION_UUID> --wait --json > slack-edit-result.json
+```
+
+Check `output.result.data.ok`, `channel`, `ts` and returned `message`, then
+independently fetch the exact thread or conversation history to confirm the
+new text. Do not edit another author's message, change its target, or treat
+an unknown edit as permission to create a replacement post.

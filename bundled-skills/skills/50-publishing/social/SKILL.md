@@ -1,6 +1,6 @@
 ---
 name: social
-description: Plan and improve organic social content, study public conversations and competitors, prepare platform-specific drafts, and publish or reply through the user's connected social accounts when authorized.
+description: Plan and improve organic social content, study public conversations, and draft, publish, schedule, reply, or manage content through the user's connected social accounts when authorized.
 metadata:
   postplus:
     familyId: social
@@ -29,7 +29,7 @@ sales or infer a platform's current ranking rules from a few posts.
 | Rewrite an article, interview, or idea into platform-ready copy | [Writing and repurposing](references/writing-and-repurposing.md). |
 | Script a Reel, Short, or TikTok; analyze an existing video | [Short video](references/short-video.md). |
 | Outline a multi-panel visual story | [Carousel](references/carousel.md). |
-| Publish, reply, inspect a post, or use account performance | [Channel execution](references/channel-execution.md), then [Instagram/Facebook](references/instagram-facebook.md), [LinkedIn](references/linkedin.md), [YouTube/TikTok](references/youtube-tiktok.md), or [Reddit/Pinterest](references/reddit-pinterest.md). |
+| Publish, schedule a Page post, reply, update a YouTube thumbnail, manage a playlist, inspect a post, or use account performance | [Channel execution](references/channel-execution.md), then [Instagram/Facebook](references/instagram-facebook.md), [LinkedIn](references/linkedin.md), [YouTube/TikTok](references/youtube-tiktok.md), or [Reddit/Pinterest](references/reddit-pinterest.md). |
 
 ## Work from evidence to an action
 

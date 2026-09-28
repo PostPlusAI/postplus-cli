@@ -9,8 +9,39 @@ channel name alone is not an ID or proof of membership.
 ## Verify the destination and reply context
 
 Use the `discord` connection and `discordbot` toolkit. Inspect each tool with
-`postplus channels tools show <SLUG> --json`. If the user provided a channel
-ID, query its metadata before sending:
+`postplus channels tools show <SLUG> --json`. If the user gives a server or
+channel **name** rather than an ID, discover the bot's accessible servers:
+
+<!-- tool-input: DISCORDBOT_LIST_MY_GUILDS -->
+```json
+{"limit":100}
+```
+
+```sh
+postplus channels tools show DISCORDBOT_LIST_MY_GUILDS --json
+postplus channels tools run DISCORDBOT_LIST_MY_GUILDS --connection <DISCORD_CONNECTION_UUID> --input-file discord-guilds.json --wait --json > discord-guilds-result.json
+```
+
+Read `output.result.data.guilds[]`; page with `after` from the last returned
+guild ID until the intended server is found or coverage ends. Confirm its ID
+and name when similar servers exist. List that server's channels:
+
+<!-- tool-input: DISCORDBOT_LIST_GUILD_CHANNELS -->
+```json
+{"guild_id":"<CONFIRMED_GUILD_ID>"}
+```
+
+```sh
+postplus channels tools show DISCORDBOT_LIST_GUILD_CHANNELS --json
+postplus channels tools run DISCORDBOT_LIST_GUILD_CHANNELS --connection <DISCORD_CONNECTION_UUID> --input-file discord-channels.json --wait --json > discord-channels-result.json
+```
+
+Read `output.result.data.channels[]`; compare `id`, `guild_id`, `name`,
+`type` and parent category. This list does not include every thread. For an
+existing thread, use `DISCORDBOT_GET_ACTIVE_GUILD_THREADS` or the appropriate
+archived-thread list, then `DISCORDBOT_GET_CHANNEL` on its exact ID. Never
+substitute a same-named channel in another server. If the user provided a
+channel ID, query its metadata before sending:
 
 <!-- tool-input: DISCORDBOT_GET_CHANNEL -->
 ```json
@@ -31,6 +62,27 @@ channel:
 Confirm the parent content and author so a reply does not land under an
 unrelated discussion. A missing or inaccessible parent is a stop, not a
 reason to send a new top-level message.
+
+To **create a thread from one message**, verify that parent with
+`DISCORDBOT_GET_MESSAGE`, confirm a thread name and permission, then use:
+
+<!-- tool-input: DISCORDBOT_CREATE_THREAD_FROM_MESSAGE -->
+```json
+{"channel_id":"<CONFIRMED_PARENT_CHANNEL_ID>","message_id":"<CONFIRMED_PARENT_MESSAGE_ID>","name":"<APPROVED_THREAD_NAME>"}
+```
+
+```sh
+postplus channels tools show DISCORDBOT_CREATE_THREAD_FROM_MESSAGE --json
+postplus channels tools run DISCORDBOT_CREATE_THREAD_FROM_MESSAGE --connection <DISCORD_CONNECTION_UUID> --input-file discord-thread.json --operation-id <THREAD_OPERATION_UUID> --wait --json > discord-thread-result.json
+```
+
+Check the returned thread `id`, `guild_id`, and `parent_id`; independently
+read it with `DISCORDBOT_GET_CHANNEL`. To send *inside* the thread, put the
+returned thread ID in `DISCORDBOT_CREATE_MESSAGE.channel_id`, not the parent
+channel ID. A standalone thread uses `DISCORDBOT_CREATE_THREAD` with the
+confirmed parent `channel_id` and approved `name`; that is a different write.
+If thread creation is unknown, check its original operation ID and look for
+the thread before attempting another creation.
 
 ## Send the requested text
 

@@ -1,6 +1,6 @@
 # TikTok Ads: scoped performance reviews
 
-Use this reference for GMV Max, Smart+ material, ad benchmark, video-performance reviews, and supported Smart+ delivery changes. These are distinct report families. The current channel tools do not provide a general integrated advertiser report, so they cannot produce a complete ordinary TikTok account daily report. For that request, describe the missing coverage and use an authorized Ads Manager export or browser inspection if available.
+Use this reference for GMV Max, Smart+ material, ad benchmark, video-performance reviews, supported Smart+ delivery changes, and the specific campaign and budget operations below. These are distinct product families. The current channel tools do not provide a general integrated advertiser report or a general manual-campaign creation tool. For those requests, describe the missing coverage and use an authorized Ads Manager export or browser inspection if available.
 
 Read [channel execution](channel-execution.md) for connections, target binding, operation status, and write authorization. The channel is `tiktok-ads`; the tool directory is `tiktok_ads`. Organic TikTok research does not expose the advertiser's account metrics. `B` below is `output.result.data` in the first successful CLI response.
 
@@ -155,7 +155,107 @@ postplus channels tools run TIKTOK_ADS_SET_SMART_PLUS_DELIVERY_STATUS --connecti
 
 Inspect `B.code`, `B.message`, and any per-resource outcome in `B.data`; do not infer that every requested ID changed from an empty object. Independently read each same-type resource through its corresponding list tool with the precise ID filters and verify `operation_status`. Keep delivery/review state separate. An unknown operation is resolved by status lookup and readback, not a new write identity. Enabling later cannot undo missed delivery while disabled.
 
-This is not a general manual-campaign status tool. Do not use a parent campaign to approximate an unsupported child change. Do not repurpose Business Center advertiser-budget controls as campaign budgets. Smart+ creation, when separately requested, needs its own tool-specific prerequisites and disabled initial state; it is not part of this status recipe.
+This is not a general manual-campaign status tool. Do not use a parent campaign to approximate an unsupported child change. Do not repurpose Business Center advertiser-budget controls as campaign budgets.
+
+## Create a reviewed Smart+ campaign
+
+`TIKTOK_ADS_CREATE_SMART_PLUS_CAMPAIGN` creates a **disabled** Smart+ campaign;
+it is not a general manual-campaign creator. Confirm the advertiser, objective,
+name, destination, applicable app/catalog prerequisites, and any campaign
+budget with the user. Use an actual `objective_type` supported by `show`; do
+not invent a generic conversion objective. This minimal lead-generation
+example omits optional budget because an unspecified amount is not spending
+authorization:
+
+<!-- tool-input: TIKTOK_ADS_CREATE_SMART_PLUS_CAMPAIGN -->
+```json
+{"advertiser_id":"7000000000000000001","campaign_name":"<approved name>","objective_type":"LEAD_GENERATION","operation_status":"DISABLE","request_id":"<stable provider request ID>"}
+```
+
+```sh
+postplus channels tools show TIKTOK_ADS_CREATE_SMART_PLUS_CAMPAIGN --json
+postplus channels tools run TIKTOK_ADS_CREATE_SMART_PLUS_CAMPAIGN --connection "<connection-id>" --target-id 7000000000000000001 --target-path advertiser_id --input-file tiktok-smart-create.json --operation-id "<create-operation-id>" --wait --json > tiktok-smart-create-result.json
+```
+
+The provider `request_id` and CLI `--operation-id` are distinct; retain both
+for this one logical creation. Inspect the first response's `B.request_id` and
+open `B.data` for the returned campaign ID and state. Independently call
+`TIKTOK_ADS_LIST_SMART_PLUS_CAMPAIGNS` with the same advertiser and a precise
+`filtering.campaign_ids` when an ID is returned. If there is no ID, a name
+search may be ambiguous: do not claim creation verified or issue another
+create under a new ID. Disabled creation is not authority to enable the
+campaign; enabling is a separate action with its own spending consequence.
+
+GMV Max creation is a different task and requires a verified Shop. The fixed
+`TIKTOK_ADS_CREATE_GMV_MAX_CAMPAIGN` input requires `advertiser_id`,
+`campaign_name`, `store_id`, `store_authorized_bc_id`, `shopping_ads_type`
+(`PRODUCT` or `LIVE`), `optimization_goal`, `deep_bid_type`, `schedule_type`,
+`schedule_start_time`, and a stable provider `request_id`. For the current
+contract, `optimization_goal` is `VALUE` and `deep_bid_type` is
+`VO_MIN_ROAS`; budget, ROAS bid, product selection and schedule end depend on
+the actual Shop and user-approved plan. For a verified PRODUCT Shop campaign,
+the schema shape is:
+
+<!-- tool-input: TIKTOK_ADS_CREATE_GMV_MAX_CAMPAIGN -->
+```json
+{"advertiser_id":"7000000000000000001","campaign_name":"<approved name>","store_id":"7000000000000000002","store_authorized_bc_id":"7000000000000000005","shopping_ads_type":"PRODUCT","optimization_goal":"VALUE","deep_bid_type":"VO_MIN_ROAS","schedule_type":"SCHEDULE_START_END","schedule_start_time":"2026-10-01 00:00:00","schedule_end_time":"2026-10-08 00:00:00","request_id":"<stable provider request ID>"}
+```
+
+These dates and IDs are synthetic; replace them with provider-valid times in
+the advertiser's timezone and actual authorized Shop identities. Inspect
+`postplus channels tools show TIKTOK_ADS_CREATE_GMV_MAX_CAMPAIGN --json`
+before preparing any budget, bid, product or identity fields. Unlike Smart+
+creation, this tool does not guarantee a disabled initial state. Do not
+submit until the intended initial delivery/spend behavior, Shop authorization,
+all required values and the user's approval are established. Then preserve
+one provider `request_id` and one CLI operation ID:
+
+```sh
+postplus channels tools show TIKTOK_ADS_CREATE_GMV_MAX_CAMPAIGN --json
+postplus channels tools run TIKTOK_ADS_CREATE_GMV_MAX_CAMPAIGN --connection "<connection-id>" --target-id 7000000000000000001 --target-path advertiser_id --input-file tiktok-gmv-create.json --operation-id "<gmv-create-operation-id>" --wait --json > tiktok-gmv-create-result.json
+```
+
+If the response returns an ID, use
+`TIKTOK_ADS_GET_GMV_MAX_CAMPAIGN_INFO` with that `campaign_id` and advertiser
+for an independent read; a create receipt alone is not evidence of delivery.
+
+## Change the budget of an exact Upgraded Smart+ ad group
+
+For “change this ad group's budget,” first read the exact ID with
+`TIKTOK_ADS_LIST_SMART_PLUS_ADGROUPS` using `advertiser_id` and
+`adgroup_ids`. Confirm campaign ownership, `budget_optimize_on`, current
+budget mode/amount, account currency and the requested new total. The pinned
+`TIKTOK_ADS_UPDATE_SMART_PLUS_ADGROUP_BUDGETS` has two different branches:
+`budget` changes an **immediate total budget**; `scheduled_budget` changes a
+**next-day daily budget**. Do not swap them. For CBO, scheduled changes have
+additional min/max prerequisites. A Business Center's
+`TIKTOK_ADS_UPDATE_ADVERTISER_BUDGETS` changes account-level spend controls,
+not this ad group's budget. It requires a verified Business Center,
+`advertiser_budgets[]` entries, `budget_mode`, and a specified
+`budget_update_type` such as `UPDATE`; `RESET`, `INCREMENTAL_UPDATE`, and
+`ONE_CLICK_SET` have different consequences. Only choose that tool for an
+explicit **advertiser-level** spend-control request after reading the current
+control and approved account-level amount. If the current value or unit cannot
+be verified, stop rather than substitute an ad-group update.
+
+After the user authorizes the exact amount and consequence, save a one-object
+request. The number below is only a schema example, not a recommended amount:
+
+<!-- tool-input: TIKTOK_ADS_UPDATE_SMART_PLUS_ADGROUP_BUDGETS -->
+```json
+{"advertiser_id":"7000000000000000001","budget":[{"adgroup_id":"7000000000000000004","budget":100}]}
+```
+
+```sh
+postplus channels tools show TIKTOK_ADS_UPDATE_SMART_PLUS_ADGROUP_BUDGETS --json
+postplus channels tools run TIKTOK_ADS_UPDATE_SMART_PLUS_ADGROUP_BUDGETS --connection "<connection-id>" --target-id 7000000000000000004 --target-path budget.0.adgroup_id --input-file tiktok-smart-budget.json --operation-id "<budget-operation-id>" --wait --json > tiktok-smart-budget-result.json
+```
+
+Inspect every returned result inside the open `B.data`, then re-read that
+same ad group with `TIKTOK_ADS_LIST_SMART_PLUS_ADGROUPS`. Report configured
+budget and effective delivery separately. A changed budget can alter spend;
+an unknown result must be resolved under the original operation ID and exact
+ad group, never by automatically sending a second update.
 
 ## Review output and remaining checks
 
