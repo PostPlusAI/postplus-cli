@@ -37,7 +37,9 @@ account connection.
 | Google Search diagnosis, search terms, RSA submission, campaign or budget changes | [Google Ads](references/google-ads.md). |
 | Meta delivery, creative performance, lead costs, supported campaign changes | [Meta Ads](references/meta-ads.md). |
 | TikTok GMV Max, Smart+ material or video analysis | [TikTok Ads](references/tiktok-ads.md); preserve the specialty report's actual scope. |
-| Missing or conflicting conversions, website measurement | [Measurement](references/measurement.md). |
+| Reddit Ads account/campaign discovery, dated reports, or an exact campaign pause/resume | [Reddit Ads](references/reddit-ads.md). |
+| Pinterest Ads advertiser/campaign reports, or an exact campaign pause/resume or rename | [Pinterest Ads](references/pinterest-ads.md). |
+| Missing or conflicting ad conversions, campaign tracking or launch measurement | [Ad measurement](references/measurement.md); standalone GA4 and Search Console analysis belongs to the Measurement skill. |
 | Audience conditions, customer lists, LinkedIn audience estimates | [Audience planning](references/audience-planning.md). |
 | Competitor ads, customer language, objections, source evidence | [Creative research](references/creative-research.md); reuse the matching platform research Skill. |
 | Ad angles, copy variants, Google RSA text | [Ad copy](references/ad-copy.md); reuse existing media-production Skills for actual assets. |

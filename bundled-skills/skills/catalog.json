@@ -140,6 +140,17 @@
       "supportedModels": []
     },
     {
+      "familyId": "channel-messaging",
+      "familyName": "Channel Messaging",
+      "name": "channel-messaging",
+      "description": "Draft, send, schedule, or verify a message in a specified Discord channel, Slack conversation or thread, or WhatsApp Business customer conversation using the user's connected channel.",
+      "category": "publish",
+      "example": "Reply in this Slack thread, or prepare a WhatsApp reply for the named customer.",
+      "path": "skills/50-publishing/channel-messaging/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
       "familyId": "media-production",
       "familyName": "Media and Creative Production",
       "name": "commercial-ad",
@@ -366,6 +377,17 @@
       "supportedModels": []
     },
     {
+      "familyId": "measurement",
+      "familyName": "Website and Search Measurement",
+      "name": "measurement",
+      "description": "Investigate website behavior in GA4, Google search visibility in Search Console, and differences between those reports and ad-platform results using the user's connected properties.",
+      "category": "analyze",
+      "example": "Explain the change in organic search clicks and compare it with GA4 sessions for the same site.",
+      "path": "skills/30-measurement/measurement/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
       "familyId": "media-production",
       "familyName": "Media and Creative Production",
       "name": "media-analysis",
@@ -459,6 +481,17 @@
       "category": "analyze",
       "example": "Extract reusable visual and hook rules from these reference frames.",
       "path": "skills/10-routing/reference-decode/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "social",
+      "familyName": "Organic Social",
+      "name": "social",
+      "description": "Plan and improve organic social content, study public conversations and competitors, prepare platform-specific drafts, and publish or reply through the user's connected social accounts when authorized.",
+      "category": "publish",
+      "example": "Turn this article into a LinkedIn organization post, then publish it to my connected page.",
+      "path": "skills/50-publishing/social/SKILL.md",
       "status": "released",
       "supportedModels": []
     },

@@ -5,7 +5,7 @@
     {
       "name": "ads",
       "path": "skills/60-ads/ads/SKILL.md",
-      "contentHash": "6cbb5fb6e419c8de4e55aa464c649dd753d5ede6a29655fd5f5ac9c71987a734"
+      "contentHash": "15fbf17c5bf62650d8483bb2f6bfb2b5f1d88a3c25c892edb01ab5b8af3247aa"
     },
     {
       "name": "audio-generation",
@@ -36,6 +36,11 @@
       "name": "cartoon-ad",
       "path": "skills/40-creative/cartoon-ad/SKILL.md",
       "contentHash": "78d102424eb58e391318353a6277264fbfd11256075ad9e994ab83f095336b9c"
+    },
+    {
+      "name": "channel-messaging",
+      "path": "skills/50-publishing/channel-messaging/SKILL.md",
+      "contentHash": "e38fda09a1f61cb0b3cb8bd75a1572fb310841fa83576b3dda9fbcf890343e59"
     },
     {
       "name": "commercial-ad",
@@ -78,6 +83,11 @@
       "contentHash": "2f5077c7ff50899edd86b4732fa69daf988b1b5366141ef863a651a48020f4fa"
     },
     {
+      "name": "measurement",
+      "path": "skills/30-measurement/measurement/SKILL.md",
+      "contentHash": "baaa39939029a04f4a92647cadd89364b7f43497235837f804fa39b3516c6f87"
+    },
+    {
       "name": "media-analysis",
       "path": "skills/40-creative/media-analysis/SKILL.md",
       "contentHash": "1a947f80e8f5ea66aa43b8aef971de93d15f7613e8f55ca4c408621501aaea14"
@@ -101,6 +111,11 @@
       "name": "reference-decode",
       "path": "skills/10-routing/reference-decode/SKILL.md",
       "contentHash": "18c14aeb7575a6de1ce5ee1229f71eb1c7fa67f40914534f372848061305fead"
+    },
+    {
+      "name": "social",
+      "path": "skills/50-publishing/social/SKILL.md",
+      "contentHash": "98ed0fc0024dbbe1ca3719a0303f96c0082ba5d49371e0ea6dbc6234d69c3f3f"
     },
     {
       "name": "street-interview-ad",

@@ -34,6 +34,8 @@ change an ad.
 | Google Analytics | ga4 | google_analytics |
 | LinkedIn | linkedin | linkedin |
 | TikTok Ads | tiktok-ads | tiktok_ads |
+| Reddit Ads | reddit-ads | reddit_ads |
+| Pinterest Ads | pinterest-ads | pinterest_ads |
 
 `$ADS_CONNECTION` is a PostPlus connection UUID. Customer, advertiser, campaign,
 pixel, and property IDs are different values inside the tool input. Never use
