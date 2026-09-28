@@ -55,7 +55,13 @@ test('full discovery lists every catalog member once; summary keeps only group e
   const summary = formatSkillDiscovery(catalog, 'summary');
   for (const skill of catalog.skills) assert.ok(!summary.includes(`  ${skill.skillId}: `));
   const groupLines = summary.split('\n').filter(line => line.startsWith('- '));
-  assert.deepEqual(groupLines, Object.values(catalog.categories!).map(category => `- ${category.title}`));
+  const populatedCategories = new Set(catalog.skills.map((skill) => skill.category));
+  assert.deepEqual(
+    groupLines,
+    Object.entries(catalog.categories!)
+      .filter(([key]) => populatedCategories.has(key))
+      .map(([, category]) => `- ${category.title}`),
+  );
   assert.equal(groupLines.at(-1), `- ${catalog.categories!.workspace!.title}`);
   assert.ok(summary.split('\n').filter(line => line.startsWith('  Try:')).length <= 6);
   const firstOnly = { ...catalog, skills: catalog.skills.filter((skill, index, all) => all.findIndex(candidate => candidate.category === skill.category) === index) };

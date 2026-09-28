@@ -49,6 +49,17 @@
   },
   "skills": [
     {
+      "familyId": "ads",
+      "familyName": "Paid Advertising",
+      "name": "ads",
+      "description": "Plan paid campaigns, research ad angles, write ad copy, report and diagnose account performance, check conversion tracking, and carry out supported account changes within the user's authorization.",
+      "category": "advertise",
+      "example": "Review last week's ad results, explain the next tests, and prepare an authorized account change.",
+      "path": "skills/60-ads/ads/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
       "familyId": "routing-contracts",
       "familyName": "Routing & Contracts",
       "name": "audio-generation",
@@ -450,25 +461,6 @@
       "path": "skills/10-routing/reference-decode/SKILL.md",
       "status": "released",
       "supportedModels": []
-    },
-    {
-      "familyId": "workspace-publishing",
-      "familyName": "Workspace, Publishing, and Meta",
-      "name": "social-media-publisher",
-      "description": "Prepare and manage social publishing requests through PostPlus, with explicit approval before publishing or other account changes.",
-      "category": "publish",
-      "example": "Prepare these posts for our connected channels and show me what needs approval.",
-      "path": "skills/50-publishing/social-media-publisher/SKILL.md",
-      "status": "released",
-      "supportedModels": [],
-      "requirements": {
-        "accountConnections": [
-          "social-publishing-workspace"
-        ],
-        "capabilities": [
-          "publishing"
-        ]
-      }
     },
     {
       "familyId": "media-production",

@@ -3,6 +3,11 @@
   "releaseId": "skills-2026-09-18.1-cli-mechanism-hardening",
   "skills": [
     {
+      "name": "ads",
+      "path": "skills/60-ads/ads/SKILL.md",
+      "contentHash": "6cbb5fb6e419c8de4e55aa464c649dd753d5ede6a29655fd5f5ac9c71987a734"
+    },
+    {
       "name": "audio-generation",
       "path": "skills/10-routing/audio-generation/SKILL.md",
       "contentHash": "264ba117ba758c51b13aeb801cde1b5ce518d3a18ec26e17a13f6a3b0b57cfc5"
@@ -96,11 +101,6 @@
       "name": "reference-decode",
       "path": "skills/10-routing/reference-decode/SKILL.md",
       "contentHash": "18c14aeb7575a6de1ce5ee1229f71eb1c7fa67f40914534f372848061305fead"
-    },
-    {
-      "name": "social-media-publisher",
-      "path": "skills/50-publishing/social-media-publisher/SKILL.md",
-      "contentHash": "15130aa85c048280a852810ec51e86225ed52a5734d9879909780f0c9fb8f24c"
     },
     {
       "name": "street-interview-ad",
