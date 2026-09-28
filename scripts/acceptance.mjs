@@ -113,7 +113,7 @@ async function runCapture(command, args, options = {}) {
 
       reject(
         new Error(
-          `Command failed (${code ?? 'unknown'}): ${command} ${args.join(' ')}\n${Buffer.concat(stderr).toString('utf8')}`,
+          `Command failed (${code ?? 'unknown'}): ${command} ${args.join(' ')}\n${options.includeStdoutOnError ? Buffer.concat(stdout).toString('utf8') : ''}${Buffer.concat(stderr).toString('utf8')}`,
         ),
       );
     });
@@ -212,18 +212,14 @@ try {
         'validate',
         '--json',
       ],
-      { env: configEnv },
+      { env: configEnv, includeStdoutOnError: true },
     );
   } catch (error) {
     mismatchFailure = error instanceof Error ? error.message : String(error);
   }
   if (
-    !mismatchFailure.includes(
-      'session belongs to https://staging.postplus.example.com',
-    ) ||
-    !mismatchFailure.includes(
-      'this process targets https://postplus.example.com',
-    )
+    !mismatchFailure.includes('session belongs to [redacted-url]') ||
+    !mismatchFailure.includes('this process targets [redacted-url]')
   ) {
     throw new Error(
       'A staging-bound session was not rejected before production validation.',

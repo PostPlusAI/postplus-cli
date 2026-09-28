@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { HostedProductRequestError } from './hosted-command-runtime.js';
 import { runWorkspaceCommand } from './workspace-commands.js';
 import { runChannelsCommand } from './channel-commands.js';
 import { formatSkillDiscovery } from './skill-discovery.js';
@@ -788,6 +789,12 @@ runMainWithRecovery().then(() => {
   if (process.exitCode === 2 && process.argv[2] === 'channels') return;
   if (process.exitCode && process.exitCode !== 0) process.exitCode = 1;
 }).catch((error: unknown) => {
+  if (error instanceof HostedProductRequestError && ['subscription_required', 'postplus_cli_subscription_required'].includes(error.productError.code ?? '')) {
+    if (process.argv.includes('--json')) process.stdout.write(`${JSON.stringify({ error: error.productError }, null, 2)}\n`);
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
   writeFailure(error, { automaticRecovery: process.env[POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV] === '1', json: process.argv.includes('--json'), stage: process.argv[2] ?? 'command', helpCommand: helpCommandForArgs(process.argv.slice(2)) });
   process.exitCode = 1;
 });

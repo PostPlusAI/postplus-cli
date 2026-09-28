@@ -2,6 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
+import { HostedProductRequestError, readHostedProductError } from './hosted-command-runtime.js';
 import { runChannelToolCommand } from './channel-tool-commands.js';
 
 export function parseChannelCommand(args: string[]) {
@@ -104,14 +105,7 @@ export async function runChannelsCommand(args: string[]): Promise<number> {
     );
   }
   if (!response.ok) {
-    const message =
-      payload &&
-      typeof payload === 'object' &&
-      'error' in payload &&
-      typeof payload.error === 'string'
-        ? payload.error
-        : 'Channel request failed. Check its status before retrying.';
-    throw new Error(message);
+    throw new HostedProductRequestError(readHostedProductError(payload), response.status);
   }
   // JSON is also the lossless text representation until per-action renderers exist.
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);

@@ -266,7 +266,8 @@ async function runHostedCommand(input: {
     }
 
     if (error instanceof HostedProductRequestError) {
-      const exhausted = process.env[POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV] === '1';
+      const subscription = ['subscription_required', 'postplus_cli_subscription_required'].includes(error.productError.code ?? '');
+      const exhausted = process.env[POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV] === '1' && !subscription;
       const { userAction, ...productFacts } = error.productError;
       const stopped = exhausted ? stopAutomaticRecovery(toFailureFact(error.productError, {service:'postplus-cloud'})) : null;
       const preserve = shouldPreserveHostedOutput(input.preserveOutputOnProductError);
@@ -281,7 +282,7 @@ async function runHostedCommand(input: {
       if (preserve) {
         if (input.json) await writeResult({ error: productError }, null, true);
         if (!stopped) writePreservedOutputRecovery(input.preservedOutputRecovery);
-      } else if (!stopped || input.outputPath || input.json) {
+      } else if ((!subscription && !stopped) || input.outputPath || input.json) {
         await writeResult({ error: productError }, input.outputPath, input.json);
       }
       process.stderr.write(`${stopped ? formatFailure(stopped) : error.message}\n`);
@@ -592,9 +593,17 @@ function readHostedProductErrorUserAction(
 
 // Terminal message that keeps the stable code, owning layer, and operation id
 // visible next to the human-readable message so a failed run is locatable.
-function formatHostedProductErrorMessage(
+export function formatHostedProductErrorMessage(
   productError: HostedProductError,
 ): string {
+  if (productError.code === 'subscription_required' || productError.code === 'postplus_cli_subscription_required') {
+    const action = productError.userAction;
+    return [
+      productError.message,
+      action ? (typeof action === 'string' ? action : `${action.label}: ${action.url}`) : 'Open Billing in your PostPlus workspace to view plans.',
+      'Once your subscription is ready, return here and retry this command. If you have a saved task, resume that task instead.',
+    ].join('\n\n');
+  }
   const locator = [
     productError.code ? `code=${productError.code}` : null,
     productError.layer ? `layer=${productError.layer}` : null,
