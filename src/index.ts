@@ -124,8 +124,6 @@ Usage:
   postplus media poll --handle <run-id> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--debug] [--json] [--output <result.json>]
   postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
   postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
-  postplus publish schema [--json]
-  postplus publish <operation> --request <input.json> [--output <result.json>]
   postplus workflow list|show|runs|run-show|create|propose|save|quote|launch ... [--json]
   postplus workflow help
   postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <credits>]
@@ -676,12 +674,6 @@ async function main(): Promise<void> {
     case 'media-file':
       process.exitCode = (await runMediaFileCommand(rest)) as number;
       return;
-    case 'publish':
-      process.exitCode = (await runHostedDomainCommand(
-        'publish',
-        rest,
-      )) as number;
-      return;
     case 'workflow':
       process.exitCode = await runWorkflowCommand(rest);
       return;
@@ -875,7 +867,6 @@ function helpCommandForArgs(args: string[]): string {
     auth: ['login', 'refresh', 'revoke', 'status', 'validate', 'logout'], skills: ['verify'], quote: ['confirm'],
     runs: ['list', 'show'], studio: ['init', 'open', 'status'], workflow: ['list', 'show', 'runs', 'run-show', 'create', 'propose', 'save', 'quote', 'launch'],
     research: ['schema', 'run'], media: ['schema', 'poll', 'prepare', 'estimate', ...buildVerbTargetIndex('media').keys()],
-    publish: ['schema', ...[...buildVerbTargetIndex('publish').values()].flatMap((targets) => [...targets.keys()])],
     'media-file': ['upload', 'download'],
   };
   if (subcommand && children[command]?.includes(subcommand)) {

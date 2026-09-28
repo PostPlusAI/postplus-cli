@@ -5,7 +5,7 @@
 // defaults, or the intent/default/runner-managed field classification.
 import { HOSTED_EXECUTION_MANIFESTS } from './generated/hosted-execution-manifest.generated.js';
 
-export type HostedDomain = 'media' | 'publish' | 'research';
+export type HostedDomain = 'media' | 'research';
 
 export type ManifestFieldClass = 'intent' | 'default' | 'runner-managed';
 
@@ -57,18 +57,9 @@ export type ManifestSource = {
   requiredAnyOf?: readonly string[];
 };
 
-export type ManifestOperation = {
-  operation: string;
-  // read = the Web host routes the op as GET (non-side-effecting); write =
-  // anything else. Projected from the Web SOCIAL_PUBLISHING_OPERATION_METHODS
-  // table so approval/effect gates never hand-maintain a publish read list.
-  effect?: 'read' | 'write';
-};
-
 // One execution binding from the generated manifest. media-generation entries
 // carry `endpoints`; video-analysis entries carry `models`; hosted-collection
-// entries carry `collections`; public-content-collection entries carry `sources`;
-// social-publishing entries carry `operations`.
+// entries carry `collections`; public-content-collection entries carry `sources`.
 export type ManifestEntry = {
   skill: string;
   mode?: 'cli-runner';
@@ -77,9 +68,7 @@ export type ManifestEntry = {
   domain: HostedDomain;
   capability: string;
   // Effect of the binding's SUBMIT form. The four provider-launching
-  // capabilities project `spend` (credits reserved at submit); social-publishing
-  // classifies per operation (see ManifestOperation.effect) and carries no
-  // binding-level effect.
+  // capabilities project `spend` (credits reserved at submit).
   effect?: 'read' | 'spend' | 'write' | 'destructive';
   endpointKeys?: readonly string[];
   modelKeys?: readonly string[];
@@ -87,7 +76,6 @@ export type ManifestEntry = {
   models?: readonly ManifestModel[];
   collections?: readonly ManifestCollection[];
   sources?: readonly ManifestSource[];
-  operations?: readonly ManifestOperation[];
 };
 
 const HOSTED_EXECUTION_MANIFEST_INDEX: Readonly<
@@ -96,9 +84,8 @@ const HOSTED_EXECUTION_MANIFEST_INDEX: Readonly<
 
 // A resolved (verb, target) entry. media-generation resolves to an `endpoint`;
 // video-analysis resolves to a `model`; hosted-collection resolves to a
-// `collection`; public-content-collection resolves to a `source`; the publish
-// operation is both the subcommand and the target. capability discriminates them
-// so callers route to the right input surface.
+// `collection`; public-content-collection resolves to a `source`. Capability
+// discriminates them so callers route to the right input surface.
 export type ResolvedVerbTarget = {
   skill: string;
   capability: string;
@@ -107,7 +94,6 @@ export type ResolvedVerbTarget = {
   model?: ManifestModel;
   collection?: ManifestCollection;
   source?: ManifestSource;
-  operation?: string;
 };
 
 export function allManifestEntries(): ManifestEntry[] {
@@ -160,13 +146,6 @@ export function buildVerbTargetIndex(
       continue;
     }
 
-    if (entry.capability === 'social-publishing') {
-      for (const { operation } of entry.operations ?? []) {
-        targets.set(operation, { ...base, operation });
-      }
-      continue;
-    }
-
     for (const endpoint of entry.endpoints ?? []) {
       targets.set(endpoint.endpointKey, { ...base, endpoint });
     }
@@ -203,9 +182,6 @@ export function manifestTargetKeys(
     }
     for (const source of entry.sources ?? []) {
       keys.add(source.routeKey);
-    }
-    for (const operation of entry.operations ?? []) {
-      keys.add(operation.operation);
     }
   }
 

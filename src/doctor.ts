@@ -668,9 +668,6 @@ function publicCapabilityMatchesIdentifier(
   if (capability === 'media') {
     return ['media-file', 'media-generation', 'video-analysis'].includes(family);
   }
-  if (capability === 'publishing') {
-    return family === 'social-publishing';
-  }
   return false;
 }
 
@@ -774,13 +771,6 @@ function collectMissingHostedRequirementLabels(
 
 function identifierMatchesKey(identifier: string, key: string): boolean {
   if (identifier === key) {
-    return true;
-  }
-
-  if (
-    key === 'social-publishing-workspace' &&
-    identifierMatchesCapability(identifier, 'social-publishing')
-  ) {
     return true;
   }
 

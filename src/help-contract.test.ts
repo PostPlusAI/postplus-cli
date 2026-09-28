@@ -8,12 +8,12 @@ import test from 'node:test';
 import { buildVerbTargetIndex } from './hosted-manifest-index.js';
 
 const exec = promisify(execFile);
-const paths: string[][] = [[], ...['doctor', 'status', 'list', 'version', 'install', 'update', 'uninstall', 'auth', 'skills', 'quote', 'balance', 'runs', 'studio', 'workflow', 'research', 'media', 'publish', 'media-file'].map(x => [x]),
+const paths: string[][] = [[], ...['doctor', 'status', 'list', 'version', 'install', 'update', 'uninstall', 'auth', 'skills', 'quote', 'balance', 'runs', 'studio', 'workflow', 'research', 'media', 'media-file'].map(x => [x]),
   ...['login', 'refresh', 'revoke', 'status', 'validate', 'logout'].map(x => ['auth', x]),
   ['skills', 'verify'], ['quote', 'confirm'], ['runs', 'list'], ['runs', 'show'],
   ...['init', 'open', 'status'].map(x => ['studio', x]),
   ...['list', 'show', 'runs', 'run-show', 'create', 'propose', 'save', 'quote', 'launch'].map(x => ['workflow', x]),
-  ...['research', 'media', 'publish'].map(x => [x, 'schema']),
+  ...['research', 'media'].map(x => [x, 'schema']),
   ['research', 'run'], ['media', 'estimate'], ['media', 'poll'], ['media', 'prepare'],
   ['media-file', 'upload'], ['media-file', 'download'],
 ];
@@ -23,9 +23,6 @@ for (const [verb, targets] of buildVerbTargetIndex('media')) {
 }
 for (const targets of buildVerbTargetIndex('research').values()) {
   for (const target of targets.keys()) paths.push(['research', 'run', target]);
-}
-for (const targets of buildVerbTargetIndex('publish').values()) {
-  for (const target of targets.keys()) paths.push(['publish', target]);
 }
 
 test('every public help path and alias is offline and leaves account state untouched', async () => {
@@ -98,7 +95,7 @@ test('invalid options suggest the nearest valid command help and diagnostics exp
 
 
 test('unknown public subcommands return one JSON failure and a valid family help action', async () => {
-  for (const command of ['publish','media','research','workflow','studio','runs','media-file']) {
+  for (const command of ['media','research','workflow','studio','runs','media-file']) {
     await assert.rejects(exec(process.execPath,['--import','tsx','src/index.ts',command,'not-a-command','--json']), (error:any) => {
       const payload=JSON.parse(error.stdout);
       assert.equal(payload.ok,false,command);
@@ -107,6 +104,15 @@ test('unknown public subcommands return one JSON failure and a valid family help
       return true;
     });
   }
+});
+
+test('retired publish command is absent from the public CLI', async () => {
+  await assert.rejects(exec(process.execPath, ['--import', 'tsx', 'src/index.ts', 'publish', '--json']), (error: any) => {
+    const payload = JSON.parse(error.stdout);
+    assert.equal(payload.error.code, 'postplus_unknown_command');
+    assert.equal(payload.error.action, 'Run postplus --help.');
+    return true;
+  });
 });
 
 

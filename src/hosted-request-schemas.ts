@@ -74,7 +74,6 @@ type HostedRequestSchemaReport = {
   routeKeys?: string[];
   endpointKeys?: string[];
   modelKeys?: string[];
-  operations?: string[];
   selectedRouteKey?: string;
   selectedEndpointKey?: string;
   notes: string[];
@@ -86,8 +85,7 @@ type HostedRequestSchemaReport = {
   }>;
   // Per-endpoint field contracts (media domain), or per-target field contract for
   // the selected endpoint. Empty for capabilities whose request body is an opaque
-  // JSON object the agent authors verbatim (research collection, video analysis,
-  // social publishing).
+  // JSON object the agent authors verbatim (research collection, video analysis).
   endpoints?: EndpointContract[];
   routes?: ResearchRouteContract[];
 };
@@ -250,8 +248,6 @@ export function buildHostedRequestSchemaReport(input: {
       return buildResearchSchemaReport(input.routeKey ?? null);
     case 'media':
       return buildMediaSchemaReport(input.endpointKey ?? null);
-    case 'publish':
-      return buildPublishSchemaReport();
   }
 }
 
@@ -416,46 +412,4 @@ function requireMediaBinding(endpointKey: string): MediaGenerationBinding {
     );
   }
   return binding;
-}
-
-function buildPublishSchemaReport(): HostedRequestSchemaReport {
-  const operations = manifestTargetKeys('publish', 'social-publishing');
-
-  return {
-    schemaVersion: 1,
-    domain: 'publish',
-    command:
-      'postplus publish <operation> --request <input.json> --output <result.json>',
-    description: 'Schema for files passed to hosted publish commands.',
-    operations,
-    notes: [
-      'The operation is BOTH the CLI subcommand and the target; the operation-specific publishing payload goes under input in --request <file>.',
-      'Side-effecting operations may surface a quote-confirmation challenge; replay the fixed confirm/retry commands.',
-    ],
-    schemas: [
-      {
-        id: 'social-publishing.request',
-        description: 'Run a hosted social publishing operation.',
-        required: ['capability', 'operation', 'input'],
-        jsonSchema: {
-          additionalProperties: false,
-          properties: {
-            capability: { const: 'social-publishing' },
-            input: JSON_OBJECT_SCHEMA,
-            operation: {
-              enum: operations,
-              type: 'string',
-            },
-            operationId: OPERATION_ID_SCHEMA,
-            quoteConfirmationToken: {
-              minLength: 1,
-              type: 'string',
-            },
-          },
-          required: ['capability', 'operation', 'input'],
-          type: 'object',
-        },
-      },
-    ],
-  };
 }

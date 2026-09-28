@@ -18,7 +18,7 @@ test('nested hosted help returns before authentication, requests, input reads, o
         ...['list', 'show', 'runs', 'run-show', 'create', 'propose', 'save', 'quote', 'launch'].map(command => () => runWorkflowCommand([command, flag])),
         ...['init', 'open', 'status'].map(command => () => runStudioCommand([command, '--workdir', '/nonexistent/help-must-not-create', flag])),
         ...['upload', 'download'].map(command => () => runMediaFileCommand([command, flag])),
-        ...(['research', 'media', 'publish'] as const).map(domain => () => runHostedDomainCommand(domain, ['schema', flag])),
+        ...(['research', 'media'] as const).map(domain => () => runHostedDomainCommand(domain, ['schema', flag])),
         () => runHostedDomainCommand('media', ['poll', '--resume-from', '/nonexistent/help-checkpoint', flag]),
         () => runHostedDomainCommand('media', ['estimate', flag]),
         () => runHostedDomainCommand('media', ['create', flag]),

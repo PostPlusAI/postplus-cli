@@ -231,32 +231,6 @@ function createVideoAnalysisCatalogResponse(): Response {
   );
 }
 
-function createSocialPublishingCatalogResponse(): Response {
-  return new Response(
-    JSON.stringify({
-      schemaVersion: 2,
-      releaseId: 'skills-2026-09-01.1',
-      source: 'PostPlusAI/postplus-skills',
-      skills: [
-        {
-          name: 'social-media-publisher',
-          path: 'skills/50-publishing/social-media-publisher/SKILL.md',
-          requirements: {
-            accountConnections: ['social-publishing-workspace'],
-            capabilities: ['publishing'],
-            localDependencies: [],
-          },
-          status: 'released',
-        },
-      ],
-    }),
-    {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    },
-  );
-}
-
 function createWhoamiResponse(): Response {
   return new Response(
     JSON.stringify({
@@ -341,37 +315,6 @@ function createMediaReadinessResponse(): Response {
           id: 'media-generation:image-bad',
           label: 'Media generation: image-bad',
           ok: false,
-          required: true,
-        },
-      ],
-    }),
-    {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    },
-  );
-}
-
-function createSocialPublishingReadinessResponse(): Response {
-  return new Response(
-    JSON.stringify({
-      ok: true,
-      subscriptionActive: false,
-      subscriptionStatus: null,
-      capabilities: [
-        {
-          checks: [
-            {
-              id: 'subscription',
-              label: 'PostPlus subscription',
-              ok: false,
-              required: false,
-            },
-          ],
-          id: 'social-publishing:list-channels',
-          label: 'Social publishing: list-channels',
-          ok: true,
-          operation: 'list-channels',
           required: true,
         },
       ],
@@ -1042,12 +985,6 @@ describe('doctor and status', () => {
                 label: 'Hosted media generation',
                 ok: true,
                 required: true,
-              },
-              {
-                id: 'social-publishing',
-                label: 'Hosted social publishing',
-                ok: true,
-                required: false,
               },
             ],
           }),
@@ -1843,59 +1780,6 @@ describe('doctor and status', () => {
       assert.equal(report.requiredOk, true);
       assert.match(formatted, /Hosted capabilities for media-analysis/);
       assert.doesNotMatch(formatted, /Media generation: image-bad/);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('matches social publishing operation readiness to the social publishing skill', async () => {
-    await setLocalSession({
-      cliSessionToken: 'cli-session-token-value',
-      accountId: 'account-1',
-      accountName: 'Team Workspace',
-      accountSlug: 'team-workspace',
-      accountType: 'team',
-      apiBaseUrl: 'https://postplus.example.com',
-      sessionExpiresAt: 1_900_000_000,
-      userEmail: 'user@example.com',
-      userId: 'user-1',
-    });
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input) => {
-      const url = String(input);
-
-      if (isPublicCatalogUrl(url)) {
-        return createSocialPublishingCatalogResponse();
-      }
-
-      if (url.endsWith('/api/postplus-cli/auth/whoami')) {
-        return createWhoamiResponse();
-      }
-
-      if (url.endsWith('/api/postplus-cli/hosted/readiness')) {
-        return createSocialPublishingReadinessResponse();
-      }
-
-      return new Response(JSON.stringify({ error: 'unexpected url' }), {
-        status: 404,
-        headers: { 'content-type': 'application/json' },
-      });
-    };
-
-    try {
-      const report = await generateDoctorReport({
-        skillId: 'social-media-publisher',
-      });
-      const formatted = formatDoctorReport(report);
-
-      assert.equal(report.skillId, 'social-media-publisher');
-      assert.equal(report.ok, false);
-      assert.equal(report.requiredOk, false);
-      assert.match(
-        formatted,
-        /PostPlus Plus or Pro plan required; current subscription none/,
-      );
-      assert.doesNotMatch(formatted, /readiness check missing/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -6392,22 +6276,12 @@ describe('hosted domain commands', () => {
       /research (collect|scrape)|--request|max-charge-usd/u,
     );
 
-    for (const domain of ['media', 'publish']) {
-      const { stdout } = await execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
-        domain,
-        'help',
-      ]);
-      assert.match(stdout, new RegExp(`postplus ${domain} schema`, 'u'));
-      if (domain === 'media') {
-        assert.match(stdout, /--endpoint <endpoint-key>/u);
-        assert.match(stdout, /postplus media create <endpoint-key>/u);
-      } else {
-        assert.match(stdout, /postplus publish <operation> --request/u);
-      }
-    }
+    const { stdout: mediaHelp } = await execFileAsync(process.execPath, [
+      '--import', 'tsx', 'src/index.ts', 'media', 'help',
+    ]);
+    assert.match(mediaHelp, /postplus media schema/u);
+    assert.match(mediaHelp, /--endpoint <endpoint-key>/u);
+    assert.match(mediaHelp, /postplus media create <endpoint-key>/u);
   });
 
   it('renders media-file help for subcommand-level --help/-h instead of throwing a flag error', async () => {
@@ -6562,27 +6436,6 @@ describe('hosted domain commands', () => {
     );
     assert.equal(operationIdField?.kind, 'runner-managed');
 
-    const { stdout: publishStdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
-      'publish',
-      'schema',
-      '--json',
-    ]);
-    const publishReport = JSON.parse(publishStdout) as Record<string, unknown>;
-    assert.ok((publishReport.operations as string[]).includes('create-post'));
-    const publishOperationSchema = (
-      publishReport.schemas as Array<{
-        id: string;
-        jsonSchema: { properties: Record<string, { enum?: string[] }> };
-      }>
-    ).find((schema) => schema.id === 'social-publishing.request');
-    assert.ok(
-      publishOperationSchema?.jsonSchema.properties.operation.enum?.includes(
-        'create-post',
-      ),
-    );
   });
 
   it('prints manifest-driven transcription media field contract without example payloads', async () => {
@@ -6819,7 +6672,7 @@ describe('hosted domain commands', () => {
     assert.match(stdout, /\n {4}requestDimensions\n/u);
   });
 
-  it('prints per-target help for semantic research, opaque publish, and normalized video analysis', async () => {
+  it('prints per-target help for semantic research and normalized video analysis', async () => {
     const { stdout: researchHelp } = await execFileAsync(process.execPath, [
       '--import',
       'tsx',
@@ -6850,16 +6703,6 @@ describe('hosted domain commands', () => {
     assert.match(analyzeHelp, /--video <video>.*--prompt <prompt>/u);
     assert.doesNotMatch(analyzeHelp, /Gemini request payload|file_reference/u);
 
-    const { stdout: publishHelp } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
-      'publish',
-      'create-post',
-      '--help',
-    ]);
-    assert.match(publishHelp, /PostPlus CLI - publish create-post\n/u);
-    assert.match(publishHelp, /Capability: social-publishing/u);
   });
 
   it('submits semantic Research flags to the unified route without private fields', async () => {
@@ -14733,7 +14576,7 @@ describe('hosted lib / bin request parity', () => {
 
   type ParityCase = {
     name: string;
-    domain: 'media' | 'research' | 'publish' | 'media-file';
+    domain: 'media' | 'research' | 'media-file';
     // Tokens AFTER the domain, shared by both paths EXCEPT the request source.
     baseArgs: string[];
     // request-json surfaces: the injected object (lib) / written file (bin).
@@ -14790,15 +14633,6 @@ describe('hosted lib / bin request parity', () => {
         '--hosted-operation-id',
         PARITY_OP_ID,
       ],
-    },
-    {
-      name: 'publish create-post',
-      domain: 'publish',
-      baseArgs: ['create-post', '--hosted-operation-id', PARITY_OP_ID],
-      requestJson: {
-        channelId: 'channel_1',
-        content: 'hello world',
-      },
     },
   ];
 

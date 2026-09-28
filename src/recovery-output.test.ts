@@ -142,11 +142,9 @@ test('a hosted product failure after recovery stops without a second action or J
   t.after(()=>rm(config,{recursive:true,force:true}));
   const mock=join(config,'mock.mjs');
   await writeFile(join(config,'config.json'),JSON.stringify({cliSessionToken:'fixture',apiBaseUrl:'https://postplus.test'}),{mode:0o600});
-  const request=join(config,'request.json');
-  await writeFile(request,'{}');
   await writeFile(mock, `globalThis.fetch=async()=>Response.json({code:'postplus_cli_fixture_failed',error:'Task failed.',userAction:'Run postplus update.',operationId:'original-operation'},{status:400});`);
   for (const json of [true,false]) {
-    await assert.rejects(promisify(execFile)(process.execPath,['--import',mock,'--import','tsx','src/index.ts','publish','list-channels','--request',request,...(json?['--json']:[])],{
+    await assert.rejects(promisify(execFile)(process.execPath,['--import',mock,'--import','tsx','src/index.ts','research','run','google-trends-fast','--query','fixture','--country','US','--time-range','today 12-m','--output',join(config,'result.json'),...(json?['--json']:[])],{
       env:{...process.env,POSTPLUS_CONFIG_DIR:config,POSTPLUS_API_BASE_URL:'https://postplus.test',POSTPLUS_CLI_SESSION_TOKEN:'fixture',POSTPLUS_CLIENT_RECOVERY_ATTEMPT:'1'},
     }), (error:any) => {
       assert.equal(error.code,1);

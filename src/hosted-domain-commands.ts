@@ -71,19 +71,6 @@ export type { HostedRequestContext } from './hosted-command-runtime.js';
 // hand-maintains a mirror of the Web hosted catalog.
 const MEDIA_VERB_ENDPOINTS = buildVerbTargetIndex('media');
 const RESEARCH_VERB_TARGETS = buildVerbTargetIndex('research');
-const PUBLISH_VERB_OPERATIONS = buildPublishVerbIndex();
-
-// Publish flattens to operation -> resolved target: the publish OPERATION is both
-// the subcommand and the target (no separate positional), unlike media/research.
-function buildPublishVerbIndex(): Map<string, ResolvedVerbTarget> {
-  const index = new Map<string, ResolvedVerbTarget>();
-  for (const targets of buildVerbTargetIndex('publish').values()) {
-    for (const [operation, resolved] of targets) {
-      index.set(operation, resolved);
-    }
-  }
-  return index;
-}
 
 type ParsedFlags = {
   values: Map<string, string>;
@@ -185,17 +172,8 @@ export async function runHostedDomainCommand(
     return runMediaVerb(subcommand, rest, context);
   }
 
-  // publish: the OPERATION is the subcommand (no separate target positional).
-  if (
-    domain === 'publish' &&
-    subcommand &&
-    PUBLISH_VERB_OPERATIONS.has(subcommand)
-  ) {
-    return runPublishOperation(subcommand, rest, context);
-  }
-
   if (subcommand !== undefined && !isHelp(subcommand)) throw new Error(`Unknown command: ${domain} ${subcommand}`);
-  printDomainVerbHelp(domain);
+  printDomainVerbHelp();
   return 0;
 }
 
@@ -216,7 +194,7 @@ async function runMediaVerb(
 
   const [targetKey, ...rest] = args;
   if (args.some(isHelp) && (!targetKey || isHelp(targetKey) || targetKey.startsWith('-'))) {
-    printDomainVerbHelp('media');
+    printDomainVerbHelp();
     return 0;
   }
   if (!targetKey || targetKey.startsWith('--')) {
@@ -1228,7 +1206,7 @@ async function runMediaPoll(
   context: HostedRequestContext | undefined,
 ): Promise<number | unknown> {
   if (args.some(isHelp)) {
-    printDomainVerbHelp('media');
+    printDomainVerbHelp();
     return 0;
   }
   const flags = parseFlags(args, new Set(['debug', 'json']));
@@ -1614,7 +1592,7 @@ async function runMediaEstimate(
 ): Promise<number | unknown> {
   const [endpointKey, ...rest] = args;
   if (args.some(isHelp) && (!endpointKey || isHelp(endpointKey) || endpointKey.startsWith('-'))) {
-    printDomainVerbHelp('media');
+    printDomainVerbHelp();
     return 0;
   }
   if (!endpointKey || endpointKey.startsWith('--')) {
@@ -2203,87 +2181,6 @@ function assertCliPublicHttpsUrl(key: string, value: string): void {
   }
 }
 
-// Manifest-driven publish operation (request-json surface). The OPERATION is the
-// subcommand and the target: `postplus publish <operation> --request <file>`. The
-// publishing input object is read directly from `--request <file>` and posted to
-// /hosted/capability with capability `social-publishing` / the resolved operation.
-// Side-effecting operations surface the Web quote-confirmation challenge; the
-// shared runHostedCommand handles the challenge -> retry-with-token path. There is
-// no requestDimensions/approval/execute — those were private-runtime concepts.
-async function runPublishOperation(
-  operation: string,
-  args: string[],
-  context: HostedRequestContext | undefined,
-): Promise<number | unknown> {
-  const resolved = PUBLISH_VERB_OPERATIONS.get(operation);
-  if (!resolved) {
-    throw new Error(
-      `Unknown publish operation ${operation}. Valid: ${[...PUBLISH_VERB_OPERATIONS.keys()].join(', ')}.`,
-    );
-  }
-
-  // `postplus publish <operation> --help`: opaque-input contract.
-  if (args.some(isHelp)) {
-    printOpaquePublishHelp(operation);
-    return 0;
-  }
-
-  const flags = parseFlags(args, new Set(['json']));
-  const allowedKeys = new Set([
-    'hosted-operation-id',
-    'json',
-    'output',
-    'quote-confirmation-token',
-    'request',
-    'skill',
-  ]);
-  for (const key of [...flags.values.keys(), ...flags.booleans]) {
-    if (!allowedKeys.has(key)) {
-      throw new Error(`Unknown option for publish ${operation}: --${key}.`);
-    }
-  }
-
-  const outputPath = flags.values.get('output') ?? null;
-  const { body: raw, errorInputLabel } = await resolveRequestBody(
-    context,
-    flags,
-  );
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(
-      `publish ${operation} --request must be a JSON object of publishing input.`,
-    );
-  }
-  const input = raw as Record<string, unknown>;
-
-  const skillName = flags.values.get('skill') ?? resolved.skill;
-  const operationId =
-    flags.values.get('hosted-operation-id') ??
-    `postplus-cli:publish:social-publishing:request:${randomUUID()}`;
-  const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
-
-  return dispatchHostedCommand(
-    {
-      request: () =>
-        postHostedJson({
-          body: {
-            capability: 'social-publishing',
-            operation,
-            input,
-            operationId,
-            quoteConfirmationToken: quoteConfirmationToken ?? undefined,
-          },
-          pathName: '/api/postplus-cli/hosted/capability',
-          skillName,
-          context,
-        }),
-      errorInputLabel,
-      json: flags.booleans.has('json'),
-      outputPath,
-    },
-    context,
-  );
-}
-
 // ---------------------------------------------------------------------------
 // workflow — video-production workflow authoring / read / quote / launch over
 // the hosted `workflow` capability envelope. This is the bin counterpart to the
@@ -2694,16 +2591,11 @@ async function runHostedSchema(
 ): Promise<number | unknown> {
   if (args.some(isHelp)) {
     if (domain === 'research') printResearchHelp();
-    else printDomainVerbHelp(domain);
+    else printDomainVerbHelp();
     return 0;
   }
   const flags = parseFlags(args, new Set(['json']));
-  const allowedFlags =
-    domain === 'media'
-      ? new Set(['endpoint'])
-      : domain === 'research'
-        ? new Set(['route'])
-        : new Set<string>();
+  const allowedFlags = domain === 'media' ? new Set(['endpoint']) : new Set(['route']);
 
   for (const key of flags.values.keys()) {
     if (!allowedFlags.has(key)) {
@@ -2856,34 +2748,31 @@ Next:
 `);
 }
 
-function printDomainVerbHelp(domain: Exclude<HostedDomain, 'research'>): void {
-  const verbUsage =
-    domain === 'media'
-      ? [...MEDIA_VERB_ENDPOINTS.keys()]
-          .map(
-            (verb) =>
-              `  postplus media ${verb} <endpoint-key> --<intent/default flags> [--wait] [--json] [--output <result.json>]\n`,
-          )
-          .join('') +
-        '  postplus media estimate <endpoint-key> --<same flags/--request as matching submit verb> [--json]\n' +
-        '  postplus media poll --handle <run-id> [--capability <media-generation|video-analysis>] [--wait-seconds <n>] [--poll-interval-seconds <n>] [--debug] [--json] [--output <result-file>]\n' +
-        '  postplus media poll --resume-from <checkpoint.json> [--wait-seconds <n>] [--output <result-file>]\n' +
-        '    (poll waits in-command: re-checks every 8s until terminal or the 45s default budget ends; --wait-seconds 0 = single check)\n'
-      : '  postplus publish <operation> --request <input.json> [--json] [--output <result.json>]\n';
+function printDomainVerbHelp(): void {
+  const verbUsage = [...MEDIA_VERB_ENDPOINTS.keys()]
+    .map(
+      (verb) =>
+        `  postplus media ${verb} <endpoint-key> --<intent/default flags> [--wait] [--json] [--output <result.json>]\n`,
+    )
+    .join('') +
+    '  postplus media estimate <endpoint-key> --<same flags/--request as matching submit verb> [--json]\n' +
+    '  postplus media poll --handle <run-id> [--capability <media-generation|video-analysis>] [--wait-seconds <n>] [--poll-interval-seconds <n>] [--debug] [--json] [--output <result-file>]\n' +
+    '  postplus media poll --resume-from <checkpoint.json> [--wait-seconds <n>] [--output <result-file>]\n' +
+    '    (poll waits in-command: re-checks every 8s until terminal or the 45s default budget ends; --wait-seconds 0 = single check)\n';
 
-  process.stdout.write(`PostPlus CLI - ${domain} commands
+  process.stdout.write(`PostPlus CLI - media commands
 
 Usage:
-${verbUsage}  postplus ${domain} schema${domain === 'media' ? ' [--endpoint <endpoint-key>]' : ''} [--json]
+${verbUsage}  postplus media schema [--endpoint <endpoint-key>] [--json]
 
-${domain === 'media' ? 'Create or analyze media, estimate credits, and retrieve an existing run.' : 'Submit an explicitly prepared publishing operation.'}
+Create or analyze media, estimate credits, and retrieve an existing run.
 
 Examples:
-  postplus ${domain} schema --json
-  postplus ${domain === 'media' ? 'media poll --handle <run-id> --json' : 'publish schema --help'}
+  postplus media schema --json
+  postplus media poll --handle <run-id> --json
 
 Next:
-  Inspect the selected ${domain === 'media' ? 'endpoint' : 'operation'} help before executing it.
+  Inspect the selected endpoint help before executing it.
   --help, -h shows local help without authentication or business requests.
 `);
 }
@@ -3090,30 +2979,6 @@ function printResearchRouteHelp(
     '', '  Next:', '    Provide the required research inputs, then inspect the returned evidence and run status.',
   );
   process.stdout.write(`${lines.join('\n')}\n`);
-}
-
-// Per-target help for the remaining opaque publishing JSON surface.
-function printOpaquePublishHelp(targetKey: string): void {
-  const inputShape = 'a product request JSON object';
-  const header = `publish ${targetKey}`;
-  const usage = `    postplus publish ${targetKey} --request <input.json> [--json] [--output <result.json>]`;
-
-  process.stdout.write(`PostPlus CLI - ${header}
-
-  Surface: request-json (opaque input authored by the agent)
-  Capability: social-publishing
-  Usage:
-${usage}
-
-  Examples:
-${usage}
-    postplus publish schema --json
-
-  Next:
-    Prepare and review the operation payload before authorizing publication.
-  --request <file>  ${inputShape}.
-  Runner-managed (minted by the CLI; never in the body): operationId, quoteConfirmationToken
-`);
 }
 
 function writeJson(value: unknown): void {
