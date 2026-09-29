@@ -110,7 +110,7 @@ Usage:
   postplus auth logout [--json]
   postplus doctor [--skill <skill-id>] [--json]
   postplus workspace status|list|use <workspace-id> [--json]
-  postplus channels list|show|connect|disconnect ... [--json]
+  postplus channels list|show|connect|wait|disconnect ... [--json]
   postplus channels tools list|show|run ... [--json]
   postplus balance [--json]
   postplus runs list [--status <status>] [--since <iso>] [--limit <n>] [--json]
@@ -846,7 +846,7 @@ function printReadOnlyHelp(command: 'list' | 'version', json: boolean): number {
     purpose: command === 'list' ? 'Discover what PostPlus can do, grouped by the task you want to complete.' : 'Show the installed CLI version.',
     usage: `postplus ${command}${command === 'list' ? ' [--json]' : ''}`,
     options: command === 'list' ? '--json: structured output; --help, -h: help' : '--help, -h: help',
-    examples: [`postplus ${command}`], next: command === 'list' ? 'Describe a task from the examples to your agent. Use postplus list --json for full skill details.' : 'Use postplus status for readiness and update information.' };
+    examples: [`postplus ${command}`], next: command === 'list' ? 'Describe a task from the examples to your agent. Use postplus list --json for full skill details. For connected accounts and executable tools, use postplus channels list and postplus channels tools list.' : 'Use postplus status for readiness and update information.' };
   process.stdout.write(json ? `${JSON.stringify(help)}\n` : `${help.purpose}\nUsage: ${help.usage}\nOptions: ${help.options}\nExamples: ${help.examples.join('\n')}\nNext: ${help.next}\n`);
   return 0;
 }

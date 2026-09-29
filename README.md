@@ -32,6 +32,39 @@ requests it, and approve the real browser connection yourself. Never share
 credentials with the agent. Quotes, publishing, and replacing business content
 require the applicable user approval.
 
+## Connect a marketing channel
+
+Ask for the outcome you need: review Google or Meta ad performance, prepare a
+Facebook Page post, or adapt a video for Instagram and TikTok. Your agent uses
+the relevant skill, discovers the available tools, and checks their inputs and
+your account permissions before executing.
+
+Connect and manage accounts in Web **Integrations** or through the CLI:
+
+```bash
+postplus channels list
+postplus channels connect google-ads
+postplus channels tools list --toolkit googleads
+postplus channels tools show GOOGLEADS_LIST_ACCESSIBLE_CUSTOMERS
+```
+
+`postplus list` describes the tasks your agent can help with. `channels list`
+shows channels and your connections; `channels tools list` searches executable
+tools. Use `channels tools show` for the selected tool's inputs and availability.
+A listed tool does not prove that your account has the platform permissions to
+use it. Complete any browser authorization yourself; the agent checks connection
+status before continuing your original task.
+
+Channel connections belong to your personal account and can be reused across
+workspaces. Connecting or executing channel tools requires eligible subscription
+access on your own PostPlus account; a teammate's subscription does not cover
+you. Disconnecting a connection affects every workspace that uses it.
+
+For publishing or account changes, approve the exact destination and final
+content or change. If the result is unknown, the agent checks the original
+operation instead of sending a duplicate. Channel access is covered by your
+eligible subscription; research and media generation can have separate charges.
+
 ## Maintenance
 
 Your agent continues the task while the CLI handles a required compatible update.
@@ -61,7 +94,7 @@ No disk check proves a running agent has loaded newly installed instructions.
 ## Product direction
 
 <!-- BEGIN POSTPLUS PRODUCT BRIEF -->
-PostPlus helps your agent turn public research, product facts, and media references into useful marketing decisions and creative assets.
+PostPlus helps your agent research a market, create marketing assets, manage advertising, and publish through your connected channels.
 
 Describe the result you want. The matching skill guides the task directly, while the CLI handles execution, account access, cost confirmation, and clear recovery actions.
 

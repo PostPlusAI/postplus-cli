@@ -40,7 +40,33 @@ export async function runChannelsCommand(args: string[]): Promise<number> {
     args.some((arg) => ['help', '--help', '-h'].includes(arg))
   ) {
     process.stdout.write(
-      'postplus channels list|show <connection-id>|connect <channel>|wait <connection-id>|disconnect <connection-id> [--json]\npostplus channels tools list [--toolkit <id>] [--query <text>] [--offset <n>] [--limit <n>] | show <tool-slug> | run <tool-slug> --connection <id> --input-file <json-path> [--media-map-file <json-path>] [--target-id <id> --target-path <argument.path>] [--operation-id <id>] [--wait] | run --status <operation-id>\nTools shows the pinned Composio catalog and PostPlus gate; enabled does not prove your third-party permission, which is checked on execution. For exact external targets, provide an ID and the JSON argument path containing it. Media map JSON maps file argument paths to references from postplus media-file upload. Connections belong to you and can be reused across workspaces. Disconnect affects all your workspaces. Channel run exit 2 means result unknown: query the original operation with tools run --status; do not resubmit it.\n',
+      `Manage your personal channel connections and discover executable tools.
+
+Connections:
+  postplus channels list [--json]
+  postplus channels show <connection-id> [--json]
+  postplus channels connect <channel> [--json]
+  postplus channels wait <connection-id> [--json]
+  postplus channels disconnect <connection-id> [--json]
+
+Tools:
+  postplus channels tools list [--toolkit <id>] [--query <text>] [--offset <n>] [--limit <n>] [--json]
+  postplus channels tools show <tool-slug> [--json]
+  postplus channels tools run <tool-slug> --connection <id> --input-file <json-path> [--media-map-file <json-path>] [--target-id <id> --target-path <argument.path>] [--operation-id <id>] [--wait] [--json]
+  postplus channels tools run --status <operation-id> [--json]
+
+Start with channels list, select your connection, then tools list and tools show.
+Tool availability does not prove your platform permissions; execution checks them.
+Connecting and executing require eligible subscription access on your own PostPlus account.
+You can also connect and manage accounts in Web Integrations. Complete browser authorization yourself;
+use channels wait to confirm the connection is active before continuing the original task.
+Connections can be reused across workspaces. Disconnect affects all your workspaces.
+For exact external targets, provide the ID and the JSON argument path containing it.
+Media map JSON maps file argument paths to references from postplus media-file upload.
+Before a write, confirm the exact destination and change with the user.
+Channel run exit 2 means result unknown: query the original operation with tools run --status;
+do not resubmit it with a new operation ID.
+`,
     );
     return 0;
   }
