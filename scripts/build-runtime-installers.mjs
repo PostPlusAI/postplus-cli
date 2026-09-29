@@ -126,12 +126,16 @@ ${JSON.stringify(release, null, 2)}
     if ($LASTEXITCODE -ne 0 -or $version -ne ('v' + $release.node.version)) { throw 'The existing PostPlus runtime needs repair.' }
   } else {
     $nodeArchive = Join-Path $temp 'node.zip'
+    [Console]::Error.WriteLine('Downloading the verified PostPlus runtime.')
     Download-Verified $artifact.url $artifact.sha256 $nodeArchive
+    [Console]::Error.WriteLine('Unpacking the PostPlus runtime.')
     Expand-Archive -LiteralPath $nodeArchive -DestinationPath (Join-Path $temp 'node')
     $node = Join-Path (Join-Path $temp 'node') ($artifact.directory + '/node.exe')
   }
   $cliArchive = Join-Path $temp 'cli.tar.gz'
+  [Console]::Error.WriteLine('Downloading the matching PostPlus program.')
   Download-Verified $release.cli.url $release.cli.sha256 $cliArchive
+  [Console]::Error.WriteLine('Unpacking the PostPlus program.')
   New-Item -ItemType Directory -Path (Join-Path $temp 'cli') | Out-Null
   & (Join-Path $env:SystemRoot 'System32/tar.exe') -xzf $cliArchive -C (Join-Path $temp 'cli')
   if ($LASTEXITCODE -ne 0) { throw 'PostPlus archive could not be unpacked.' }
@@ -145,6 +149,7 @@ ${JSON.stringify(release, null, 2)}
   if ($CurrentDirectory) { $setupArgs += '--current-directory' }
   if ($ProgramOnly) { $setupArgs += '--program-only' }
   if ($Repair) { $setupArgs += '--repair' }
+  [Console]::Error.WriteLine('Verifying and activating PostPlus and its skills.')
   & $node @setupArgs
   if ($LASTEXITCODE -ne 0) { throw 'PostPlus setup did not finish; see its result above.' }
 } catch {

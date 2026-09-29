@@ -36,6 +36,8 @@ test('official bootstrap installs and reuses a complete managed runtime without 
     const name = request.url === (windows ? '/node.zip' : '/node.tar.gz') ? 'node' : request.url === '/cli.tar.gz' ? 'cli' : null;
     if (!name) { response.writeHead(404); response.end(); return; }
     downloads[name]++;
+    process.stderr.write('Acceptance download started: ' + name + '\n');
+    response.on('finish', () => process.stderr.write('Acceptance download completed: ' + name + '\n'));
     response.writeHead(200, { 'content-type': 'application/octet-stream' });
     createReadStream(name === 'node' ? archive : join(repo, `dist/postplus-cli-v${release.cliVersion}.tar.gz`)).pipe(response);
   });
