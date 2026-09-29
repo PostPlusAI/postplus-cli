@@ -78,3 +78,16 @@ test('installed POSIX launcher uses managed Node and preserves exact arguments',
     return true;
   });
 });
+
+test('installed Windows launcher preserves JSON, spaces, empty values and literal arguments', { skip: process.platform !== 'win32' }, async t => {
+  const { root, value } = await fixture(t);
+  await activateInstallation(root, value, run);
+  await mkdir(join(root, 'bin'));
+  await copyFile(new URL('./launch.ps1', import.meta.url), join(root, 'bin/postplus.ps1'));
+  await writeFile(join(root, value.cli), 'console.log(JSON.stringify(process.argv.slice(2)));');
+  const args = ['with space', '{"title":"two words"}', '', '$literal', ';exit 9', '中文', 'C:\\path with space\\'];
+  const result = await exec('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(root, 'bin/postplus.ps1'), ...args], {
+    env: { ...process.env, NODE_OPTIONS: '--require=C:/postplus-test-does-not-exist.cjs' },
+  });
+  assert.deepEqual(JSON.parse(result.stdout), args);
+});

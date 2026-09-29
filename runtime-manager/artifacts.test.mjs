@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { hashDirectory, prepareArtifact, verifyArtifactDirectory } from './artifacts.mjs';
+import { TAR_EXECUTABLE } from './distribution.mjs';
 const exec = promisify(execFile);
 
 test('verified local archive is prepared once; a changed installed file is never silently reused', async t => {
@@ -15,7 +16,7 @@ test('verified local archive is prepared once; a changed installed file is never
   const source = join(root, 'source'); await mkdir(join(source, 'package'), { recursive: true });
   await writeFile(join(source, 'package/file'), 'approved');
   const archive = join(root, 'archive.tar.gz');
-  await exec('tar', ['-czf', archive, '-C', source, 'package']);
+  await exec(TAR_EXECUTABLE, ['-czf', archive, '-C', source, 'package']);
   const artifact = { url: 'https://example.test/archive.tar.gz', directory: 'package', sha256: createHash('sha256').update(await readFile(archive)).digest('hex') };
   const destination = join(root, 'versions/fixture');
   const noNetwork = async () => assert.fail('a supplied archive must not fetch');

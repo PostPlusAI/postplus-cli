@@ -152,7 +152,7 @@ function getReleaseBuildFiles() {
 }
 
 function createArchive() {
-  execFileSync('tar', ['-czf', resolve(distDir, versionedArchive), '-C', resolve(distDir, 'package'), 'postplus-cli'], {
+  execFileSync(process.platform === 'win32' ? resolve(process.env.SystemRoot, 'System32/tar.exe') : 'tar', ['-czf', resolve(distDir, versionedArchive), '-C', resolve(distDir, 'package'), 'postplus-cli'], {
     cwd: repoRoot,
     // macOS tar must not add AppleDouble files outside package.json.files.
     env: { ...process.env, COPYFILE_DISABLE: '1' },

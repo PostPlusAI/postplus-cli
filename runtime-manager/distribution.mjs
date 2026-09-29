@@ -6,6 +6,8 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 const exec = promisify(execFile);
+export const TAR_EXECUTABLE = process.platform === 'win32'
+  ? join(process.env.SystemRoot, 'System32', 'tar.exe') : 'tar';
 export const RELEASE_URL = 'https://postplus.io/postplus-runtime.json';
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -106,7 +108,7 @@ export async function extractArtifact(archive, artifact, destination) {
       'Expand-Archive -LiteralPath $env:POSTPLUS_ARCHIVE -DestinationPath $env:POSTPLUS_EXTRACT -ErrorAction Stop'],
     { env: { ...process.env, POSTPLUS_ARCHIVE: archive, POSTPLUS_EXTRACT: destination }, timeout: 120_000 });
   } else {
-    await exec('tar', ['-xzf', archive, '-C', destination], { timeout: 120_000 });
+    await exec(TAR_EXECUTABLE, ['-xzf', archive, '-C', destination], { timeout: 120_000 });
   }
   return join(destination, artifact.directory);
 }

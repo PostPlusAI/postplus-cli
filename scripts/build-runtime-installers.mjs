@@ -111,7 +111,7 @@ ${JSON.stringify(release, null, 2)}
   $cliArchive = Join-Path $temp 'cli.tar.gz'
   Download-Verified $release.cli.url $release.cli.sha256 $cliArchive
   New-Item -ItemType Directory -Path (Join-Path $temp 'cli') | Out-Null
-  & tar.exe -xzf $cliArchive -C (Join-Path $temp 'cli')
+  & (Join-Path $env:SystemRoot 'System32/tar.exe') -xzf $cliArchive -C (Join-Path $temp 'cli')
   if ($LASTEXITCODE -ne 0) { throw 'PostPlus archive could not be unpacked.' }
   $releaseFile = Join-Path $temp 'release.json'
   [IO.File]::WriteAllText($releaseFile, ($release | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
