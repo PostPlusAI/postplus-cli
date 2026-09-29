@@ -4755,7 +4755,7 @@ describe('skill management commands', () => {
       assert.equal((await readManagedSkillBaseline())?.releaseId, 'skills-2026-09-02.1');
       assert.equal(config?.cliVersion, CURRENT_CLI_VERSION);
       assert.deepEqual(successMessages, [
-        'PostPlus Skills updated: 2 current, 1 retired removed (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.',
+        'PostPlus Skills updated: 2 current, 1 retired removed (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.\n\nFewer interruptions\nRoutine recoverable errors no longer stop the task.\n- PostPlus retries once after a compatible update.\n- Safe local usage errors can be corrected before submission.',
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -4936,7 +4936,7 @@ describe('skill management commands', () => {
 
       assert.equal(exitCode, 0);
       assert.deepEqual(successMessages, [
-        'PostPlus Skills updated: 1 current, 0 retired removed (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.',
+        'PostPlus Skills updated: 1 current, 0 retired removed (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.\n\nFewer interruptions\nRoutine recoverable errors no longer stop the task.\n- PostPlus retries once after a compatible update.',
       ]);
     } finally {
       globalThis.fetch = originalFetch;
