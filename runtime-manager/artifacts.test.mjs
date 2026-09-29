@@ -26,6 +26,12 @@ test('verified local archive is prepared once; a changed installed file is never
   await writeFile(join(destination, 'file'), 'modified');
   await assert.rejects(prepareArtifact(root, artifact, destination, noNetwork), /integrity/);
   assert.equal(await readFile(join(destination, 'file'), 'utf8'), 'modified');
+  const repaired = await prepareArtifact(root, artifact, destination, noNetwork, archive, { repair: true });
+  assert.equal(repaired.repaired, true);
+  assert.notEqual(repaired.directory, destination);
+  await verifyArtifactDirectory(repaired.directory, artifact.sha256);
+  assert.equal(await readFile(join(repaired.directory, 'file'), 'utf8'), 'approved');
+  assert.equal(await readFile(join(destination, 'file'), 'utf8'), 'modified', 'explicit repair preserves the old generation');
   const wrong = { ...artifact, sha256: '0'.repeat(64) };
   await assert.rejects(prepareArtifact(root, wrong, join(root, 'versions/wrong'), noNetwork, archive), /does not match/);
 });

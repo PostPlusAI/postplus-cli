@@ -13,6 +13,7 @@ const exec = promisify(execFile);
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 test('official bootstrap installs and reuses a complete managed runtime without system Node', { timeout: 240000 }, async t => {
+  try {
   const windows = process.platform === 'win32';
   const archive = process.env.POSTPLUS_TEST_NODE_ARCHIVE;
   assert.ok(archive, 'POSTPLUS_TEST_NODE_ARCHIVE must name the pinned official Node archive');
@@ -37,7 +38,9 @@ test('official bootstrap installs and reuses a complete managed runtime without 
     createReadStream(name === 'node' ? archive : join(repo, `dist/postplus-cli-v${release.cliVersion}.tar.gz`)).pipe(response);
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-  t.after(() => { server.closeAllConnections(); server.close(); });
+  const sockets = new Set();
+  server.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
+  t.after(() => { for (const socket of sockets) socket.destroy(); server.closeAllConnections(); server.close(); });
   const base = `https://127.0.0.1:${server.address().port}`;
   release.cli.url = `${base}/cli.tar.gz`;
   release.node.artifacts[`${process.platform}-${process.arch}`].url = `${base}/${windows ? 'node.zip' : 'node.tar.gz'}`;
@@ -47,7 +50,8 @@ test('official bootstrap installs and reuses a complete managed runtime without 
     POSTPLUS_CONFIG_DIR: config, POSTPLUS_INSTALL_ROOT: program, XDG_CONFIG_HOME: join(home, '.config'),
     CURL_CA_BUNDLE: cert, NODE_EXTRA_CA_CERTS: cert, DISABLE_TELEMETRY: '1', DO_NOT_TRACK: '1' };
   await assert.rejects(windows ? exec('where.exe', ['node'], { env: environment }) : exec('/bin/sh', ['-c', 'command -v node'], { env: environment }), 'test environment must not resolve a system Node');
-  const invoke = () => exec(windows ? 'powershell.exe' : '/bin/sh', windows ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dist, 'install.ps1')] : [join(dist, 'install.sh')], { cwd: project, env: environment, timeout: 120000, maxBuffer: 1024 * 1024 });
+  const invoke = (repair = false) => exec(windows ? 'powershell.exe' : '/bin/sh', windows ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dist, 'install.ps1'), ...(repair ? ['-Repair'] : [])] : [join(dist, 'install.sh'), ...(repair ? ['--repair'] : [])], { cwd: project, env: environment, timeout: 120000, maxBuffer: 1024 * 1024 });
+  process.stderr.write('Managed acceptance: first installation\n');
   const first = await invoke(); const installed = JSON.parse(first.stdout);
   assert.equal(installed.ok, true); assert.equal(installed.diskReady, true);
   assert.equal(installed.installation.managed, true); assert.equal(installed.installation.reusedRuntime, false);
@@ -61,6 +65,7 @@ test('official bootstrap installs and reuses a complete managed runtime without 
   assert.equal(version.stdout.trim(), release.cliVersion);
   const verified = JSON.parse((await launch(['skills', 'verify', '--json'])).stdout);
   assert.equal(verified.ok, true); assert.equal(verified.verifiedSkillsReleaseId, release.skillsReleaseId);
+  process.stderr.write('Managed acceptance: repeat installation\n');
   const second = JSON.parse((await invoke()).stdout);
   assert.equal(second.ok, true); assert.equal(second.outcome, 'current');
   assert.equal(second.installation.reusedRuntime, true); assert.equal(downloads.node, 1);
@@ -79,6 +84,7 @@ test('official bootstrap installs and reuses a complete managed runtime without 
     });
     if (result.exitCode !== 0 || result.latestVersion !== release.cliVersion) process.exitCode = 1;
   `);
+  process.stderr.write('Managed acceptance: managed update\n');
   const updated = JSON.parse((await exec(managedNode, [updateDriver], { cwd: project, env: environment, timeout: 120000, maxBuffer: 1024 * 1024 })).stdout);
   assert.equal(updated.ok, true);
   assert.equal(updated.outcome, 'current');
@@ -90,7 +96,22 @@ test('official bootstrap installs and reuses a complete managed runtime without 
     const shell = await exec('/bin/sh', ['-c', '. "$HOME/.profile"; command -v postplus'], { env: environment });
     assert.equal(shell.stdout.trim(), launcher, 'new shells choose the managed command');
   }
+  process.stderr.write('Managed acceptance: explicit runtime repair\n');
+  await writeFile(managedNode, 'deliberately damaged test runtime');
+  const repaired = JSON.parse((await invoke(true)).stdout);
+  assert.equal(repaired.ok, true);
+  assert.ok(repaired.installation.repairs.some(item => item.component === 'runtime'));
+  const repairedActive = (await readFile(join(program, 'active'), 'utf8')).split('\n');
+  assert.notEqual(repairedActive[3], active[3], 'repair selects a fresh immutable runtime directory');
+  assert.equal(await readFile(managedNode, 'utf8'), 'deliberately damaged test runtime', 'repair leaves the previous generation untouched');
+  assert.equal((await launch(['--version'])).stdout.trim(), release.cliVersion);
+  assert.equal(JSON.parse((await invoke()).stdout).installation.reusedRuntime, true);
+  assert.equal(downloads.node, 2, 'the repaired private runtime is reused by subsequent installation');
   const saved = JSON.parse(await readFile(join(config, 'config.json'), 'utf8'));
   for (const [name, value] of Object.entries(existingConfig)) assert.equal(saved[name], value);
-  t.diagnostic(`CLI=${release.cliVersion}; Node=${release.node.version}; skills=${installed.skillCount}; first/repeat/verify/update=0; Node downloads=1; prior identity preserved`);
+  t.diagnostic(`CLI=${release.cliVersion}; Node=${release.node.version}; skills=${installed.skillCount}; first/repeat/verify/update/repair/reuse=0; Node downloads=2; prior identity preserved`);
+  } catch (error) {
+    process.stderr.write(String(error.stack ?? error) + '\n' + String(error.stdout ?? '').slice(-8000) + '\n' + String(error.stderr ?? '').slice(-8000) + '\n');
+    throw error;
+  }
 });

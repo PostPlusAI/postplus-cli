@@ -9,7 +9,7 @@ import { fetchRelease, validateRelease } from './distribution.mjs';
 import { registerCommandPath } from './path-registration.mjs';
 import { defaultInstallRoot, installRelease } from './installation.mjs';
 
-export async function setup({ release, root = defaultInstallRoot(), command = 'install', currentDirectory = false, programOnly = false,
+export async function setup({ release, root = defaultInstallRoot(), command = 'install', currentDirectory = false, programOnly = false, repair = false,
   cliArchive, nodeArchive, environment = process.env, fetchFn = diagnosticFetch }) {
   const env = { ...environment, POSTPLUS_INSTALL_ROOT: root };
   // Resolve the runtime we selected. User NODE_OPTIONS cannot redirect a managed
@@ -17,7 +17,7 @@ export async function setup({ release, root = defaultInstallRoot(), command = 'i
   delete env.NODE_OPTIONS;
   delete env.NODE_PATH;
   const run = async (executable, args) => (await runCommand(executable, args, { env, timeoutMs: 300_000 })).stdout;
-  return installRelease({ release, root, fetchFn, run, cliArchive, nodeArchive,
+  return installRelease({ release, root, fetchFn, run, cliArchive, nodeArchive, repair,
     afterActivate: async installed => {
       if (programOnly) {
         const pathRegistration = await registerCommandPath(installed.root);
@@ -41,7 +41,7 @@ export async function setup({ release, root = defaultInstallRoot(), command = 'i
       const pathRegistration = await registerCommandPath(installed.root);
       return { ...report, installation: { managed: true, commandPath: installed.commandPath,
         cliVersion: release.cliVersion, nodeVersion: release.node.version,
-        reusedRuntime: installed.reusedNode, pathRegistration,
+        reusedRuntime: installed.reusedNode, repairs: installed.repairs, pathRegistration,
         currentSessionAction: `Use ${installed.commandPath} for subsequent commands in this session; new shells will load the registered PATH.` },
         nextAction: report.session?.newSessionRequired ? report.session.action : 'Continue the user’s original task.' };
     },
@@ -54,8 +54,10 @@ async function main(args) {
   const options = {};
   let currentDirectory = false;
   let programOnly = false;
+  let repair = false;
   while (args.length) {
     const key = args.shift();
+    if (key === '--repair') { repair = true; continue; }
     if (key === '--program-only') { programOnly = true; continue; }
     if (key === '--current-directory') { currentDirectory = true; continue; }
     if (!['--root', '--release-file', '--cli-archive', '--node-archive'].includes(key) || !args[0] || args[0].startsWith('--')) throw new Error('Invalid PostPlus setup option.');
@@ -65,7 +67,7 @@ async function main(args) {
   const release = options['--release-file']
     ? validateRelease(JSON.parse(await readFile(resolve(options['--release-file']), 'utf8')))
     : await fetchRelease(diagnosticFetch);
-  const report = await setup({ command, currentDirectory, programOnly, release,
+  const report = await setup({ command, currentDirectory, programOnly, repair, release,
     root: options['--root'] || defaultInstallRoot(), cliArchive: options['--cli-archive'], nodeArchive: options['--node-archive'] });
   process.stdout.write(JSON.stringify(report) + '\n');
 }

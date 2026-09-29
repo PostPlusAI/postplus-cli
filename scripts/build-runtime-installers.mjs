@@ -20,7 +20,7 @@ export async function writeBootstrapScripts(root, release) {
 set -eu
 fail() { printf 'PostPlus setup could not finish: %s\\n' "$1" >&2; exit 1; }
 for argument in "$@"; do
-  case "$argument" in --current-directory|--program-only) ;; *) fail 'Unknown PostPlus installer option.' ;; esac
+  case "$argument" in --current-directory|--program-only|--repair) ;; *) fail 'Unknown PostPlus installer option.' ;; esac
 done
 case "$(uname -s)" in Darwin) platform=darwin ;; Linux) platform=linux ;; *) fail 'This operating system is not supported by this installer.' ;; esac
 case "$(uname -m)" in arm64|aarch64) arch=arm64 ;; x86_64|amd64) arch=x64 ;; *) fail 'This processor is not supported by this installer.' ;; esac
@@ -41,9 +41,18 @@ trap 'exit 143' TERM
 download() { curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 300 "$1" -o "$2" || fail 'The environment could not download the required PostPlus components.'; }
 printf '%s\\n' 'Preparing the PostPlus runtime and program. Your system Node will not be changed.' >&2
 unset NODE_OPTIONS NODE_PATH
+repair=''
+for argument in "$@"; do [ "$argument" != --repair ] || repair=--repair; done
 node_archive=''
 runtime_node="$install_root/runtimes/node-v${release.node.version}-$platform-$arch-$(printf '%.12s' "$node_sha")/bin/node"
-if [ -x "$runtime_node" ]; then
+if [ -z "$repair" ] && [ -f "$install_root/active" ]; then
+  { IFS= read -r record_header; IFS= read -r record_cli; IFS= read -r record_version; IFS= read -r record_node; } < "$install_root/active" || fail 'The PostPlus installation record needs --repair.'
+  if [ "$record_header" = postplus-installation-v1 ] && [ "$record_version" = ${quote(release.node.version)} ]; then
+    case "$record_node" in *..*|*[!A-Za-z0-9_./-]*) fail 'The PostPlus installation record needs --repair.' ;; esac
+    case "$record_node" in runtimes/node-v${release.node.version}-$platform-$arch-$(printf '%.12s' "$node_sha")*/bin/node) runtime_node="$install_root/$record_node" ;; *) fail 'The PostPlus installation record needs --repair.' ;; esac
+  fi
+fi
+if [ -z "$repair" ] && [ -x "$runtime_node" ]; then
   [ "$("$runtime_node" --version)" = ${quote('v' + release.node.version)} ] || fail 'The existing PostPlus runtime needs repair.'
 else
   download "$node_url" "$temp/node.tar.gz"
@@ -69,11 +78,12 @@ set -- install --root "$install_root" --release-file "$temp/release.json" --cli-
 if [ -n "$node_archive" ]; then set -- "$@" --node-archive "$node_archive"; fi
 if [ -n "$scope" ]; then set -- "$@" "$scope"; fi
 if [ -n "$program_only" ]; then set -- "$@" "$program_only"; fi
+if [ -n "$repair" ]; then set -- "$@" "$repair"; fi
 "$runtime_node" "$temp/cli/${release.cli.directory}/runtime-manager/index.mjs" "$@"
 `;
   await writeFile(join(root, 'dist/install.sh'), script, { mode: 0o755 });
   const windows = Object.fromEntries(Object.entries(release.node.artifacts).filter(([key]) => key.startsWith('win32-')));
-  const ps = `param([switch]$CurrentDirectory, [switch]$ProgramOnly)
+  const ps = `param([switch]$CurrentDirectory, [switch]$ProgramOnly, [switch]$Repair)
 $ErrorActionPreference = 'Stop'
 $temp = $null
 try {
@@ -99,7 +109,19 @@ ${JSON.stringify(release, null, 2)}
   Remove-Item Env:NODE_PATH -ErrorAction SilentlyContinue
   $nodeArchive = $null
   $node = Join-Path $installRoot ('runtimes/node-v' + $release.node.version + '-win32-' + $arch + '-' + $artifact.sha256.Substring(0,12) + '/node.exe')
-  if (Test-Path -LiteralPath $node -PathType Leaf) {
+  $activeFile = Join-Path $installRoot 'active'
+  if (-not $Repair -and (Test-Path -LiteralPath $activeFile -PathType Leaf)) {
+    $active = [IO.File]::ReadAllLines($activeFile)
+    if ($active.Length -ne 6 -or $active[0] -ne 'postplus-installation-v1') { throw 'The PostPlus installation record needs -Repair.' }
+    if ($active[2] -eq $release.node.version) {
+      $relativeNode = $active[3]
+      if ($relativeNode -notmatch '^[A-Za-z0-9_./-]+$' -or $relativeNode.Contains('..') -or
+          -not $relativeNode.StartsWith('runtimes/node-v' + $release.node.version + '-win32-' + $arch + '-' + $artifact.sha256.Substring(0,12)) -or
+          -not $relativeNode.EndsWith('/node.exe')) { throw 'The PostPlus installation record needs -Repair.' }
+      $node = Join-Path $installRoot $relativeNode
+    }
+  }
+  if (-not $Repair -and (Test-Path -LiteralPath $node -PathType Leaf)) {
     $version = & $node --version
     if ($LASTEXITCODE -ne 0 -or $version -ne ('v' + $release.node.version)) { throw 'The existing PostPlus runtime needs repair.' }
   } else {
@@ -122,6 +144,7 @@ ${JSON.stringify(release, null, 2)}
   if ($nodeArchive) { $setupArgs += @('--node-archive', $nodeArchive) }
   if ($CurrentDirectory) { $setupArgs += '--current-directory' }
   if ($ProgramOnly) { $setupArgs += '--program-only' }
+  if ($Repair) { $setupArgs += '--repair' }
   & $node @setupArgs
   if ($LASTEXITCODE -ne 0) { throw 'PostPlus setup did not finish; see its result above.' }
 } catch {

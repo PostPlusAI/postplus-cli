@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
@@ -42,17 +42,22 @@ export async function verifyArtifactDirectory(directory, sha256) {
   }
 }
 
-export async function prepareArtifact(root, artifact, destination, fetchFn, archiveFile) {
-  try {
-    await lstat(destination);
-    await verifyArtifactDirectory(destination, artifact.sha256);
-    return { directory: destination, reused: true };
-  } catch (error) {
-    // An existing but corrupt directory is a failure, not permission to overwrite
-    // files that another running CLI might still use.
-    if (error.code !== 'ENOENT') throw error;
-    try { await lstat(destination); throw new Error('Managed artifact is incomplete. No running installation was changed.'); }
-    catch (nested) { if (nested.code !== 'ENOENT') throw nested; }
+export async function prepareArtifact(root, artifact, destination, fetchFn, archiveFile, { repair = false } = {}) {
+  let exists = false;
+  let repairReason;
+  try { await lstat(destination); exists = true; }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (exists) {
+    try {
+      await verifyArtifactDirectory(destination, artifact.sha256);
+      return { directory: destination, reused: true, repaired: false };
+    } catch (error) {
+      if (!repair) throw error;
+      // An explicitly requested repair prepares a new immutable generation.
+      // Never overwrite or remove files that a running process could hold.
+      repairReason = error.message;
+      destination += `-repair-${randomUUID()}`;
+    }
   }
   await mkdir(root, { recursive: true });
   const temp = await mkdtemp(join(root, '.prepare-'));
@@ -71,6 +76,6 @@ export async function prepareArtifact(root, artifact, destination, fetchFn, arch
     await writeFile(join(staged, RECEIPT), JSON.stringify({ schemaVersion: 1, sha256: artifact.sha256, contentHash }) + '\n', { mode: 0o600 });
     await mkdir(join(destination, '..'), { recursive: true });
     await rename(staged, destination);
-    return { directory: destination, reused: false };
+    return { directory: destination, reused: false, repaired: Boolean(repairReason), ...(repairReason ? { repairReason } : {}) };
   } finally { await rm(temp, { recursive: true, force: true }); }
 }

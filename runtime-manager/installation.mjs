@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { prepareArtifact } from './artifacts.mjs';
 import { activateInstallation, readInstallation, verifyInstallation, withInstallationLock } from './state.mjs';
@@ -20,17 +20,38 @@ async function writeLauncher(root, source, name) {
   finally { await rm(temp, { force: true }); }
 }
 
-export async function installRelease({ release, root, fetchFn, run, cliArchive, nodeArchive, afterActivate }) {
+export async function installRelease({ release, root, fetchFn, run, cliArchive, nodeArchive, afterActivate, repair = false }) {
   validateRelease(release);
   root = resolve(root);
   return withInstallationLock(root, async () => {
     root = await realpath(root);
-    const previous = await readInstallation(root);
+    let previous;
+    const repairs = [];
+    try { previous = await readInstallation(root); }
+    catch (error) {
+      if (!repair) throw error;
+      previous = null;
+      repairs.push({ component: 'installation-record', reason: error.message });
+    }
     const artifact = selectNodeArtifact(release);
-    const nodeDirectory = `runtimes/node-v${release.node.version}-${process.platform}-${process.arch}-${artifact.sha256.slice(0, 12)}`;
-    const cliDirectory = `versions/${release.cliVersion}/${release.cli.sha256}`;
-    const nodeResult = await prepareArtifact(root, artifact, join(root, nodeDirectory), fetchFn, nodeArchive);
-    const cliResult = await prepareArtifact(root, release.cli, join(root, cliDirectory), fetchFn, cliArchive);
+    let nodeDirectory = `runtimes/node-v${release.node.version}-${process.platform}-${process.arch}-${artifact.sha256.slice(0, 12)}`;
+    let cliDirectory = `versions/${release.cliVersion}/${release.cli.sha256}`;
+    // A prior explicit repair may have selected a fresh generation of these
+    // same approved bytes. Reuse that generation only after full verification.
+    const nodeSuffix = process.platform === 'win32' ? '/node.exe' : '/bin/node';
+    if (previous?.node.startsWith(nodeDirectory + '-repair-') && previous.node.endsWith(nodeSuffix)) {
+      nodeDirectory = previous.node.slice(0, -nodeSuffix.length);
+    }
+    if (previous?.cli.startsWith(cliDirectory + '-repair-') && previous.cli.endsWith('/build/index.js')) {
+      cliDirectory = previous.cli.slice(0, -'/build/index.js'.length);
+    }
+    const nodeResult = await prepareArtifact(root, artifact, join(root, nodeDirectory), fetchFn, nodeArchive, { repair });
+    const cliResult = await prepareArtifact(root, release.cli, join(root, cliDirectory), fetchFn, cliArchive, { repair });
+    nodeDirectory = relative(root, nodeResult.directory).replaceAll('\\', '/');
+    cliDirectory = relative(root, cliResult.directory).replaceAll('\\', '/');
+    for (const [component, result] of [['runtime', nodeResult], ['program', cliResult]]) {
+      if (result.repaired) repairs.push({ component, reason: result.repairReason });
+    }
     const pkg = JSON.parse(await readFile(join(cliResult.directory, 'package.json'), 'utf8'));
     const skills = JSON.parse(await readFile(join(cliResult.directory, 'bundled-skills/skills-manifest.json'), 'utf8'));
     if (pkg.name !== '@postplus/cli' || pkg.version !== release.cliVersion || skills.releaseId !== release.skillsReleaseId) {
@@ -53,7 +74,7 @@ export async function installRelease({ release, root, fetchFn, run, cliArchive, 
     // The active record is the only switch. Existing commands retain their
     // immutable files; no old program/runtime directory is deleted here.
     await activateInstallation(root, installation, run);
-    const result = { root, installation, previous, reusedNode: nodeResult.reused,
+    const result = { root, installation, previous, repairs, reusedNode: nodeResult.reused,
       reusedCli: cliResult.reused, commandPath: join(root, 'bin', process.platform === 'win32' ? 'postplus.cmd' : 'postplus') };
     return afterActivate ? afterActivate(result) : result;
   });
