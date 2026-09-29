@@ -8,11 +8,10 @@ import test from 'node:test';
 import { buildVerbTargetIndex } from './hosted-manifest-index.js';
 
 const exec = promisify(execFile);
-const paths: string[][] = [[], ...['doctor', 'status', 'list', 'version', 'install', 'update', 'uninstall', 'auth', 'skills', 'quote', 'balance', 'runs', 'studio', 'workflow', 'research', 'media', 'media-file'].map(x => [x]),
+const paths: string[][] = [[], ...['doctor', 'status', 'list', 'version', 'install', 'update', 'uninstall', 'auth', 'skills', 'quote', 'balance', 'runs', 'studio', 'research', 'media', 'media-file'].map(x => [x]),
   ...['login', 'refresh', 'revoke', 'status', 'validate', 'logout'].map(x => ['auth', x]),
   ['skills', 'verify'], ['quote', 'confirm'], ['runs', 'list'], ['runs', 'show'],
   ...['init', 'open', 'status'].map(x => ['studio', x]),
-  ...['list', 'show', 'runs', 'run-show', 'create', 'propose', 'save', 'quote', 'launch'].map(x => ['workflow', x]),
   ...['research', 'media'].map(x => [x, 'schema']),
   ['research', 'run'], ['media', 'estimate'], ['media', 'poll'], ['media', 'prepare'],
   ['media-file', 'upload'], ['media-file', 'download'],
@@ -76,7 +75,7 @@ test('invalid options suggest the nearest valid command help and diagnostics exp
   const directory = await mkdtemp(join(tmpdir(), 'postplus-help-errors-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const options = { env: { ...process.env, HOME: directory, POSTPLUS_CONFIG_DIR: directory, POSTPLUS_ACCESS_TOKEN: '', POSTPLUS_REFRESH_TOKEN: '' } };
-  for (const path of [['doctor'], ['auth', 'status'], ['skills', 'verify'], ['runs', 'list'], ['studio', 'open'], ['workflow', 'list']]) {
+  for (const path of [['doctor'], ['auth', 'status'], ['skills', 'verify'], ['runs', 'list'], ['studio', 'open']]) {
     await assert.rejects(exec(process.execPath, ['--import', 'tsx', 'src/index.ts', ...path, '--not-an-option', '--json'], options), (error: any) => {
       const failure = JSON.parse(error.stdout).error;
       assert.equal(failure.code, 'postplus_invalid_arguments');
@@ -95,7 +94,7 @@ test('invalid options suggest the nearest valid command help and diagnostics exp
 
 
 test('unknown public subcommands return one JSON failure and a valid family help action', async () => {
-  for (const command of ['media','research','workflow','studio','runs','media-file']) {
+  for (const command of ['media','research','studio','runs','media-file']) {
     await assert.rejects(exec(process.execPath,['--import','tsx','src/index.ts',command,'not-a-command','--json']), (error:any) => {
       const payload=JSON.parse(error.stdout);
       assert.equal(payload.ok,false,command);
@@ -113,6 +112,23 @@ test('retired publish command is absent from the public CLI', async () => {
     assert.equal(payload.error.action, 'Run postplus --help.');
     return true;
   });
+});
+
+test('retired workflow commands are rejected as unknown top-level commands', async () => {
+  await assert.rejects(
+    exec(process.execPath, [
+      '--import', 'tsx', 'src/index.ts', 'workflow', 'list', '--json',
+    ]),
+    (error: any) => {
+      assert.equal(error.stderr, '');
+      const failure = JSON.parse(error.stdout);
+      assert.equal(failure.ok, false);
+      assert.equal(failure.error.code, 'postplus_unknown_command');
+      assert.match(failure.error.message, /Unknown command: workflow/u);
+      assert.equal(failure.error.action, 'Run postplus --help.');
+      return true;
+    },
+  );
 });
 
 
