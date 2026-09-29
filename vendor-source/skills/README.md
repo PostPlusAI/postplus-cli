@@ -24,7 +24,11 @@ and tarballs, reapplying the patch, and rerunning acceptance. Builds do not fetc
 network content or resolve moving dependency versions. No upstream install hooks
 are executed. License and notice files are copied from every original package.
 
-The patch extends read-only JSON listing and one exact-path PostPlus removal command. `directories` preserves each
+The patch extends read-only JSON listing and one exact-path PostPlus removal command.
+Its final shutdown drains stdout and stderr before exiting, preserving complete
+large JSON results when the parent reads a pipe slowly. The upstream bounded
+telemetry wait remains in place, and uncaught command errors retain a failure
+exit status. `directories` preserves each
 physical entry instead of collapsing independent copies by display name:
 
 - `path`: actual entry path, including the agent's symlink path.

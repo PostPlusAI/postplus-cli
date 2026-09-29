@@ -312,7 +312,13 @@ test('request cancellation retains timeout category', async (t) => {
   syncBuiltinESMExports();
   directConnection(t);
   const fetch = await createImageSourceFetcher();
-  await assert.rejects(fetch(`https://${target}/photo`, AbortSignal.timeout(30)), {
+  // The DNS mock has no live socket or timer. AbortSignal.timeout uses an
+  // unreferenced timer, so older supported Node versions can exit before it
+  // fires. Own the cancellation timer just as the real request owns its socket.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30);
+  t.after(() => clearTimeout(timer));
+  await assert.rejects(fetch(`https://${target}/photo`, controller.signal), {
     message: 'media_source_timeout',
   });
 });

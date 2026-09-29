@@ -112,3 +112,17 @@
  	const agentResult = await detectAgent();
  	if (agentResult.isAgent) {
  		options.yes = true;
+@@ -8006,3 +8006,12 @@
+ }
+-main().finally(() => flushTelemetry().then(() => process.exit(process.exitCode ?? 0)));
++// Drain both pipes before the bounded shutdown; process.exit alone can truncate JSON.
++main().catch((error) => {
++ console.error(error);
++ process.exitCode = 1;
++}).finally(async () => {
++ await flushTelemetry();
++ await Promise.all([process.stdout, process.stderr].map((stream) =>
++  new Promise((resolve, reject) => stream.write("", (error) => error ? reject(error) : resolve()))));
++ process.exit(process.exitCode ?? 0);
++});
+ export {};

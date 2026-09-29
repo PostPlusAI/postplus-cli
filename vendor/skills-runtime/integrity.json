@@ -60,10 +60,10 @@
       "archive": "yaml.tgz"
     }
   ],
-  "patchSha256": "5e02cb0ae975e54919e4b3b3290fde4b630e8e42f28acf9f561b5e40b2e81b78",
+  "patchSha256": "46687ee2f88733f60d987100f4f8cbb685bb750708d4171ff91ff50b7dcfe92b",
   "files": {
     "cli.mjs": "bfa0655e66f3a757d7268a1e4cac127391a0860e19d90a8150863fdea3671b1c",
-    "dist/cli.mjs": "f6816840d775e92f24c4249e4d6b4f7e0b53a3987063e3005b0e9619ad3ccf2c",
+    "dist/cli.mjs": "c7b84125c019a79b1832e1f4da25ed793f96664d696ff038b2a3ef925963a2e6",
     "licenses/@isaacs-fs-minipass/LICENSE": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
     "licenses/chownr/LICENSE.md": "a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09",
     "licenses/minipass/LICENSE.md": "8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004",

@@ -24650,4 +24650,11 @@ async function main() {
       process.exitCode = 1;
   }
 }
-main().finally(() => flushTelemetry().then(() => process.exit(process.exitCode ?? 0)));
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+}).finally(async () => {
+  await flushTelemetry();
+  await Promise.all([process.stdout, process.stderr].map((stream) => new Promise((resolve2, reject) => stream.write("", (error) => error ? reject(error) : resolve2()))));
+  process.exit(process.exitCode ?? 0);
+});
