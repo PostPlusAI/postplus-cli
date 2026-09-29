@@ -6,12 +6,13 @@ You do not need to learn skill names or read a shared rulebook first.
 
 ## Install and start
 
-Requires Node.js >=24.5.0 and npm.
+Ask your agent to follow the [official installation guide](https://postplus.io/postplus-agent-install.md).
+The installer prepares PostPlus and its dedicated runtime automatically.
+You do not need to install or upgrade Node.js or npm, and your system Node is not changed.
 
-```bash
-npm install -g @postplus/cli@latest
-postplus install
-```
+After installation, the agent uses the command path returned by the installer
+for the current session, then continues your original task. New shells use the
+registered `postplus` command.
 
 The CLI includes its matching skills and verifies actual installed content.
 Follow the completion message for session reload and continuing your task.

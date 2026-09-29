@@ -90,7 +90,7 @@ type UpdateCheckDependencies = {
 
 export type CliSelfUpdateResult = {
   failure?: FailureFact;
-  command: typeof POSTPLUS_CLI_UPDATE_COMMAND;
+  command: typeof POSTPLUS_CLI_UPDATE_COMMAND | typeof POSTPLUS_UPDATE_COMMAND;
   currentVersion: string;
   exitCode: number | null;
   latestVersion: string;
@@ -422,7 +422,7 @@ export async function runCliSelfUpdateIfOutdated(
     }
 
     return {
-      command: POSTPLUS_CLI_UPDATE_COMMAND,
+      command: environment.POSTPLUS_INSTALL_ROOT ? POSTPLUS_UPDATE_COMMAND : POSTPLUS_CLI_UPDATE_COMMAND,
       currentVersion,
       exitCode: null,
       latestVersion: continuationVersion,
@@ -438,7 +438,7 @@ export async function runCliSelfUpdateIfOutdated(
     });
     // The manager verifies the runtime even when the CLI version is unchanged.
     // Its continuation already produced the one final command report.
-    return { command: POSTPLUS_CLI_UPDATE_COMMAND, currentVersion,
+    return { command: POSTPLUS_UPDATE_COMMAND, currentVersion,
       latestVersion: result.latestVersion, exitCode: result.exitCode, updateAvailable: true };
   }
 
