@@ -36,3 +36,25 @@ test('legacy channel action verbs fail before any hosted request', async () => {
   for (const verb of ['actions', 'run', 'run-status'])
     await assert.rejects(runChannelsCommand([verb]), /retired/);
 });
+
+test('connection mutations with lost responses report unknown without retrying', async () => {
+  for (const verb of ['connect', 'disconnect']) {
+    let calls = 0;
+    const output: string[] = [];
+    const code = await runChannelsCommand([verb, 'fixture'], {
+      request: async () => { calls++; throw new TypeError('fetch failed'); },
+      output: (text) => output.push(text),
+    });
+    assert.equal(code, 2);
+    assert.equal(calls, 1);
+    const result = JSON.parse(output[0]!);
+    assert.equal(result.execution.resultStatus, 'unknown');
+    assert.match(result.next, /channels list/);
+  }
+  await assert.rejects(runChannelsCommand(['list'], {
+    request: async () => { throw new TypeError('fetch failed'); },
+  }), /fetch failed/);
+  await assert.rejects(runChannelsCommand(['connect', 'fixture'], {
+    request: async () => { throw new Error('configuration failure'); },
+  }), /configuration failure/);
+});

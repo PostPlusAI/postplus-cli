@@ -287,3 +287,37 @@ test('lost submission classifies TLS errors without retaining credentials or cla
   assert.equal(result.execution.resultStatus, 'unknown');
   assert.ok(!JSON.stringify(result).includes('secret'));
 });
+
+test('catalog HTML gateway errors retain HTTP status', async () => {
+  await assert.rejects(runChannelToolCommand(['list'], {
+    requestCatalog: async () => new Response('<html>gateway</html>', { status: 502 }),
+    output: () => {},
+  }), /502/);
+});
+
+test('accepted submission with a failed status poll stays unknown without resubmission', async () => {
+  const bodies: unknown[] = [];
+  const messages: string[] = [];
+  const code = await runChannelToolCommand([
+    'run', 'GOOGLEADS_MUTATE_CAMPAIGNS', '--connection', 'fixture',
+    '--input-file', 'input.json', '--operation-id', 'accepted-op', '--wait',
+  ], {
+    readInput: async () => '{}',
+    submit: async ({ body }) => {
+      bodies.push(body);
+      if (bodies.length === 1) return { output: { status: 'accepted', execution: { resultStatus: 'pending' } } };
+      throw new Error('private status response');
+    },
+    output: (text) => messages.push(text), diagnostic: () => {},
+  });
+  assert.equal(code, 2);
+  assert.equal(bodies.length, 2);
+  assert.equal((bodies[1] as {operation: string}).operation, 'status');
+  const result = JSON.parse(messages[0]!);
+  assert.equal(result.operationId, 'accepted-op');
+  assert.equal(result.execution.resultStatus, 'unknown');
+  assert.equal(result.error.stage, 'cli_status_poll');
+  assert.equal(result.error.delivery, 'accepted');
+  assert.match(result.next, /run --status accepted-op/);
+  assert.ok(!messages.join('').includes('private status'));
+});

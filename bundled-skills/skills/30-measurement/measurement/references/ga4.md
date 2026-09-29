@@ -53,7 +53,9 @@ current source for tool availability, required fields and enums.
 Get the property's current field dictionary with
 `GOOGLE_ANALYTICS_GET_METADATA` and
 `{"name":"properties/123456789/metadata"}`. Read the actual
-`dimensions[].apiName` and `metrics[].apiName`, including custom fields. For
+`dimensions[].apiName` and `metrics[].apiName`, including custom fields. Check
+`metrics[].blockedReasons` for every selected metric. If nonempty, report that
+metric as unavailable for this user; a returned zero is not observed activity. For
 “Which sources brought engaged sessions?”, check the complete combination:
 
 <!-- tool-input: GOOGLE_ANALYTICS_CHECK_COMPATIBILITY -->
@@ -117,3 +119,5 @@ zero real-world visits or a broken tag.
 If a report's result changes or removes a requested field, disclose that
 instead of assigning the old label to new data. Never sum unique users across
 overlapping groups or interpret these sessions as attributed ad conversions.
+
+Metric access semantics: [Google Analytics MetricMetadata](https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/MetricMetadata).

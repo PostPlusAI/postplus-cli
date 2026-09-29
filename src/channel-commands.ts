@@ -1,4 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import { isNetworkFailure, isTlsFailure } from './network-diagnostics.js';
 
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
@@ -34,7 +35,10 @@ export function parseChannelCommand(args: string[]) {
   );
 }
 
-export async function runChannelsCommand(args: string[]): Promise<number> {
+export async function runChannelsCommand(args: string[], dependencies: {
+  request?: (command: ReturnType<typeof parseChannelCommand>) => Promise<Response>;
+  output?: (text: string) => void;
+} = {}): Promise<number> {
   if (
     !args.length ||
     args.some((arg) => ['help', '--help', '-h'].includes(arg))
@@ -115,17 +119,35 @@ do not resubmit it with a new operation ID.
     );
   }
   const command = parseChannelCommand(args);
-  const auth = await resolveFreshRemoteAuth();
-  const response = await sendAuthedCloudRequest({
-    auth,
-    ...command,
-    timeoutMs: 90_000,
-    retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
-  });
+  const output = dependencies.output ?? ((text: string) => process.stdout.write(text));
+  const uncertain = (code = 'response_unavailable') => {
+    output(`${JSON.stringify({
+      execution: { resultStatus: 'unknown' },
+      error: { stage: 'cli_connection_request', code, delivery: 'unconfirmed' },
+      next: 'Run postplus channels list and inspect connection status before retrying this change.',
+    }, null, 2)}\n`);
+    return 2;
+  };
+  let response: Response;
+  try {
+    response = dependencies.request
+      ? await dependencies.request(command)
+      : await sendAuthedCloudRequest({
+          auth: await resolveFreshRemoteAuth(),
+          ...command,
+          timeoutMs: 90_000,
+          retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
+        });
+  } catch (error) {
+    if (command.method === 'POST' && (isNetworkFailure(error) || isTlsFailure(error)))
+      return uncertain(isTlsFailure(error) ? 'tls_error' : 'network_error');
+    throw error;
+  }
   let payload: unknown;
   try {
     payload = await response.json();
   } catch {
+    if (command.method === 'POST') return uncertain();
     throw new Error(
       'PostPlus returned invalid channel JSON. Check connection status before retrying.',
     );
@@ -134,6 +156,6 @@ do not resubmit it with a new operation ID.
     throw new HostedProductRequestError(readHostedProductError(payload), response.status);
   }
   // JSON is also the lossless text representation until per-action renderers exist.
-  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+  output(`${JSON.stringify(payload, null, 2)}\n`);
   return 0;
 }

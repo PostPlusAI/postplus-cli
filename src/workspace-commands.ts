@@ -61,6 +61,7 @@ export async function switchWorkspace(accountId: string): Promise<unknown> {
       try {
         await setLocalSession({
           apiBaseUrl: auth.apiBaseUrl,
+          persistApiBaseUrl: auth.source !== 'env',
           accountId,
           userId: String(data.userId),
           cliSessionToken: data.cliSessionToken,

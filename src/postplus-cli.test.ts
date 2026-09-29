@@ -1,3 +1,4 @@
+import { switchWorkspace } from './workspace-commands.js';
 import { serializeInstallerEntries } from './fixtures/skills-bundle-fixture.test.js';
 import { INSTALLER_LABELS, writeFixtureBundle, writeInstalledFixture } from './fixtures/skills-bundle-fixture.test.js';
 import { hashSkillDirectory } from './skills-bundle.js';
@@ -2053,6 +2054,21 @@ describe('doctor and status', () => {
       'https://staging.postplus.example.com',
     );
 
+    const previousFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = async () => Response.json({
+        accountId: 'other-staging-workspace', accountName: 'Other staging',
+        accountType: 'team', userId: 'user-1', cliSessionToken: 'new-staging-session',
+        sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+      });
+      await switchWorkspace('other-staging-workspace');
+      const switchedConfig = await readLocalConfig();
+      assert.equal(switchedConfig?.apiBaseUrl, 'https://postplus.example.com');
+      assert.equal(switchedConfig?.sessionApiBaseUrl, 'https://staging.postplus.example.com');
+      assert.equal(switchedConfig?.accountId, 'other-staging-workspace');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
     delete process.env.POSTPLUS_API_BASE_URL;
     await assert.rejects(
       () => validateRemoteAuth(),

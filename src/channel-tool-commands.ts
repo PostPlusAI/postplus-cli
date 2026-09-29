@@ -204,6 +204,7 @@ export async function runChannelToolCommand(
   args: string[],
   dependencies: {
     readInput?: (path: string) => Promise<string>;
+    requestCatalog?: (pathName: string) => Promise<Response>;
     submit?: typeof postHostedJson;
     output?: (text: string) => void;
     diagnostic?: (text: string) => void;
@@ -229,17 +230,19 @@ export async function runChannelToolCommand(
     return channelToolExitCode(result);
   }
   if (command.operation !== 'run') {
-    const response = await sendAuthedCloudRequest({
-      auth: await resolveFreshRemoteAuth(),
-      pathName: command.pathName,
-      timeoutMs: 30_000,
-      retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
-    });
-    const payload: unknown = await response.json();
+    const response = dependencies.requestCatalog
+      ? await dependencies.requestCatalog(command.pathName)
+      : await sendAuthedCloudRequest({
+          auth: await resolveFreshRemoteAuth(),
+          pathName: command.pathName,
+          timeoutMs: 30_000,
+          retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
+        });
     if (!response.ok)
       throw new Error(
         `Channel tool catalog request failed (${response.status}).`,
       );
+    const payload: unknown = await response.json();
     output(`${JSON.stringify(payload, null, 2)}\n`);
     return 0;
   }
@@ -328,20 +331,30 @@ export async function runChannelToolCommand(
   }
   // A successful read carries its data only in the first response. Polling a
   // completed run would replace that response with its metadata-only receipt.
-  if (shouldPollChannelTool(command.wait, result))
-    result = await pollHostedRunUntilSettled({
-      pollIntervalMs: 1000,
-      waitBudgetMs: 60_000,
-      pollOnce: () =>
-        submit({
-          skillName: null,
-          pathName: '/api/postplus-cli/hosted/capability',
-          body: statusRequest,
-        }),
-      readStatus: (value) => readRun(value)?.status ?? null,
-      stopWaiting: (value) =>
-        readRun(value)?.execution?.resultStatus === 'unknown',
-    });
+  if (shouldPollChannelTool(command.wait, result)) {
+    try {
+      result = await pollHostedRunUntilSettled({
+          pollIntervalMs: 1000,
+          waitBudgetMs: 60_000,
+          pollOnce: () =>
+            submit({
+              skillName: null,
+              pathName: '/api/postplus-cli/hosted/capability',
+              body: statusRequest,
+            }),
+          readStatus: (value) => readRun(value)?.status ?? null,
+          stopWaiting: (value) =>
+            readRun(value)?.execution?.resultStatus === 'unknown',
+        });
+    } catch (error) {
+      const uncertain = lostChannelToolSubmission(command.operationId, error);
+      output(`${JSON.stringify({
+        ...uncertain,
+        error: { ...uncertain.error, stage: 'cli_status_poll', delivery: 'accepted' },
+      }, null, 2)}\n`);
+      return 2;
+    }
+  }
   output(`${JSON.stringify(result, null, 2)}\n`);
   return channelToolExitCode(result);
 }
