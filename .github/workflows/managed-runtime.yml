@@ -2,7 +2,7 @@ name: Managed Runtime Acceptance
 
 on:
   push:
-    branches: ['codex/cli-onboarding-runtime']
+    branches: ['main', 'codex/cli-onboarding-runtime']
   pull_request:
   workflow_dispatch:
 
@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Read managed Node policy
         id: runtime
         run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + require('./runtime-manager/node-releases.json').version + '\n')"
@@ -26,13 +28,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm release:package
+      - run: node scripts/write-runtime-candidate-receipt.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: managed-candidate
           path: |
-            dist/*.tar.gz
-            dist/*.sha256
+            dist/postplus-cli-v*.tar.gz
+            dist/postplus-cli-v*.tar.gz.sha256
             dist/postplus-runtime.json
+            dist/postplus-candidate.json
             dist/install.sh
             dist/install.ps1
           if-no-files-found: error
@@ -57,6 +61,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Read managed Node policy
         id: runtime
         run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + require('./runtime-manager/node-releases.json').version + '\n')"
