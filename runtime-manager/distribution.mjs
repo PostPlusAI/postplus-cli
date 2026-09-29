@@ -104,9 +104,9 @@ export async function extractArtifact(archive, artifact, destination) {
   // This is called only after verifying the exact approved archive digest.
   await mkdir(destination, { recursive: true });
   if (new URL(artifact.url).pathname.endsWith('.zip')) {
-    await exec('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-      'Expand-Archive -LiteralPath $env:POSTPLUS_ARCHIVE -DestinationPath $env:POSTPLUS_EXTRACT -ErrorAction Stop'],
-    { env: { ...process.env, POSTPLUS_ARCHIVE: archive, POSTPLUS_EXTRACT: destination }, timeout: 120_000 });
+    // Windows' native bsdtar supports ZIP as well as the CLI's tar archive.
+    // Use the same extractor for both bootstrap and later runtime updates.
+    await exec(TAR_EXECUTABLE, ['-xf', archive, '-C', destination], { timeout: 120_000 });
   } else {
     await exec(TAR_EXECUTABLE, ['-xzf', archive, '-C', destination], { timeout: 120_000 });
   }

@@ -129,7 +129,9 @@ ${JSON.stringify(release, null, 2)}
     [Console]::Error.WriteLine('Downloading the verified PostPlus runtime.')
     Download-Verified $artifact.url $artifact.sha256 $nodeArchive
     [Console]::Error.WriteLine('Unpacking the PostPlus runtime.')
-    Expand-Archive -LiteralPath $nodeArchive -DestinationPath (Join-Path $temp 'node')
+    New-Item -ItemType Directory -Path (Join-Path $temp 'node') | Out-Null
+    & (Join-Path $env:SystemRoot 'System32/tar.exe') -xf $nodeArchive -C (Join-Path $temp 'node')
+    if ($LASTEXITCODE -ne 0) { throw 'The PostPlus runtime archive could not be unpacked.' }
     $node = Join-Path (Join-Path $temp 'node') ($artifact.directory + '/node.exe')
   }
   $cliArchive = Join-Path $temp 'cli.tar.gz'

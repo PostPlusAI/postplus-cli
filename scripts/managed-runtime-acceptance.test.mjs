@@ -57,7 +57,12 @@ test('official bootstrap installs and reuses a complete managed runtime without 
     CURL_CA_BUNDLE: cert, NODE_EXTRA_CA_CERTS: cert, DISABLE_TELEMETRY: '1', DO_NOT_TRACK: '1' };
   await assert.rejects(windows ? exec('where.exe', ['node'], { env: environment }) : exec('/bin/sh', ['-c', 'command -v node'], { env: environment }), 'test environment must not resolve a system Node');
   if (windows) process.stderr.write((await exec(join(process.env.SystemRoot, 'System32/curl.exe'), ['--version'], { env: environment, timeout: 10000 })).stdout);
-  const invoke = (repair = false) => exec(windows ? 'powershell.exe' : '/bin/sh', windows ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dist, 'install.ps1'), ...(repair ? ['-Repair'] : [])] : [join(dist, 'install.sh'), ...(repair ? ['--repair'] : [])], { cwd: project, env: environment, timeout: 120000, maxBuffer: 1024 * 1024 });
+  const execWithProgress = (...args) => {
+    const pending = exec(...args);
+    pending.child.stderr.on('data', chunk => process.stderr.write(chunk));
+    return pending;
+  };
+  const invoke = (repair = false) => execWithProgress(windows ? 'powershell.exe' : '/bin/sh', windows ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dist, 'install.ps1'), ...(repair ? ['-Repair'] : [])] : [join(dist, 'install.sh'), ...(repair ? ['--repair'] : [])], { cwd: project, env: environment, timeout: 120000, maxBuffer: 1024 * 1024 });
   process.stderr.write('Managed acceptance: first installation\n');
   const first = await invoke(); const installed = JSON.parse(first.stdout);
   assert.equal(installed.ok, true); assert.equal(installed.diskReady, true);
