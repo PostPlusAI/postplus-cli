@@ -13,7 +13,7 @@ import { hashDirectory } from '../runtime-manager/artifacts.mjs';
 const exec = promisify(execFile);
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('official bootstrap installs and reuses a complete managed runtime without system Node', { timeout: 240000 }, async t => {
+test('official bootstrap installs and reuses a complete managed runtime independently of system Node', { timeout: 240000 }, async t => {
   let server;
   const sockets = new Set();
   try {
@@ -64,6 +64,15 @@ test('official bootstrap installs and reuses a complete managed runtime without 
     PATH: windows ? [join(process.env.SystemRoot, 'System32'), join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0')].join(';') : '/usr/bin:/bin', HOME: home, USERPROFILE: home,
     POSTPLUS_CONFIG_DIR: config, POSTPLUS_INSTALL_ROOT: program, XDG_CONFIG_HOME: join(home, '.config'),
     CURL_CA_BUNDLE: cert, NODE_EXTRA_CA_CERTS: cert, DISABLE_TELEMETRY: '1', DO_NOT_TRACK: '1' };
+  const hostNodeBin = process.env.POSTPLUS_TEST_HOST_NODE_BIN;
+  let hostNodeHash;
+  let hostNodeVersion;
+  if (hostNodeBin) {
+    environment.PATH = hostNodeBin + (windows ? ';' : ':') + environment.PATH;
+    hostNodeVersion = (await exec('node', ['--version'], { env: environment })).stdout.trim();
+    assert.match(hostNodeVersion, /^v22\./, 'host fixture must be a real Node 22 runtime');
+    hostNodeHash = await hashDirectory(dirname(hostNodeBin));
+  }
   const legacyPrefix = process.env.POSTPLUS_TEST_LEGACY_PREFIX;
   let legacyHash;
   if (legacyPrefix) {
@@ -77,11 +86,13 @@ test('official bootstrap installs and reuses a complete managed runtime without 
       ? await exec('where.exe', ['postplus'], { env: environment })
       : await exec('/bin/sh', ['-c', 'command -v postplus'], { env: environment });
     assert.ok(oldCommand.stdout.includes(legacyBin), 'the old npm entry initially owns the command');
-    await assert.rejects(windows
+    const oldInvocation = windows
       ? exec('cmd.exe', ['/d', '/c', 'postplus --version'], { env: environment })
-      : exec(join(legacyBin, 'postplus'), ['--version'], { env: environment }), 'old npm entry cannot start without its system Node');
+      : exec(join(legacyBin, 'postplus'), ['--version'], { env: environment });
+    if (hostNodeBin) await assert.rejects(oldInvocation, error => /requires Node\.js >=24\.5\.0; found 22\./.test(error.stderr), 'published old CLI rejects the otherwise runnable host Node 22');
+    else await assert.rejects(oldInvocation, 'old npm entry cannot start without its system Node');
   }
-  await assert.rejects(windows ? exec('where.exe', ['node'], { env: environment }) : exec('/bin/sh', ['-c', 'command -v node'], { env: environment }), 'test environment must not resolve a system Node');
+  if (!hostNodeBin) await assert.rejects(windows ? exec('where.exe', ['node'], { env: environment }) : exec('/bin/sh', ['-c', 'command -v node'], { env: environment }), 'test environment must not resolve a system Node');
   if (windows) process.stderr.write((await exec(join(process.env.SystemRoot, 'System32/curl.exe'), ['--version'], { env: environment, timeout: 10000 })).stdout);
   const execWithProgress = (...args) => {
     const pending = exec(...args);
@@ -152,7 +163,11 @@ test('official bootstrap installs and reuses a complete managed runtime without 
   const saved = JSON.parse(await readFile(join(config, 'config.json'), 'utf8'));
   for (const [name, value] of Object.entries(existingConfig)) assert.equal(saved[name], value);
   if (legacyPrefix) assert.equal(await hashDirectory(legacyPrefix), legacyHash, 'migration preserves the complete original npm installation');
-  t.diagnostic(`CLI=${release.cliVersion}; Node=${release.node.version}; skills=${installed.skillCount}; first/repeat/verify/update/repair/reuse=0; Node downloads=2; prior identity preserved`);
+  if (hostNodeBin) {
+    assert.equal(await hashDirectory(dirname(hostNodeBin)), hostNodeHash, 'host Node files remain unchanged');
+    assert.equal((await exec('node', ['--version'], { env: environment })).stdout.trim(), hostNodeVersion, 'host Node selection remains unchanged');
+  }
+  t.diagnostic(`hostNode=${hostNodeVersion ?? 'absent'}; CLI=${release.cliVersion}; Node=${release.node.version}; skills=${installed.skillCount}; first/repeat/verify/update/repair/reuse=0; Node downloads=2; prior identity preserved`);
   } catch (error) {
     process.stderr.write(String(error.stack ?? error) + '\n' + String(error.stdout ?? '').slice(-8000) + '\n' + String(error.stderr ?? '').slice(-8000) + '\n');
     throw error;
