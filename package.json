@@ -68,7 +68,20 @@
     "build/proxy-configuration.js",
     "build/channel-commands.js",
     "build/workspace-commands.js",
-    "build/channel-tool-commands.js"
+    "build/channel-tool-commands.js",
+    "runtime-manager/package.json",
+    "runtime-manager/state.mjs",
+    "runtime-manager/distribution.mjs",
+    "runtime-manager/artifacts.mjs",
+    "runtime-manager/installation.mjs",
+    "runtime-manager/index.mjs",
+    "runtime-manager/launch.sh",
+    "runtime-manager/launch.ps1",
+    "runtime-manager/launch.cmd",
+    "runtime-manager/node-releases.json",
+    "build/managed-runtime.js",
+    "runtime-manager/path-registration.mjs",
+    "runtime-manager/npm-entry.cjs"
   ],
   "publishConfig": {
     "access": "public",
@@ -78,7 +91,7 @@
     "node": ">=24.5.0"
   },
   "bin": {
-    "postplus": "build/index.js"
+    "postplus": "runtime-manager/npm-entry.cjs"
   },
   "exports": {
     "./hosted-lib": {
@@ -98,7 +111,9 @@
     "prepack": "node ./scripts/finalize-build.mjs",
     "vendor:skills:build": "node scripts/build-skills-runtime.mjs",
     "vendor:skills:check": "node scripts/check-skills-runtime.mjs",
-    "vendor:skills:test": "node --test scripts/vendor-skills-runtime.test.mjs"
+    "vendor:skills:test": "node --test scripts/vendor-skills-runtime.test.mjs",
+    "test:runtime": "node --test --test-timeout=120000 runtime-manager/*.test.mjs",
+    "test:runtime:acceptance": "node --test scripts/managed-runtime-acceptance.test.mjs"
   },
   "dependencies": {
     "cross-spawn": "7.0.6",

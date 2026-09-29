@@ -1,31 +1,10 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-fail() {
-  printf 'PostPlus CLI install failed: %s\n' "$1" >&2
-  exit 1
-}
-
-if ! command -v node >/dev/null 2>&1; then
-  fail "Node.js >= 24.5.0 is required before installing PostPlus CLI."
-fi
-
-node <<'NODE' || fail "Node.js >= 24.5.0 is required before installing PostPlus CLI."
-const [major, minor] = process.versions.node.split('.').map(Number);
-if (major < 24 || (major === 24 && minor < 5)) {
-  process.exit(1);
-}
-NODE
-
-if ! command -v npm >/dev/null 2>&1; then
-  fail "npm is required to install PostPlus CLI."
-fi
-
-npm install -g @postplus/cli@latest
-
-if ! command -v postplus >/dev/null 2>&1; then
-  fail "postplus command not found after install. Ensure npm global bin is on your PATH."
-fi
-
-postplus help >/dev/null
-printf 'PostPlus CLI installed.\n'
+#!/bin/sh
+set -eu
+# The generated official installer owns platform and runtime selection.
+# This repository/archive entry needs curl and a shell, never Node or npm.
+temp=$(mktemp -d "${TMPDIR:-/tmp}/postplus-entry.XXXXXXXX")
+trap 'rm -rf "$temp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 300 https://postplus.io/install.sh -o "$temp/install.sh"
+/bin/sh "$temp/install.sh" "$@"

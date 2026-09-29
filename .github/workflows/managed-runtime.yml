@@ -1,0 +1,86 @@
+name: Managed Runtime Acceptance
+
+on:
+  push:
+    branches: ['codex/cli-onboarding-runtime']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build one candidate archive
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Read managed Node policy
+        id: runtime
+        run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + require('./runtime-manager/node-releases.json').version + '\n')"
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.30.3
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ steps.runtime.outputs.version }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm release:package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: managed-candidate
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+            dist/postplus-runtime.json
+            dist/install.sh
+            dist/install.ps1
+          if-no-files-found: error
+
+  install:
+    needs: package
+    name: Install / ${{ matrix.platform }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, platform: linux, arch: x64 }
+          - { os: ubuntu-24.04-arm, platform: linux, arch: arm64 }
+          - { os: macos-15-intel, platform: darwin, arch: x64 }
+          - { os: macos-15, platform: darwin, arch: arm64 }
+          - { os: windows-2025, platform: win32, arch: x64 }
+          - { os: windows-11-arm, platform: win32, arch: arm64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Read managed Node policy
+        id: runtime
+        run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + require('./runtime-manager/node-releases.json').version + '\n')"
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.30.3
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ steps.runtime.outputs.version }}
+          architecture: ${{ matrix.arch }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: managed-candidate
+          path: dist
+      - run: pnpm test:runtime
+      - name: Download and verify the real target runtime
+        env:
+          POSTPLUS_EXPECT_PLATFORM: ${{ matrix.platform }}-${{ matrix.arch }}
+        run: node scripts/download-runtime-test-artifact.mjs
+      - name: Test final installation and update without system Node
+        run: pnpm test:runtime:acceptance

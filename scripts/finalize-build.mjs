@@ -26,6 +26,7 @@ function removePrivateDeclarations(directory) {
 }
 removePrivateDeclarations(resolve(repoRoot, 'build'));
 chmodSync(resolve(repoRoot, 'build', 'index.js'), 0o755);
+chmodSync(resolve(repoRoot, 'runtime-manager', 'npm-entry.cjs'), 0o755);
 
 // Fail before publishing if the generated skill projection is missing or corrupt.
 const { readSkillsManifest } = await import('../build/skills-bundle.js');

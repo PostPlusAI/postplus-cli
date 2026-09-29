@@ -1,33 +1,19 @@
+param([switch]$CurrentDirectory, [switch]$ProgramOnly)
 $ErrorActionPreference = 'Stop'
-
-function Fail($Message) {
-  Write-Error "PostPlus CLI install failed: $Message"
-  exit 1
-}
-
+$temp = Join-Path ([IO.Path]::GetTempPath()) ('postplus-entry-' + [Guid]::NewGuid().ToString('N'))
 try {
-  $nodeVersionText = (& node -p "process.versions.node") 2>$null
-  if (-not $nodeVersionText) {
-    Fail "Node.js >= 24.5.0 is required before installing PostPlus CLI."
-  }
-
-  $nodeVersion = [Version]$nodeVersionText
-  if ($nodeVersion.Major -lt 24 -or ($nodeVersion.Major -eq 24 -and $nodeVersion.Minor -lt 5)) {
-    Fail "Node.js >= 24.5.0 is required before installing PostPlus CLI."
-  }
-
-  if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-    Fail "npm is required to install PostPlus CLI."
-  }
-
-  & npm install -g @postplus/cli@latest
-
-  if (-not (Get-Command postplus -ErrorAction SilentlyContinue)) {
-    Fail "postplus command not found after install. Ensure npm global bin is on your PATH."
-  }
-
-  & postplus help | Out-Null
-  Write-Output "PostPlus CLI installed."
+  New-Item -ItemType Directory -Path $temp | Out-Null
+  $installer = Join-Path $temp 'install.ps1'
+  & curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 300 https://postplus.io/install.ps1 -o $installer
+  if ($LASTEXITCODE -ne 0) { throw 'The PostPlus installer could not be downloaded.' }
+  $arguments = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $installer)
+  if ($CurrentDirectory) { $arguments += '-CurrentDirectory' }
+  if ($ProgramOnly) { $arguments += '-ProgramOnly' }
+  & powershell.exe @arguments
+  if ($LASTEXITCODE -ne 0) { throw 'PostPlus setup did not complete.' }
 } catch {
-  Fail $_.Exception.Message
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+} finally {
+  Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }

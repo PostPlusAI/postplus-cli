@@ -1,3 +1,4 @@
+import { fetchManagedRelease, resolveManagedInvocation, updateManagedInstallation } from './managed-runtime.js';
 import { fileURLToPath } from 'node:url';
 import { PostPlusFailure, stopAutomaticRecovery, toFailureFact, type FailureFact } from './failure-contract.js';
 import { diagnosticFetch } from './network-diagnostics.js';
@@ -210,6 +211,15 @@ export async function runPostPlusClientUpgradeRecovery(
   try {
     const result = JSON.parse(updateOutput);
     if (result?.ok !== true) throw new Error('Expected a successful update envelope.');
+    if (result.releaseNotes !== undefined) {
+      const notes = result.releaseNotes;
+      if (!notes || typeof notes.title !== 'string' || typeof notes.summary !== 'string' ||
+          notes.title.length > 500 || notes.summary.length > 4000) throw new Error('Invalid update release notes.');
+      // Keep the business command's stdout machine-readable. Agent tools receive
+      // this short maintenance explanation on stderr alongside the final result.
+      writeError(`PostPlus updated: ${notes.title}\n${notes.summary}\n`);
+    }
+
     if (result.session !== undefined) {
       if (!result.session || typeof result.session.newSessionRequired !== 'boolean' ||
           (result.session.newSessionRequired ? typeof result.session.action !== 'string' : result.session.action !== null && typeof result.session.action !== 'string')) throw new Error('Invalid update session metadata.');
@@ -233,9 +243,14 @@ export async function runPostPlusClientUpgradeRecovery(
     };
   }
 
+  // The updater may have selected a new Node as well as a new CLI. Resolve
+  // the active record again instead of retrying through this old process.
+  const retry = environment.POSTPLUS_INSTALL_ROOT
+    ? await resolveManagedInvocation(environment)
+    : { executable: process.execPath, args: cliArgs };
   const retryExitCode = await runInteractiveCommand(
-    process.execPath,
-    [...cliArgs, ...input.originalArgs],
+    retry.executable,
+    [...retry.args, ...input.originalArgs],
     { env: recoveryEnvironment, stdin: 'ignore', timeoutMs: 300_000 },
   );
 
@@ -279,10 +294,9 @@ export async function generateUpdateStatusReport(
   let matchingCache: UpdateCheckCache | null = null;
 
   try {
-    const registryIdentity = await readNpmRegistryIdentity(
-      runCommand,
-      environment,
-    );
+    const registryIdentity = environment.POSTPLUS_INSTALL_ROOT
+      ? 'postplus-managed-release-v1'
+      : await readNpmRegistryIdentity(runCommand, environment);
     // Revalidate the effective source even for cache hits. Legacy caches, a
     // changed scope/default registry, or a failed config query cannot establish
     // which distribution the previous version belongs to.
@@ -304,10 +318,11 @@ export async function generateUpdateStatusReport(
         source: 'cache',
       });
     }
-    const [latestCliVersion, latestSkillsReleaseId] = await Promise.all([
-      fetchLatestCliVersion(runCommand, environment),
-      fetchLatestSkillReleaseId(dependencies.fetchFn),
-    ]);
+    const managedRelease = environment.POSTPLUS_INSTALL_ROOT
+      ? await fetchManagedRelease(dependencies.fetchFn) : null;
+    const [latestCliVersion, latestSkillsReleaseId] = managedRelease
+      ? [managedRelease.cliVersion, managedRelease.skillsReleaseId]
+      : await Promise.all([fetchLatestCliVersion(runCommand, environment), fetchLatestSkillReleaseId(dependencies.fetchFn)]);
     const nextCache = {
       checkedAt: new Date().toISOString(),
       cli: {
@@ -413,6 +428,18 @@ export async function runCliSelfUpdateIfOutdated(
       latestVersion: continuationVersion,
       updateAvailable: false,
     };
+  }
+
+  if (environment.POSTPLUS_INSTALL_ROOT) {
+    const result = await updateManagedInstallation({ environment,
+      continuationArgs: dependencies.continuationArgs ?? [],
+      currentCliEntryPath: dependencies.currentCliEntryPath ?? process.argv[1],
+      runInteractiveCommand,
+    });
+    // The manager verifies the runtime even when the CLI version is unchanged.
+    // Its continuation already produced the one final command report.
+    return { command: POSTPLUS_CLI_UPDATE_COMMAND, currentVersion,
+      latestVersion: result.latestVersion, exitCode: result.exitCode, updateAvailable: true };
   }
 
   const latestVersion = await fetchLatestCliVersion(

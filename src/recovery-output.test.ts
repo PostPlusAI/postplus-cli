@@ -8,7 +8,7 @@ import test from 'node:test';
 
 // Exercise real inherited file descriptors in a child process: intercepting
 // process.stdout.write cannot catch an installer's inherited stdout.
-async function recover(options: { updateExit?: number; restart?: boolean; malformed?: boolean; human?: boolean; newSession?: boolean } = {}) {
+async function recover(options: { updateExit?: number; restart?: boolean; malformed?: boolean; human?: boolean; newSession?: boolean; notes?: boolean } = {}) {
   const source = `
     import { runPostPlusClientUpgradeRecovery } from './src/update-check.ts';
     import { runInteractiveCommand } from './src/command-runner.ts';
@@ -25,7 +25,7 @@ async function recover(options: { updateExit?: number; restart?: boolean; malfor
       runInteractiveCommand: async (command, args, options) => {
         args = args.slice(3);
         const script = args[0] === 'update'
-          ? ${JSON.stringify(`console.log(${JSON.stringify(options.malformed ? 'broken JSON' : JSON.stringify((options.updateExit ?? 0) === 0 ? {ok:true, session:{newSessionRequired:options.newSession === true,action:options.newSession ? 'Start a new agent session before using updated skills.' : null}} : {ok:false,error:{code:options.human?'postplus_requires_human':'postplus_cli_update_failed',stage:'npm-install',service:'npm',correlationId:'fixture-id',retryable:false,message:'Update stopped.',action:'Review the installation.',cause:[{name:'Error',code:'EACCES',message:'npm permission denied'}]}}))}); console.error('installer stderr'); process.exitCode = ${options.updateExit ?? 0};`)}
+          ? ${JSON.stringify(`console.log(${JSON.stringify(options.malformed ? 'broken JSON' : JSON.stringify((options.updateExit ?? 0) === 0 ? {ok:true, ...(options.notes ? {releaseNotes:{title:'Marketing Channels', summary:'Plan and publish from one channel workspace.'}} : {}), session:{newSessionRequired:options.newSession === true,action:options.newSession ? 'Start a new agent session before using updated skills.' : null}} : {ok:false,error:{code:options.human?'postplus_requires_human':'postplus_cli_update_failed',stage:'npm-install',service:'npm',correlationId:'fixture-id',retryable:false,message:'Update stopped.',action:'Review the installation.',cause:[{name:'Error',code:'EACCES',message:'npm permission denied'}]}}))}); console.error('installer stderr'); process.exitCode = ${options.updateExit ?? 0};`)}
           : 'process.stdout.write(JSON.stringify({ok:true,args:process.argv.slice(1)}));';
         return runInteractiveCommand(process.execPath, ['-e', script, '--', ...args], options);
       }
@@ -163,4 +163,11 @@ test('a hosted product failure after recovery stops without a second action or J
       return true;
     });
   }
+});
+
+test('automatic update summary reaches the Agent on stderr without mixing into business JSON', async () => {
+  const result = await recover({ notes: true });
+  assert.equal(result.code, 0);
+  assert.equal(JSON.parse(result.stdout).ok, true);
+  assert.equal(result.stderr, 'PostPlus updated: Marketing Channels\nPlan and publish from one channel workspace.\n');
 });

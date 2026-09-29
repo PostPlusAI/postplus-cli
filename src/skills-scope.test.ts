@@ -383,3 +383,37 @@ test("atomic baseline commit failure preserves the previous release and removes 
     "skills-lock.json",
   ]);
 });
+
+test('first install JSON includes the approved product brief once, then current omits it', async t => {
+  const f = await fixture(t);
+  let output = '';
+  const writer = mock.method(process.stdout, 'write', (chunk: string | Uint8Array) => { output += String(chunk); return true; });
+  try {
+    await runPostPlusSkillUpdate(f.dependencies, { command: 'install', scope: 'global', json: true });
+    const first = JSON.parse(output);
+    assert.deepEqual(first.introduction.paragraphs, ['FIRST-INSTALL-BRIEF']);
+    assert.equal(first.releaseNotes, undefined);
+    output = '';
+    await runPostPlusSkillUpdate(f.dependencies, { command: 'install', scope: 'global', json: true });
+    const second = JSON.parse(output);
+    assert.equal(second.outcome, 'current');
+    assert.equal(second.introduction, undefined);
+    assert.equal(second.releaseNotes, undefined);
+  } finally { writer.mock.restore(); }
+});
+
+test('a known prior release returns target release notes in JSON after verified update', async t => {
+  const f = await fixture(t);
+  await runPostPlusSkillUpdate(f.dependencies, { command: 'install', scope: 'global' });
+  await writeManagedSkillBaseline({ releaseId: 'skills-older', skillNames: ['demo'] }, 'global');
+  let output = '';
+  const writer = mock.method(process.stdout, 'write', (chunk: string | Uint8Array) => { output += String(chunk); return true; });
+  try {
+    await runPostPlusSkillUpdate(f.dependencies, { command: 'update', scope: 'global', json: true });
+    const updated = JSON.parse(output);
+    assert.equal(updated.outcome, 'updated');
+    assert.equal(updated.releaseNotes.releaseId, updated.releaseId);
+    assert.equal(updated.releaseNotes.title, 'Official release notes');
+    assert.equal(updated.introduction, undefined);
+  } finally { writer.mock.restore(); }
+});

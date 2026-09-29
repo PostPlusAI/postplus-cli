@@ -209,6 +209,7 @@ async function reconcilePostPlusSkills(
           : 'updated',
     options,
     firstInstall,
+    previousReleaseId: baseline.releaseId,
     retiredSkillCount: retiredSkillNames.length,
     skillCount: skillNames.length,
     changed: targets.length > 0 || replacements.length > 0,
@@ -248,16 +249,26 @@ function reportPostPlusSkillReconcileSuccess(input: {
   options: SkillMutationOptions;
   outcome: 'current' | 'ready' | 'repaired' | 'updated';
   firstInstall?: boolean;
+  previousReleaseId?: string | null;
   retiredSkillCount: number;
   skillCount: number;
   changed: boolean;
 }): void {
   const session = { newSessionRequired: input.changed,
     action: input.changed ? POSTPLUS_SKILLS_SESSION_ACTION : null };
+  const introduction = input.firstInstall && input.outcome === 'ready' && input.options.command === 'install'
+    ? { paragraphs: input.catalog.productBrief?.paragraphs ?? [],
+        capabilities: Object.entries(input.catalog.categories ?? {}).filter(([id]) => id !== 'workspace').flatMap(([id, category]) => {
+          const example = input.catalog.skills.find(skill => skill.category === id && skill.example)?.example;
+          return example ? [{ title: category.title, example }] : [];
+        }).slice(0, 6) }
+    : undefined;
+  const releaseNotes = input.outcome === 'updated' && input.previousReleaseId && input.previousReleaseId !== input.catalog.releaseId ? input.catalog.releaseNotes : undefined;
   if (input.options.json) {
     process.stdout.write(`${JSON.stringify({ ok: true, outcome: input.outcome, releaseId: input.catalog.releaseId,
       skillCount: input.skillCount, retiredSkillCount: input.retiredSkillCount, scope: input.options.scope,
-      diskReady: true, changed: input.changed, session })}\n`);
+      diskReady: true, changed: input.changed, session,
+      ...(introduction ? { introduction } : {}), ...(releaseNotes ? { releaseNotes } : {}) })}\n`);
     return;
   }
   const summary = input.outcome === 'current'
@@ -267,7 +278,9 @@ function reportPostPlusSkillReconcileSuccess(input: {
       : `PostPlus Skills ${input.outcome === 'repaired' ? 'repaired and verified' : 'updated'}: ${input.skillCount} current, ${input.retiredSkillCount} retired removed (${input.options.scope}).`;
   input.dependencies.reportSuccess?.([summary,
     ...(input.changed ? ['Skills are ready on disk.', session.action!] : []),
-  ].join(' ') + (input.firstInstall && input.outcome === 'ready' && input.options.command === 'install' && input.catalog.categories ? `\n\n${formatSkillDiscovery(input.catalog, 'summary')}` : ''));
+  ].join(' ') + (introduction
+    ? `\n\n${[...introduction.paragraphs, formatSkillDiscovery(input.catalog, 'summary')].join('\n\n')}` : '') +
+    (releaseNotes ? `\n\n${releaseNotes.title}\n${releaseNotes.summary}\n${releaseNotes.highlights.map(item => `- ${item}`).join('\n')}` : ''));
 }
 
 class SkillMutationError extends Error {

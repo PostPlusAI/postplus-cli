@@ -1,0 +1,6 @@
+{
+  "name": "@postplus/runtime-manager",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test *.test.mjs" }
+}

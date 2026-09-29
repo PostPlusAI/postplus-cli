@@ -1,0 +1,2 @@
+# Preserve the exact bytes of shipped skill and vendor manifests on Windows.
+* text=auto eol=lf

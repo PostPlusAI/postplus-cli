@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import test from 'node:test';
+const exec = promisify(execFile);
+
+test('npm entry forwards to the private runtime and preserves arguments and failure exit status', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'postplus npm bridge '));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const version = process.versions.node;
+  const node = `runtimes/node-v${version}-test/${process.platform === 'win32' ? 'node.exe' : 'node'}`;
+  const cli = 'versions/0.2.13/test/index.cjs';
+  for (const name of [node, cli]) await mkdir(join(root, name, '..'), { recursive: true });
+  await copyFile(process.execPath, join(root, node));
+  await writeFile(join(root, cli), 'process.stdout.write(JSON.stringify({args:process.argv.slice(2),node:process.execPath,root:process.env.POSTPLUS_INSTALL_ROOT}));process.exitCode=Number(process.argv[2])||0;');
+  await writeFile(join(root, 'active'), ['postplus-installation-v1', '0.2.13', version, node, cli, 'versions/0.2.13/test/manager.mjs', ''].join('\n'));
+  const args = ['0', 'a b', '$HOME', "a'\"b", '--json'];
+  const entry = fileURLToPath(new URL('./npm-entry.cjs', import.meta.url));
+  const env = { ...process.env, POSTPLUS_INSTALL_ROOT: root, PATH: '' };
+  const report = JSON.parse((await exec(process.execPath, [entry, ...args], { env })).stdout);
+  assert.deepEqual(report.args, args);
+  assert.ok(report.node.replaceAll('\\', '/').endsWith(node));
+  assert.equal(report.root, root);
+  await assert.rejects(exec(process.execPath, [entry, '7'], { env }), error => error.code === 7 && error.stderr === '');
+  await writeFile(join(root, 'active'), 'broken');
+  await assert.rejects(exec(process.execPath, [entry, '--version'], { env }), /installation record needs repair/);
+});

@@ -104,7 +104,7 @@ function assertBuildOnlyContainsReleaseFiles() {
       if (isDir) {
         walk(full);
       } else {
-        const relativePath = full.replace(repoRoot + '/', '');
+        const relativePath = relative(repoRoot, full).replaceAll('\\', '/');
         if (!allowedFiles.has(relativePath)) {
           unexpected.push(relativePath);
         }
@@ -182,3 +182,10 @@ writeSha256(versionedArchive);
 writeSha256(stableArchive);
 
 process.stdout.write(`Packaged ${versionedArchive} and ${stableArchive}\n`);
+
+const { writeManagedRelease, writeBootstrapScripts } = await import('./build-runtime-installers.mjs');
+const skillsIdentity = await readSkillsManifest();
+const managedRelease = await writeManagedRelease(repoRoot, version, skillsIdentity.releaseId,
+  createHash('sha256').update(readFileSync(resolve(distDir, versionedArchive))).digest('hex'));
+
+await writeBootstrapScripts(repoRoot, managedRelease);
