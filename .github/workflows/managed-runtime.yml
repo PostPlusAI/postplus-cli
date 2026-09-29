@@ -81,3 +81,8 @@ jobs:
       - name: Test final installation and update without system Node
         timeout-minutes: 5
         run: pnpm test:runtime:acceptance
+      - name: Prepare the published legacy npm installation
+        run: node scripts/prepare-legacy-cli-test.mjs
+      - name: Migrate the old npm entry without system Node
+        timeout-minutes: 5
+        run: pnpm test:runtime:acceptance

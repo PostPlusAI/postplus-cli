@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import { writeBootstrapScripts } from './build-runtime-installers.mjs';
+import { hashDirectory } from '../runtime-manager/artifacts.mjs';
 const exec = promisify(execFile);
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -23,6 +24,14 @@ test('official bootstrap installs and reuses a complete managed runtime without 
   const root = await mkdtemp(join(tmpdir(), 'postplus bootstrap space '));
   t.after(() => rm(root, { recursive: true, force: true }));
   const home = join(root, 'home'); const project = join(root, 'project'); const program = join(home, 'program');
+  const readUserPath = async () => JSON.parse((await exec('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+    "@{value=[Environment]::GetEnvironmentVariable('Path','User')} | ConvertTo-Json -Compress"], { timeout: 30000 })).stdout).value;
+  if (windows) {
+    const previousUserPath = await readUserPath();
+    t.after(() => exec('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+      "$saved=$env:POSTPLUS_TEST_SAVED_PATH | ConvertFrom-Json; [Environment]::SetEnvironmentVariable('Path',$saved.value,'User')"],
+    { env: { ...process.env, POSTPLUS_TEST_SAVED_PATH: JSON.stringify({ value: previousUserPath }) }, timeout: 30000 }));
+  }
   const config = join(home, 'config'); const dist = join(root, 'dist');
   for (const path of [home, project, config, dist]) await mkdir(path, { recursive: true });
   const existingConfig = { apiBaseUrl: 'https://postplus.io', userId: 'fixture-user', userEmail: 'migration-fixture@example.invalid' };
@@ -55,6 +64,23 @@ test('official bootstrap installs and reuses a complete managed runtime without 
     PATH: windows ? [join(process.env.SystemRoot, 'System32'), join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0')].join(';') : '/usr/bin:/bin', HOME: home, USERPROFILE: home,
     POSTPLUS_CONFIG_DIR: config, POSTPLUS_INSTALL_ROOT: program, XDG_CONFIG_HOME: join(home, '.config'),
     CURL_CA_BUNDLE: cert, NODE_EXTRA_CA_CERTS: cert, DISABLE_TELEMETRY: '1', DO_NOT_TRACK: '1' };
+  const legacyPrefix = process.env.POSTPLUS_TEST_LEGACY_PREFIX;
+  let legacyHash;
+  if (legacyPrefix) {
+    const legacyPackage = join(legacyPrefix, windows ? 'node_modules/@postplus/cli' : 'lib/node_modules/@postplus/cli');
+    const legacyVersion = (await exec(process.execPath, [join(legacyPackage, 'build/index.js'), '--version'], { env: { ...process.env, POSTPLUS_CONFIG_DIR: config } })).stdout.trim();
+    assert.equal(legacyVersion, '0.2.12', 'fixture is the real runnable published CLI');
+    legacyHash = await hashDirectory(legacyPrefix);
+    const legacyBin = windows ? legacyPrefix : join(legacyPrefix, 'bin');
+    environment.PATH = legacyBin + (windows ? ';' : ':') + environment.PATH;
+    const oldCommand = windows
+      ? await exec('where.exe', ['postplus'], { env: environment })
+      : await exec('/bin/sh', ['-c', 'command -v postplus'], { env: environment });
+    assert.ok(oldCommand.stdout.includes(legacyBin), 'the old npm entry initially owns the command');
+    await assert.rejects(windows
+      ? exec('cmd.exe', ['/d', '/c', 'postplus --version'], { env: environment })
+      : exec(join(legacyBin, 'postplus'), ['--version'], { env: environment }), 'old npm entry cannot start without its system Node');
+  }
   await assert.rejects(windows ? exec('where.exe', ['node'], { env: environment }) : exec('/bin/sh', ['-c', 'command -v node'], { env: environment }), 'test environment must not resolve a system Node');
   if (windows) process.stderr.write((await exec(join(process.env.SystemRoot, 'System32/curl.exe'), ['--version'], { env: environment, timeout: 10000 })).stdout);
   const execWithProgress = (...args) => {
@@ -107,6 +133,10 @@ test('official bootstrap installs and reuses a complete managed runtime without 
   if (!windows) {
     const shell = await exec('/bin/sh', ['-c', '. "$HOME/.profile"; command -v postplus'], { env: environment });
     assert.equal(shell.stdout.trim(), launcher, 'new shells choose the managed command');
+  } else {
+    const userPath = await readUserPath();
+    const resolved = await exec('where.exe', ['postplus'], { env: { ...environment, PATH: userPath + ';' + environment.PATH } });
+    assert.equal(resolved.stdout.trim().split(/\r?\n/)[0].toLowerCase(), launcher.toLowerCase(), 'registered user PATH chooses the managed entry before the old npm entry');
   }
   process.stderr.write('Managed acceptance: explicit runtime repair\n');
   await writeFile(managedNode, 'deliberately damaged test runtime');
@@ -121,6 +151,7 @@ test('official bootstrap installs and reuses a complete managed runtime without 
   assert.equal(downloads.node, 2, 'the repaired private runtime is reused by subsequent installation');
   const saved = JSON.parse(await readFile(join(config, 'config.json'), 'utf8'));
   for (const [name, value] of Object.entries(existingConfig)) assert.equal(saved[name], value);
+  if (legacyPrefix) assert.equal(await hashDirectory(legacyPrefix), legacyHash, 'migration preserves the complete original npm installation');
   t.diagnostic(`CLI=${release.cliVersion}; Node=${release.node.version}; skills=${installed.skillCount}; first/repeat/verify/update/repair/reuse=0; Node downloads=2; prior identity preserved`);
   } catch (error) {
     process.stderr.write(String(error.stack ?? error) + '\n' + String(error.stdout ?? '').slice(-8000) + '\n' + String(error.stderr ?? '').slice(-8000) + '\n');

@@ -1,0 +1,23 @@
+import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { appendFile, mkdir, rm, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
+const exec = promisify(execFile);
+// A published, immutable npm package: migration must exercise the old real entry.
+const version = '0.2.12';
+const integrity = 'GsppJ68tuotSO2BJOP+r1X76/xciBXuYzBsrER5+7EwsLpPAngIMsV1oMudVx71sNRZXoBGrfPMCCjr1OV0caw==';
+const directory = resolve('dist/legacy-migration');
+await mkdir(directory, { recursive: true });
+const response = await fetch(`https://registry.npmjs.org/@postplus/cli/-/cli-${version}.tgz`, { signal: AbortSignal.timeout(30000) });
+if (!response.ok) throw new Error(`Legacy fixture download failed: ${response.status}`);
+const bytes = Buffer.from(await response.arrayBuffer());
+if (createHash('sha512').update(bytes).digest('base64') !== integrity) throw new Error('Legacy npm fixture integrity mismatch.');
+const archive = join(directory, 'legacy.tgz');
+await writeFile(archive, bytes);
+const prefix = join(directory, 'prefix');
+await rm(prefix, { recursive: true, force: true });
+const npm = join(dirname(process.execPath), process.platform === 'win32' ? 'node_modules/npm/bin/npm-cli.js' : '../lib/node_modules/npm/bin/npm-cli.js');
+await exec(process.execPath, [npm, 'install', '--global', '--prefix', prefix, '--ignore-scripts', '--no-audit', '--no-fund', archive], { timeout: 120000 });
+if (process.env.GITHUB_ENV) await appendFile(process.env.GITHUB_ENV, `POSTPLUS_TEST_LEGACY_PREFIX=${prefix}\n`);
+process.stdout.write(`Prepared published npm CLI ${version} at ${prefix}.\n`);
