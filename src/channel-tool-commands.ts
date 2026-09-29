@@ -1,3 +1,5 @@
+import { PostPlusNetworkRequestError, isNetworkFailure, isTlsFailure } from './network-diagnostics.js';
+
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
@@ -146,9 +148,21 @@ function channelToolExitCode(value: unknown): 0 | 1 | 2 {
   return 0;
 }
 
-export function lostChannelToolSubmission(operationId: string) {
+export function lostChannelToolSubmission(operationId: string, error?: unknown) {
+  const diagnostic = error === undefined ? undefined : {
+    stage: 'cli_submission',
+    service: error instanceof HostedProductRequestError ? 'postplus-hosted' : 'postplus-cli',
+    code: error instanceof HostedProductRequestError ? 'hosted_http_error'
+      : isTlsFailure(error) ? 'tls_error'
+      : isNetworkFailure(error) ? 'network_error' : 'submission_response_unavailable',
+    httpStatus: error instanceof HostedProductRequestError ? error.httpStatus ?? null : null,
+    // Never infer arrival from a transport error, or print raw error/cause text.
+    delivery: 'unconfirmed',
+    ...(error instanceof PostPlusNetworkRequestError ? { method: error.method } : {}),
+  };
   return {
     operationId,
+    ...(diagnostic ? { error: diagnostic } : {}),
     execution: { resultStatus: 'unknown' as const },
     next: `Query postplus channels tools run --status ${operationId}; never resubmit this write with a new operation ID.`,
   };
@@ -308,7 +322,7 @@ export async function runChannelToolCommand(
     // The request may have reached hosted even if its response was lost. The
     // durable run can be inspected by ID, but this CLI must never resubmit it.
     output(
-      `${JSON.stringify(lostChannelToolSubmission(command.operationId), null, 2)}\n`,
+      `${JSON.stringify(lostChannelToolSubmission(command.operationId, error), null, 2)}\n`,
     );
     return 2;
   }

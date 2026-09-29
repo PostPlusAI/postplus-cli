@@ -278,3 +278,12 @@ test('tool run requires a personal connection and JSON input file', () => {
     /--target-path/,
   );
 });
+
+test('lost submission classifies TLS errors without retaining credentials or claiming delivery', () => {
+  const cause = Object.assign(new Error('https://private/?token=secret'), { code: 'CERT_HAS_EXPIRED' });
+  const result = lostChannelToolSubmission('op-safe', new TypeError('fetch failed', { cause }));
+  assert.equal(result.error?.code, 'tls_error');
+  assert.equal(result.error?.delivery, 'unconfirmed');
+  assert.equal(result.execution.resultStatus, 'unknown');
+  assert.ok(!JSON.stringify(result).includes('secret'));
+});

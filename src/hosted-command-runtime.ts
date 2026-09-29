@@ -82,7 +82,19 @@ type HostedProductErrorUserAction = {
   url: string;
 };
 
+function readProviderDiagnostic(value: unknown) {
+  if (!value || typeof value !== 'object') return undefined;
+  const d = value as Record<string, unknown>;
+  if (d.service !== 'composio' || !['configuration', 'transport', 'http', 'invalid_response', 'tool_failed'].includes(String(d.code))) return undefined;
+  return {
+    service: 'composio', code: String(d.code),
+    httpStatus: typeof d.httpStatus === 'number' && Number.isInteger(d.httpStatus) && d.httpStatus >= 100 && d.httpStatus <= 599 ? d.httpStatus : null,
+    providerLogId: typeof d.providerLogId === 'string' && /^log_[A-Za-z0-9_-]{1,120}$/.test(d.providerLogId) ? d.providerLogId : null,
+  };
+}
+
 export type HostedProductError = {
+  diagnostic?: NonNullable<ReturnType<typeof readProviderDiagnostic>>;
   message: string;
   code: string | null;
   layer: string | null;
@@ -553,6 +565,7 @@ export function readHostedProductError(payload: unknown): HostedProductError {
     ...(record.sourceSubmissionRejected === true
       ? { sourceSubmissionRejected: true as const }
       : {}),
+    ...(readProviderDiagnostic(record.diagnostic) ? { diagnostic: readProviderDiagnostic(record.diagnostic) } : {}),
     layer: normalizeString(record.layer),
     operationId: normalizeString(record.operationId),
     userMessageRule: normalizeString(record.userMessageRule),
@@ -606,6 +619,9 @@ export function formatHostedProductErrorMessage(
   }
   const locator = [
     productError.code ? `code=${productError.code}` : null,
+    productError.diagnostic ? `providerCode=${productError.diagnostic.code}` : null,
+    productError.diagnostic?.httpStatus ? `providerHttpStatus=${productError.diagnostic.httpStatus}` : null,
+    productError.diagnostic?.providerLogId ? `providerLogId=${productError.diagnostic.providerLogId}` : null,
     productError.layer ? `layer=${productError.layer}` : null,
     productError.operationId ? `operationId=${productError.operationId}` : null,
     productError.runId ? `runId=${productError.runId}` : null,

@@ -86,3 +86,14 @@ test('subscription rejection is friendly in text and remains actionable in JSON'
     }
   } finally { process.stdout.write = stdout; process.stderr.write = stderr; }
 });
+
+test('channel provider diagnosis survives product error parsing without private fields', async () => {
+  const { readHostedProductError } = await import('./hosted-command-runtime.js');
+  const error = readHostedProductError({
+    code: 'provider_unavailable', stage: 'channel_connection',
+    diagnostic: { service: 'composio', code: 'http', httpStatus: 403, providerLogId: 'log_fixture', token: 'private' },
+  });
+  assert.deepEqual(error.diagnostic, { service: 'composio', code: 'http', httpStatus: 403, providerLogId: 'log_fixture' });
+  assert.match(new HostedProductRequestError(error).message, /providerHttpStatus=403/);
+  assert.ok(!JSON.stringify(error).includes('private'));
+});
