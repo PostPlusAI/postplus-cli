@@ -47,7 +47,9 @@ test('official bootstrap installs and reuses a complete managed runtime without 
   release.cli.url = `${base}/cli.tar.gz`;
   release.node.artifacts[`${process.platform}-${process.arch}`].url = `${base}/${windows ? 'node.zip' : 'node.tar.gz'}`;
   await writeBootstrapScripts(root, release);
-  const environment = { ...(windows ? { SystemRoot: process.env.SystemRoot, TEMP: root, TMP: root, LOCALAPPDATA: join(home, 'AppData/Local'), APPDATA: join(home, 'AppData/Roaming') } : {}),
+  // Remove Node from PATH without deleting Windows' executable-extension
+  // contract. PowerShell needs PATHEXT to invoke .exe files as native commands.
+  const environment = { ...(windows ? { SystemRoot: process.env.SystemRoot, PATHEXT: process.env.PATHEXT, TEMP: root, TMP: root, LOCALAPPDATA: join(home, 'AppData/Local'), APPDATA: join(home, 'AppData/Roaming') } : {}),
     PATH: windows ? [join(process.env.SystemRoot, 'System32'), join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0')].join(';') : '/usr/bin:/bin', HOME: home, USERPROFILE: home,
     POSTPLUS_CONFIG_DIR: config, POSTPLUS_INSTALL_ROOT: program, XDG_CONFIG_HOME: join(home, '.config'),
     CURL_CA_BUNDLE: cert, NODE_EXTRA_CA_CERTS: cert, DISABLE_TELEMETRY: '1', DO_NOT_TRACK: '1' };
