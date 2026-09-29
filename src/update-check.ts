@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { PostPlusFailure, stopAutomaticRecovery, sanitizeFailureText, toFailureFact, type FailureFact } from './failure-contract.js';
+import { PostPlusFailure, stopAutomaticRecovery, toFailureFact, type FailureFact } from './failure-contract.js';
 import { diagnosticFetch } from './network-diagnostics.js';
 import { createHash } from 'node:crypto';
 import {
@@ -132,14 +132,11 @@ export async function runPostPlusClientUpgradeRecovery(
     environment?: NodeJS.ProcessEnv;
     runInteractiveCommand?: typeof runDefaultInteractiveCommand;
     writeError?: (message: string) => void;
-    writeOutput?: (message: string) => void;
   } = {},
 ): Promise<ClientUpgradeRecoveryResult> {
   const environment = dependencies.environment ?? process.env;
   const runInteractiveCommand =
     dependencies.runInteractiveCommand ?? runDefaultInteractiveCommand;
-  const writeOutput =
-    dependencies.writeOutput ?? ((message) => process.stderr.write(message));
   const writeError =
     dependencies.writeError ?? ((message) => process.stderr.write(message));
 
@@ -162,9 +159,6 @@ export async function runPostPlusClientUpgradeRecovery(
     [POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV]: '1',
     [POSTPLUS_CLIENT_RECOVERY_COMPONENTS_ENV]: components,
   };
-  writeOutput(
-    'PostPlus is updating. The current task can resume only if the update succeeds and no agent restart is required.\n',
-  );
 
   // Resolve our own installation, never another executable earlier on PATH.
   const source = import.meta.url.endsWith('.ts');
@@ -227,10 +221,6 @@ export async function runPostPlusClientUpgradeRecovery(
       action: 'Stop automatic recovery and report this response error; do not run another update or resubmit the task.',
     });
   }
-  if (session?.newSessionRequired && input.payload.compatibility?.upgrade?.restartAgentSession !== true) {
-    writeError(`Updated skills need a new agent session for subsequent skill work. ${sanitizeFailureText(session.action ?? '')}\n`);
-  }
-
   if (input.payload.compatibility?.upgrade?.restartAgentSession === true) {
     writeError(
       'PostPlus updated successfully, but this compatibility change requires a new agent session. The original command was not retried.\n',

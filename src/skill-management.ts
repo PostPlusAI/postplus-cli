@@ -1,16 +1,8 @@
-import {
-  cp,
-  mkdir,
-  mkdtemp,
-  readFile,
-  realpath,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { formatSkillDiscovery } from './skill-discovery.js';
 import { homedir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createInterface } from 'node:readline/promises';
 
 import { writeCurrentCliVersionToLocalConfig } from './client-compatibility.js';
 import { CommandInterruptedError, CommandTimeoutError, runCommand, runInteractiveCommand } from './command-runner.js';
@@ -35,7 +27,6 @@ import {
   resolvePostPlusSkillsScope,
 } from './skill-installation.js';
 
-import { PostPlusFailure } from './failure-contract.js';
 import { hashSkillDirectory, SkillsBundleError, UnsupportedSkillEntryError } from './skills-bundle.js';
 
 export const POSTPLUS_SKILLS_SESSION_ACTION = 'Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.';
@@ -81,10 +72,6 @@ type SkillManagementDependencies = {
 };
 
 type SkillMutationDependencies = {
-  confirmModifiedSkillBackup?: (
-    input: ModifiedSkillBackupPrompt,
-  ) => Promise<boolean>;
-  isInteractive?: () => boolean;
   reportSuccess?: (message: string) => void;
   runCommand: typeof runCommand;
   runInteractiveCommand: typeof runInteractiveCommand;
@@ -93,23 +80,8 @@ type SkillMutationDependencies = {
 type SkillMutationOptions = {
   command?: 'install' | 'update';
   json?: boolean;
-  yes?: boolean;
   messageMode?: 'explicit' | 'implicit';
   scope: PostPlusSkillsInstallScope;
-};
-
-type ModifiedSkillBackupPrompt = {
-  action: 'uninstall' | 'update' | 'install';
-  scope: PostPlusSkillsInstallScope;
-  skillNames: string[];
-};
-
-type ProtectedInstalledSkill = {
-  actualContentHash: string;
-  expectedContentHash: string | null;
-  state: 'modified' | 'unverified';
-  installedPath: string;
-  name: string;
 };
 
 const DEFAULT_SKILL_MUTATION_OPTIONS: SkillMutationOptions = {
@@ -132,8 +104,6 @@ async function withPostPlusSkillsMutationLock<T>(
 
 export async function runPostPlusSkillUpdate(
   dependencies: SkillMutationDependencies = {
-    confirmModifiedSkillBackup: confirmModifiedSkillBackup,
-    isInteractive: () => process.stdin.isTTY === true,
     reportSuccess: (message) => process.stdout.write(`${message}\n`),
     runCommand,
     runInteractiveCommand,
@@ -172,31 +142,21 @@ async function reconcilePostPlusSkills(
   if (!catalog.contentHashes) {
     throw new SkillsBundleError('The selected skills source has no verified content manifest.');
   }
-  if (baseline.releaseId && baseline.releaseId !== catalog.releaseId) {
-    const previous = releaseOrder(baseline.releaseId);
-    const target = releaseOrder(catalog.releaseId);
-    if (!previous || !target) {
-      throw new SkillMutationError('postplus_skills_release_order_unknown',
-        'The installed and bundled skill releases cannot be ordered safely.',
-        'Contact PostPlus support with the two release identifiers before replacing skills.');
-    }
-    if (previous.some((value, index) => value > target[index]! && previous.slice(0, index).every((part, earlier) => part === target[earlier]))) {
-      throw new SkillMutationError('postplus_skills_downgrade_blocked',
-        'The installed skills are newer than this CLI bundle.',
-        'Update the CLI with postplus update before changing skills.');
-    }
-  }
   let installed = await listInstalledSkillsForMutationScope(dependencies, options.scope);
   const firstInstall = baseline.releaseId === null && baseline.skillNames.length === 0 && lockedSkillNames.length === 0 && !installed.some(entry => releasedSkills.has(entry.name));
-  let hashes = await readInstalledHashes(installed.filter((entry) => releasedSkills.has(entry.name) || retiredSkillNames.includes(entry.name)));
-  const backup = await protectLocallyModifiedSkills({
-    action: options.command ?? 'update', dependencies, scope: options.scope,
-    yes: options.yes, json: options.json, targetHashes: catalog.contentHashes, managedNames: retiredSkillNames,
-  });
+  let hashes = await readInstalledHashes(installed.filter((entry) => releasedSkills.has(entry.name)));
   const baselineIsCurrent = !shouldRepairManagedBaseline({ baseline, releaseId: catalog.releaseId, skillNames });
   const targets: string[] = [];
-  const removedInstalledSkills = installed.some((entry) => retiredSkillNames.includes(entry.name));
+  // Replace the whole slot, including old independent copies that the current
+  // installer now routes through a shared directory. No old-content identity is needed.
+  const replacements = installed.filter(entry => retiredSkillNames.includes(entry.name) ||
+    (releasedSkills.has(entry.name) && hashes.get(entry.path) !== catalog.contentHashes![entry.name]));
   await assertPostPlusSkillsBaselineWritable(options.scope);
+  if (replacements.length > 0 || retiredSkillNames.length > 0) {
+    await removeInstalledSkillPaths(replacements, retiredSkillNames, dependencies, options.scope);
+    installed = await listInstalledSkillsForMutationScope(dependencies, options.scope);
+    hashes = await readInstalledHashes(installed.filter(entry => releasedSkills.has(entry.name)));
+  }
   for (const agentTarget of POSTPLUS_SKILLS_AGENT_TARGETS) {
     const neededSkills = skillNames.filter((name) => !agentDirectoriesMatch(installed, hashes, name, agentTarget, catalog.contentHashes![name]!));
     if (neededSkills.length === 0) continue;
@@ -216,18 +176,6 @@ async function reconcilePostPlusSkills(
     hashes = await readInstalledHashes(installed.filter((entry) => releasedSkills.has(entry.name)));
   }
 
-  if (retiredSkillNames.length > 0) {
-    const removeExitCode = await runSkillInstaller(dependencies, formatPostPlusSkillsInstallCommand(undefined, options.scope),
-      process.execPath,
-      [...SKILLS_INSTALLER_ARGS, 'remove', '--postplus-retirement-plan', await prepareRetirementPlan(retiredSkillNames, baseline.contentHashes ?? {}, backup, dependencies, options.scope)],
-      { stdin: 'ignore', stdout: 'capture', timeoutMs: 300_000 },
-    );
-
-    if (removeExitCode !== 0) {
-      throw new SkillMutationError('postplus_skill_remove_failed', 'Retired skill removal failed.', formatPostPlusSkillsInstallCommand(undefined, options.scope));
-    }
-  }
-
   await verifyPostPlusSkillUpdate({
     dependencies,
     releasedSkillNames: skillNames,
@@ -236,9 +184,8 @@ async function reconcilePostPlusSkills(
     scope: options.scope,
   });
 
-  if (targets.length === 0 && retiredSkillNames.length === 0 && baselineIsCurrent &&
-      Object.entries(catalog.contentHashes).every(([name, hash]) => baseline.contentHashes?.[name] === hash)) {
-    reportPostPlusSkillReconcileSuccess({ catalog, dependencies, options, outcome: 'current', retiredSkillCount: 0, skillCount: skillNames.length, backup, changed: false });
+  if (targets.length === 0 && replacements.length === 0 && retiredSkillNames.length === 0 && baselineIsCurrent) {
+    reportPostPlusSkillReconcileSuccess({ catalog, dependencies, options, outcome: 'current', retiredSkillCount: 0, skillCount: skillNames.length, changed: false });
     return 0;
   }
 
@@ -246,7 +193,6 @@ async function reconcilePostPlusSkills(
     {
       releaseId: catalog.releaseId,
       skillNames,
-      contentHashes: catalog.contentHashes,
     },
     options.scope,
   );
@@ -255,7 +201,7 @@ async function reconcilePostPlusSkills(
   reportPostPlusSkillReconcileSuccess({
     catalog,
     dependencies,
-    outcome: targets.length === 0 && retiredSkillNames.length === 0 && baselineIsCurrent ? 'current' :
+    outcome: targets.length === 0 && replacements.length === 0 && retiredSkillNames.length === 0 && baselineIsCurrent ? 'current' :
       baseline.releaseId === null && lockedSkillNames.length === 0
         ? 'ready'
         : baseline.releaseId === catalog.releaseId
@@ -265,59 +211,36 @@ async function reconcilePostPlusSkills(
     firstInstall,
     retiredSkillCount: retiredSkillNames.length,
     skillCount: skillNames.length,
-    backup, changed: targets.length > 0 || removedInstalledSkills,
+    changed: targets.length > 0 || replacements.length > 0,
   });
 
   return 0;
 }
 
-// Retirement uses exact observed paths, never the installer's name-wide removal.
-async function prepareRetirementPlan(
-  names: string[], baselineHashes: Record<string, string>, approvedBackup: SkillBackup | null,
-  dependencies: SkillManagementDependencies, scope: PostPlusSkillsInstallScope,
-): Promise<string> {
-  type Saved = BackedUpSkill & { backupPath: string };
-  const backups: Array<{ manifestPath: string; skill: Saved }> = [];
-  async function loadBackup(path: string) {
-    const manifestPath = join(path, 'manifest.json');
-    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { skills: Saved[] };
-    for (const skill of manifest.skills) backups.push({ manifestPath, skill });
+// Directory rules remain owned by the bundled installer. It re-enumerates and
+// validates every exact path before deletion; links never authorize their targets.
+async function removeInstalledSkillPaths(
+  installed: InstalledSkillEntry[], retiredNames: string[],
+  dependencies: SkillMutationDependencies, scope: PostPlusSkillsInstallScope,
+  recoveryCommand = formatPostPlusSkillsInstallCommand(undefined, scope),
+): Promise<void> {
+  await mkdir(getPostPlusConfigDir(), { recursive: true });
+  const directory = await mkdtemp(join(getPostPlusConfigDir(), 'skills-sync-'));
+  const planPath = join(directory, 'manifest.json');
+  try {
+    await writeFile(planPath, JSON.stringify({ schemaVersion: 2, scope,
+      names: mergeSkillNames(installed.map(entry => entry.name), retiredNames),
+      entries: installed.map(({ name, path, realPath }) => ({ name, path, realPath })),
+    }), { mode: 0o600 });
+    const code = await runSkillInstaller(dependencies, recoveryCommand,
+      process.execPath, [...SKILLS_INSTALLER_ARGS, 'remove', '--postplus-remove-plan', planPath],
+      { stdin: 'ignore', stdout: 'capture', timeoutMs: 300_000 });
+    if (code !== 0) throw new SkillMutationError('postplus_skill_remove_failed',
+      'PostPlus could not remove skill files.', recoveryCommand);
+  } finally {
+    await rm(dirname(planPath), { recursive: true, force: true });
   }
-  if (approvedBackup) await loadBackup(approvedBackup.path);
-  const installed = (await listInstalledSkillsForMutationScope(dependencies, scope)).filter(entry => names.includes(entry.name));
-  const trusted: BackedUpSkill[] = [];
-  const seen = new Set<string>();
-  for (const entry of installed) {
-    const hash = await readInstalledHash(entry);
-    if (!hash || !entry.realPath || seen.has(entry.realPath)) continue;
-    seen.add(entry.realPath);
-    const approved = await Promise.all(backups.map(async backup => backup.skill.name === entry.name &&
-      backup.skill.actualContentHash === hash && await realpath(backup.skill.installedPath) === entry.realPath));
-    if (approved.some(Boolean)) continue;
-    if (baselineHashes[entry.name] !== hash) throw new SkillMutationError('postplus_skills_content_unverified',
-      'Retired skill content changed after approval.', 'Run the maintenance command again to review the current content.');
-    trusted.push({ name: entry.name, installedPath: entry.path, actualContentHash: hash, expectedContentHash: hash, state: 'verified-baseline' });
-  }
-  if (trusted.length) await loadBackup(await backupModifiedSkills(trusted, scope));
-  const entries = [];
-  for (const entry of installed) {
-    const hash = await readInstalledHash(entry);
-    const saved = (await Promise.all(backups.map(async backup =>
-      backup.skill.name === entry.name && backup.skill.actualContentHash === hash &&
-      await realpath(backup.skill.installedPath) === entry.realPath ? backup : null))).find(Boolean);
-    if (!saved) throw new SkillMutationError('postplus_skills_content_unverified', 'Retirement has no verified backup.', 'Run the maintenance command again.');
-    entries.push({ name: entry.name, path: entry.path, realPath: entry.realPath,
-      authorization: trusted.some(skill => skill.installedPath === saved.skill.installedPath) ? 'verified-baseline' : 'user-approved',
-      contentHash: hash, backedUpInstalledPath: saved.skill.installedPath,
-      backupPath: saved.skill.backupPath, backupManifestPath: saved.manifestPath });
-  }
-  const directory = await mkdtemp(join(getPostPlusConfigDir(), 'retirement-'));
-  const path = join(directory, 'manifest.json');
-  await writeFile(path, JSON.stringify({ schemaVersion: 1, scope, retiredNames: names, entries }), { mode: 0o600 });
-  return path;
 }
-
-type SkillBackup = { path: string; skillCount: number };
 
 function reportPostPlusSkillReconcileSuccess(input: {
   catalog: Awaited<ReturnType<typeof loadPublicSkillCatalog>>;
@@ -328,14 +251,13 @@ function reportPostPlusSkillReconcileSuccess(input: {
   retiredSkillCount: number;
   skillCount: number;
   changed: boolean;
-  backup: SkillBackup | null;
 }): void {
   const session = { newSessionRequired: input.changed,
     action: input.changed ? POSTPLUS_SKILLS_SESSION_ACTION : null };
   if (input.options.json) {
     process.stdout.write(`${JSON.stringify({ ok: true, outcome: input.outcome, releaseId: input.catalog.releaseId,
       skillCount: input.skillCount, retiredSkillCount: input.retiredSkillCount, scope: input.options.scope,
-      diskReady: true, changed: input.changed, session, backup: input.backup })}\n`);
+      diskReady: true, changed: input.changed, session })}\n`);
     return;
   }
   const summary = input.outcome === 'current'
@@ -345,7 +267,6 @@ function reportPostPlusSkillReconcileSuccess(input: {
       : `PostPlus Skills ${input.outcome === 'repaired' ? 'repaired and verified' : 'updated'}: ${input.skillCount} current, ${input.retiredSkillCount} retired removed (${input.options.scope}).`;
   input.dependencies.reportSuccess?.([summary,
     ...(input.changed ? ['Skills are ready on disk.', session.action!] : []),
-    ...(input.backup ? [`Backup saved: ${input.backup.path}.`] : []),
   ].join(' ') + (input.firstInstall && input.outcome === 'ready' && input.options.command === 'install' && input.catalog.categories ? `\n\n${formatSkillDiscovery(input.catalog, 'summary')}` : ''));
 }
 
@@ -382,8 +303,6 @@ class SkillReconciliationError extends Error {
 
 export async function runPostPlusSkillUninstall(
   dependencies: SkillMutationDependencies = {
-    confirmModifiedSkillBackup: confirmModifiedSkillBackup,
-    isInteractive: () => process.stdin.isTTY === true,
     reportSuccess: (message) => process.stdout.write(`${message}\n`),
     runCommand,
     runInteractiveCommand,
@@ -416,25 +335,10 @@ async function uninstallPostPlusSkills(
     );
   }
 
-  const backup = await protectLocallyModifiedSkills({
-    action: 'uninstall',
-    dependencies,
-    scope: options.scope,
-    yes: options.yes,
-    json: options.json,
-    targetHashes: catalog.contentHashes,
-    managedNames: allKnownSkillNames,
-  });
-
-  const exitCode = await runSkillInstaller(dependencies, formatPostPlusSkillUninstallCommand(options.scope),
-    process.execPath,
-    buildPostPlusSkillUninstallArgs(allKnownSkillNames, options.scope),
-    { stdin: 'ignore', stdout: 'capture', timeoutMs: 300_000 },
-  );
-
-  if (exitCode !== 0) {
-    throw new SkillMutationError('postplus_skill_remove_failed', 'Skill removal failed.', formatPostPlusSkillUninstallCommand(options.scope));
-  }
+  const installed = (await listInstalledSkillsForMutationScope(dependencies, options.scope))
+    .filter(entry => allKnownSkillNames.includes(entry.name));
+  await removeInstalledSkillPaths(installed, allKnownSkillNames, dependencies, options.scope,
+    formatPostPlusSkillUninstallCommand(options.scope));
 
   await verifyPostPlusSkillUninstall({
     dependencies,
@@ -444,9 +348,9 @@ async function uninstallPostPlusSkills(
 
   await clearManagedSkillBaseline(options.scope);
   await clearUpdateCheckCache();
-  if (options.json) process.stdout.write(`${JSON.stringify({ ok: true, outcome: 'uninstalled', scope: options.scope, backup })}\n`);
+  if (options.json) process.stdout.write(`${JSON.stringify({ ok: true, outcome: 'uninstalled', scope: options.scope })}\n`);
   else dependencies.reportSuccess?.(
-    `PostPlus skills uninstalled: ${allKnownSkillNames.length} managed skills removed (${options.scope}). Restart active agent sessions to refresh skill discovery.${backup ? ` Backup saved: ${backup.path}.` : ''}`,
+    `PostPlus skills uninstalled: ${allKnownSkillNames.length} managed skills removed (${options.scope}). Restart active agent sessions to refresh skill discovery.`,
   );
 
   return 0;
@@ -744,19 +648,6 @@ export function buildPostPlusSkillUpdateArgs(
   ];
 }
 
-export function buildPostPlusSkillUninstallArgs(
-  skillNames: string[],
-  scope: PostPlusSkillsInstallScope = 'global',
-): string[] {
-  return [
-    ...SKILLS_INSTALLER_ARGS,
-    'remove',
-    ...skillNames,
-    ...buildSkillScopeArgs(scope),
-    '--yes',
-  ];
-}
-
 export function formatPostPlusSkillUpdateCommand(
   scope: PostPlusSkillsInstallScope = 'global',
 ): string {
@@ -781,11 +672,6 @@ function mergeSkillNames(left: string[], right: string[]): string[] {
   return [...new Set([...left, ...right])].sort((a, b) => a.localeCompare(b));
 }
 
-function releaseOrder(releaseId: string): number[] | null {
-  const match = /^(?:skills-)?(\d{4})-(\d{2})-(\d{2})(?:\.(\d+))?(?:-[a-zA-Z0-9._-]+)?$/.exec(releaseId);
-  return match ? [Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4] ?? 0)] : null;
-}
-
 function shouldRepairManagedBaseline(input: {
   baseline: { releaseId: string | null; skillNames: string[] };
   releaseId: string;
@@ -806,151 +692,6 @@ function haveSameSkillNames(left: string[], right: string[]): boolean {
     normalizedLeft.length === normalizedRight.length &&
     normalizedLeft.every((value, index) => value === normalizedRight[index])
   );
-}
-
-async function protectLocallyModifiedSkills(input: {
-  action: 'uninstall' | 'update' | 'install';
-  dependencies: SkillMutationDependencies;
-  scope: PostPlusSkillsInstallScope;
-  yes?: boolean;
-  json?: boolean;
-  targetHashes?: Record<string, string>;
-  managedNames?: string[];
-}): Promise<SkillBackup | null> {
-  const baseline = await readManagedSkillBaseline(input.scope);
-  const installed = await listInstalledSkillsForMutationScope(input.dependencies, input.scope);
-  const managed = new Set([...baseline.skillNames, ...Object.keys(input.targetHashes ?? {}), ...(input.managedNames ?? [])]);
-  const modifiedSkills: ProtectedInstalledSkill[] = [];
-  const seen = new Set<string>();
-  for (const entry of installed) {
-    if (!managed.has(entry.name)) continue;
-    const actualContentHash = await readInstalledHash(entry);
-    if (actualContentHash === null || seen.has(entry.realPath!)) continue;
-    seen.add(entry.realPath!);
-    // Target identity wins even if the third-party lock is stale. The previous
-    // baseline proves an untouched older official version can be upgraded.
-    if (actualContentHash === input.targetHashes?.[entry.name] ||
-        actualContentHash === baseline.contentHashes?.[entry.name]) continue;
-    const expectedContentHash = baseline.contentHashes?.[entry.name] ?? null;
-    modifiedSkills.push({ actualContentHash, expectedContentHash,
-      state: expectedContentHash === null ? 'unverified' : 'modified',
-      installedPath: entry.path, name: entry.name });
-  }
-
-  if (modifiedSkills.length === 0) {
-    return null;
-  }
-
-  const skillNames = [...new Set(modifiedSkills.map((skill) => skill.name))];
-  if (!input.yes && (input.json || input.dependencies.isInteractive?.() !== true)) {
-    const retryCommand =
-      input.action === 'uninstall'
-        ? formatPostPlusSkillUninstallCommand(input.scope)
-        : input.action === 'install' ? formatPostPlusSkillsInstallCommand(undefined, input.scope) : formatPostPlusSkillUpdateCommand(input.scope);
-    const contentState = modifiedSkills.some(skill => skill.state === 'unverified') ? 'unverified' : 'modified';
-    throw new PostPlusFailure(
-      `${contentState === 'unverified' ? 'Existing skill content cannot be verified as managed by this CLI version' : 'Managed skill content differs from its recorded baseline'}: ${formatSkillList(skillNames, 8)}. Locations: ${formatSkillList(modifiedSkills.map(skill => skill.installedPath), 8)}.`,
-      { code: contentState === 'unverified' ? 'postplus_skills_content_unverified' : 'postplus_skills_requires_human',
-        stage: 'skills_content_verification', service: 'local', retryable: false, contentState,
-        conflicts: modifiedSkills.map(skill => ({ name: skill.name, path: skill.installedPath, state: skill.state })),
-        action: `Ask the user to approve backup and ${input.action === 'uninstall' ? 'removal' : 'replacement'}, then run ${retryCommand} --yes.` });
-  }
-
-  const confirmed = input.yes || await (
-    input.dependencies.confirmModifiedSkillBackup ??
-    confirmModifiedSkillBackup
-  )({
-    action: input.action,
-    scope: input.scope,
-    skillNames,
-  });
-
-  if (!confirmed) {
-    throw new Error(
-      `PostPlus skills ${input.action} cancelled before changing existing skill content. Managed baseline was not changed.`,
-    );
-  }
-
-  const backupPath = await backupModifiedSkills(
-    modifiedSkills,
-    input.scope,
-  );
-  return { path: backupPath, skillCount: modifiedSkills.length };
-}
-
-async function confirmModifiedSkillBackup(
-  input: ModifiedSkillBackupPrompt,
-): Promise<boolean> {
-  const terminal = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  try {
-    process.stdout.write(
-      `Local PostPlus content needs approval (${input.scope}): ${formatSkillList(input.skillNames, 8)}\n`,
-    );
-    const answer = await terminal.question(
-      input.action !== 'uninstall'
-        ? 'Back up the local versions and install the official release? [Y/n] '
-        : 'Back up the local versions and uninstall the managed skills? [Y/n] ',
-    );
-    const normalized = answer.trim().toLowerCase();
-    return normalized === '' || normalized === 'y' || normalized === 'yes';
-  } finally {
-    terminal.close();
-  }
-}
-
-type BackedUpSkill = Omit<ProtectedInstalledSkill, 'state'> & { state: ProtectedInstalledSkill['state'] | 'verified-baseline' };
-
-async function backupModifiedSkills(
-  skills: BackedUpSkill[],
-  scope: PostPlusSkillsInstallScope,
-): Promise<string> {
-  const backupRoot = join(getPostPlusConfigDir(), 'skill-backups');
-  await mkdir(backupRoot, { recursive: true });
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupPath = await mkdtemp(join(backupRoot, `${timestamp}-`));
-  const manifestEntries: Array<
-    BackedUpSkill & { backupPath: string }
-  > = [];
-
-  for (const skill of skills) {
-    const sourcePath = await realpath(skill.installedPath);
-    const skillBackupPath = join(
-      backupPath,
-      `skill-${manifestEntries.length + 1}-${Buffer.from(skill.name).toString('base64url')}`,
-    );
-    await cp(sourcePath, skillBackupPath, {
-      recursive: true,
-      verbatimSymlinks: true,
-    });
-    if (await hashSkillDirectory(skillBackupPath) !== skill.actualContentHash) {
-      throw new SkillMutationError('postplus_skill_backup_changed', 'Skill content changed while its backup was being made.', 'Stop editing the skill, then rerun the requested maintenance command.');
-    }
-    manifestEntries.push({
-      ...skill,
-      backupPath: skillBackupPath,
-    });
-  }
-
-  await writeFile(
-    join(backupPath, 'manifest.json'),
-    `${JSON.stringify(
-      {
-        schemaVersion: 1,
-        createdAt: new Date().toISOString(),
-        scope,
-        skills: manifestEntries,
-      },
-      null,
-      2,
-    )}\n`,
-    'utf8',
-  );
-
-  return backupPath;
 }
 
 async function verifyPostPlusSkillUpdate(input: {
@@ -1132,9 +873,7 @@ function normalizeInstalledSkillEntry(value: unknown): InstalledSkillEntry[] {
 
 async function readInstalledHash(entry: InstalledSkillEntry): Promise<string | null> {
   if (entry.realPath === null || entry.metadataError === 'occupied-file' || entry.metadataError === 'dangling-link') {
-    throw new SkillMutationError('postplus_skills_directory_unreadable',
-      `The managed skill slot ${entry.name} is occupied by a file or broken link.`,
-      'Resolve the occupied skill path before running the command again.');
+    return null;
   }
   try {
     if (await realpath(entry.path) !== entry.realPath) {
@@ -1143,11 +882,7 @@ async function readInstalledHash(entry: InstalledSkillEntry): Promise<string | n
     }
     return await hashSkillDirectory(entry.path);
   } catch (error) {
-    if (error instanceof UnsupportedSkillEntryError) {
-      throw new SkillMutationError('postplus_skills_directory_unreadable',
-        `Installed skill content cannot be verified at ${error.path}.`,
-        'Move the symbolic link or special file out of the installed skill directory, then rerun the command.');
-    }
+    if (error instanceof UnsupportedSkillEntryError) return null;
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   }

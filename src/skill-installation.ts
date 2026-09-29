@@ -17,8 +17,6 @@ const SKILLS_INSTALLER_PROJECT_LOCK_PATH = 'skills-lock.json';
 const SKILLS_INSTALLER_POSTPLUS_SOURCE = 'postplusai/postplus-skills';
 
 export type PostPlusInstallerLockedSkillEntry = {
-  expectedContentHash: string | null;
-  hashKind: 'folder-sha256' | 'git-tree-sha1' | null;
   name: string;
   scope: 'global' | 'project';
 };
@@ -65,8 +63,6 @@ async function readPostPlusInstallerLockedSkillNamesFromPath(
   lockPath: string,
 ): Promise<
   Array<{
-    expectedContentHash: string | null;
-    hashKind: 'folder-sha256' | 'git-tree-sha1' | null;
     name: string;
   }>
 > {
@@ -97,8 +93,7 @@ async function readPostPlusInstallerLockedSkillNamesFromPath(
 
     return Object.entries(record.skills as Record<string, unknown>)
       .filter(([, entry]) => isPostPlusSkillsInstallerLockEntry(entry))
-      .map(([skillName, entry]) => ({
-        ...readInstallerLockContentHash(entry),
+      .map(([skillName]) => ({
         name: skillName.trim(),
       }))
       .filter((entry) => Boolean(entry.name))
@@ -110,41 +105,6 @@ async function readPostPlusInstallerLockedSkillNamesFromPath(
     }
     throw error;
   }
-}
-
-function readInstallerLockContentHash(
-  entry: unknown,
-): Pick<
-  PostPlusInstallerLockedSkillEntry,
-  'expectedContentHash' | 'hashKind'
-> {
-  const record = entry as Record<string, unknown>;
-  const skillFolderHash =
-    typeof record.skillFolderHash === 'string'
-      ? record.skillFolderHash.trim().toLowerCase()
-      : '';
-  if (/^[0-9a-f]{40}$/.test(skillFolderHash)) {
-    return {
-      expectedContentHash: skillFolderHash,
-      hashKind: 'git-tree-sha1',
-    };
-  }
-
-  const computedHash =
-    typeof record.computedHash === 'string'
-      ? record.computedHash.trim().toLowerCase()
-      : '';
-  if (/^[0-9a-f]{64}$/.test(computedHash)) {
-    return {
-      expectedContentHash: computedHash,
-      hashKind: 'folder-sha256',
-    };
-  }
-
-  return {
-    expectedContentHash: null,
-    hashKind: null,
-  };
 }
 
 function isPostPlusSkillsInstallerLockEntry(entry: unknown): boolean {
@@ -247,7 +207,6 @@ export class PostPlusSkillsStateError extends Error {
 type ManagedSkillBaseline = {
   releaseId: string | null;
   skillNames: string[];
-  contentHashes?: Record<string, string>;
 };
 
 export async function readManagedSkillBaseline(
@@ -269,12 +228,7 @@ export async function readManagedSkillBaseline(
     ) {
       throw new Error('Invalid installation baseline.');
     }
-    if (record.contentHashes !== undefined && (
-      !record.contentHashes || typeof record.contentHashes !== 'object' || Array.isArray(record.contentHashes) ||
-      Object.entries(record.contentHashes).some(([name, hash]) => !record.skillNames.includes(name) || typeof hash !== 'string' || !/^[a-f0-9]{64}$/.test(hash))
-    )) throw new Error('Invalid baseline content identities.');
-    return { releaseId: record.releaseId, skillNames: record.skillNames,
-      ...(record.contentHashes ? { contentHashes: record.contentHashes } : {}) };
+    return { releaseId: record.releaseId, skillNames: record.skillNames };
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === 'ENOENT')
       return { releaseId: null, skillNames: [] };
@@ -283,7 +237,7 @@ export async function readManagedSkillBaseline(
 }
 
 export async function writeManagedSkillBaseline(
-  input: { releaseId: string; skillNames: string[]; contentHashes?: Record<string, string> },
+  input: { releaseId: string; skillNames: string[] },
   scope?: PostPlusSkillsInstallScope,
 ): Promise<void> {
   await stageManagedSkillBaseline(input, scope, true);
@@ -300,7 +254,7 @@ export async function assertPostPlusSkillsBaselineWritable(
 }
 
 async function stageManagedSkillBaseline(
-  input: { releaseId: string; skillNames: string[]; contentHashes?: Record<string, string> },
+  input: { releaseId: string; skillNames: string[] },
   scope: PostPlusSkillsInstallScope | undefined,
   commit: boolean,
 ): Promise<void> {
@@ -324,7 +278,6 @@ async function stageManagedSkillBaseline(
         `${JSON.stringify(
           {
             releaseId: input.releaseId,
-            ...(input.contentHashes ? { contentHashes: input.contentHashes } : {}),
             skillNames: [
               ...new Set(
                 input.skillNames

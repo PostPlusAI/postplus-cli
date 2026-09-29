@@ -53,7 +53,7 @@ test('automatic recovery keeps the complete original JSON stdout parseable', asy
     ok: true,
     args: ['media', 'schema', '--json', 'two words', '& literal'],
   });
-  assert.match(result.stderr, /PostPlus is updating/);
+  assert.equal(result.stderr, '');
   assert.doesNotMatch(result.stderr, /installer (stdout|stderr)|Updated skills need a new agent session/);
   t.diagnostic(`exit=${result.code}; stdout=${JSON.stringify(result.stdout)}`);
 });
@@ -92,12 +92,11 @@ test('restart-required maintenance leaves stdout empty without replay', async (t
 });
 
 
-test('successful skills update advises a new session once without blocking authorized replay', async () => {
+test('successful compatible skills update silently continues the original task', async () => {
   const result = await recover({newSession:true});
   assert.equal(result.code,0);
   assert.equal(JSON.parse(result.stdout).ok,true);
-  assert.equal(result.stderr.match(/Updated skills need a new agent session/g)?.length,1);
-  assert.match(result.stderr,/Start a new agent session before using updated skills/);
+  assert.equal(result.stderr, '');
 });
 test('malformed successful update fails closed without replay', async () => {
   const result = await recover({malformed:true});

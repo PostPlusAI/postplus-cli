@@ -140,8 +140,8 @@ test('package discovery and maintenance help keep the original task without shar
   for (const command of ['install', 'update']) {
     const { stdout } = await exec(process.execPath, ['--import', 'tsx', 'src/index.ts', command, '--help', '--json']);
     const help = JSON.parse(stdout);
-    assert.match(help.next, /paste the original request/);
-    assert.match(help.next, /Otherwise, describe the task/);
+    assert.match(help.next, /Continue the original task/);
+    assert.match(help.next, /new agent session only if/);
     assert.doesNotMatch(help.next, /Help me get started|postplus-shared/);
   }
 });

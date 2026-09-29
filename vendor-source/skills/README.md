@@ -24,7 +24,7 @@ and tarballs, reapplying the patch, and rerunning acceptance. Builds do not fetc
 network content or resolve moving dependency versions. No upstream install hooks
 are executed. License and notice files are copied from every original package.
 
-The patch extends read-only JSON listing and one narrowly scoped PostPlus retirement command. `directories` preserves each
+The patch extends read-only JSON listing and one exact-path PostPlus removal command. `directories` preserves each
 physical entry instead of collapsing independent copies by display name:
 
 - `path`: actual entry path, including the agent's symlink path.
@@ -40,23 +40,19 @@ subagent discovery. It includes the configured roots already scanned by upstream
 list/remove, so old independent copies remain visible. Canonical content does
 not stand in for an independent agent entry. Non-skill entries are exposed with
 metadata diagnostics, not treated as an installation failure for every skill;
-PostPlus must select only its managed names, verify content, and protect edits.
-Installing and updating remain upstream behavior. Ordinary upstream removal is
-unchanged. PostPlus retirement uses `remove --postplus-retirement-plan <manifest-path>`:
-only exact directory paths returned by the existing upstream discovery can be
-removed. It does not search by name for additional removal targets.
-
-PostPlus writes this private manifest after protection/approval and backup. Each
-entry binds the retired name, installed path and real path, backup manifest and
-backup path, and content hash. `user-approved` means the user approved replacing
-or removing that precise backed-up content; it is not evidence of historical
-ownership. `verified-baseline` retains automatic retirement for unchanged content
-matching PostPlus's recorded baseline. Unknown content never enters that route.
-The runtime checks the whole manifest, upstream roots, path identity, backup
-record, backup hash and installed hash before deletion. A mismatch stops without
-writing. Links are removed before content directories. Other same-name entries
-not in the manifest remain; upstream lock entries are cleared only when no
-matching directory remains. The manifest and backups remain local evidence.
+PostPlus selects names from the current bundle and previously recorded PostPlus
+membership. Installing and updating retain upstream directory rules.
+PostPlus uses `remove --postplus-remove-plan <manifest-path>` before replacing
+outdated same-name slots, retiring skills, and uninstalling. The schemaVersion 2
+manifest contains scope, names, and exact entries (`name`, `path`, `realPath`).
+The runtime re-enumerates all entries and validates every path before deletion.
+Links are removed before directories and are never followed for deletion;
+paths outside the enumeration are rejected. No previous fingerprint, ownership
+classification, consent, or backup is required. Unlisted entries remain.
+Upstream lock entries are cleared only when no matching directory remains.
+PostPlus removes the temporary plan after the installer finishes. A partial
+failure does not advance the verified baseline; another maintenance invocation
+reconciles the actual remaining installation.
 
 Updating this ABI requires both `src/skills-retirement.test.ts` and the upstream
 runtime acceptance suite. It does not introduce an ownership ledger, restore

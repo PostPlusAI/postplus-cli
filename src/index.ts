@@ -326,10 +326,9 @@ Install scope:
   postplus uninstall                    Remove global PostPlus skills
   postplus uninstall --current-directory  Remove PostPlus skills from the current directory
 
-Local changes:
-  Interactive updates ask to back up locally modified managed skills before replacing them.
-  Non-interactive updates stop before replacing local changes unless --yes explicitly authorizes backup and replacement.
-  --json changes output only; it does not authorize replacement.
+Official skills:
+  Install and update replace same-name skills with the bundled release and remove retired PostPlus skills.
+  Local edits are overwritten without prompts or backups. Correct content is reused.
 `);
       return 0;
     default:
@@ -518,14 +517,12 @@ function parseDiagnosticOptions(args: string[]): DiagnosticCommandOptions {
 function parseSkillMutationOptions(
   args: string[],
   commandName: 'install' | 'update' | 'uninstall',
-): { scope: PostPlusSkillsInstallScope; json: boolean; yes: boolean } {
+): { scope: PostPlusSkillsInstallScope; json: boolean } {
   let json = false;
-  let yes = false;
   let scope: PostPlusSkillsInstallScope = 'global';
 
   for (const arg of args) {
     if (arg === '--json') { json = true; continue; }
-    if (arg === '--yes') { yes = true; continue; }
     if (arg === '--current-directory') {
       scope = 'current-directory';
       continue;
@@ -534,7 +531,7 @@ function parseSkillMutationOptions(
     throw new Error(`Unknown option for ${commandName}: ${arg}`);
   }
 
-  return { scope, json, yes };
+  return { scope, json };
 }
 
 async function runAuthLogout(json: boolean): Promise<number> {
@@ -800,7 +797,17 @@ runMainWithRecovery().then(() => {
 });
 
 function printSkillMutationHelp(command: string, json: boolean): number {
-  const help = { purpose: command === 'install' ? 'Install the matching bundled skills; reuse already correct content.' : command === 'update' ? 'Update the CLI and reconcile its matching managed skills.' : 'Remove managed PostPlus skills while protecting local changes.', examples: [`postplus ${command}`, `postplus ${command} --current-directory`], next: command === 'uninstall' ? 'Success means managed skills have been removed after protecting local changes. Start a new agent session to stop using previously loaded skills.' : 'Success means every supported installation target has been verified against this CLI bundle. It does not refresh the current agent session. Follow the reported action. Changes may require a new agent session; --yes authorizes backup and replacement only with user approval. ' + POSTPLUS_SKILLS_SESSION_ACTION, command: `postplus ${command}`, usage: `postplus ${command} [--current-directory] [--json] [--yes]`, options: { '--current-directory': 'Target this project.', '--json': 'Return machine-readable output.', '--yes': command === 'uninstall' ? 'Authorize backup and removal of locally changed managed skills.' : 'Authorize backup and replacement of locally modified managed skills.' } };
+  const help = {
+    purpose: command === 'install' ? 'Install and verify the skills bundled with this CLI.'
+      : command === 'update' ? 'Update PostPlus CLI and its matching skills.' : 'Remove installed PostPlus skills.',
+    examples: [`postplus ${command}`, `postplus ${command} --current-directory`],
+    next: command === 'uninstall'
+      ? 'Same-name PostPlus skills are removed without backups, including local edits. Start a new agent session to refresh skill discovery.'
+      : 'Same-name skills are replaced with official content without prompts or backups. Correct content is reused. Continue the original task after a successful compatible update. Start a new agent session only if the completion result requests it.',
+    command: `postplus ${command}`,
+    usage: `postplus ${command} [--current-directory] [--json]`,
+    options: { '--current-directory': 'Target this project.', '--json': 'Return machine-readable output.' },
+  };
   if (json) process.stdout.write(`${JSON.stringify(help)}\n`);
   else process.stdout.write(`${help.purpose}\n\nUsage: ${help.usage}\n\nOptions:\n${Object.entries(help.options).map(([flag, detail]) => `${flag}  ${detail}`).join('\n')}\n\nExamples:\n${help.examples.join('\n')}\n\nNext: ${help.next}\n`);
   return 0;

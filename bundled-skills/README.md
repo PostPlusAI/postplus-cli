@@ -29,15 +29,18 @@ your original task rather than repeating this introduction.
 
 Cloud tasks require a connected account. Run `postplus auth login` when the CLI
 requests it, and approve the real browser connection yourself. Never share
-credentials with the agent. Quotes, publishing, and replacing existing content
+credentials with the agent. Quotes, publishing, and replacing business content
 require the applicable user approval.
 
 ## Maintenance
 
-Run `postplus update` to update the CLI and its matching managed skills.
-Follow the exact reported action on failure; do not repeat maintenance blindly.
-The CLI identifies content conflicts and requests authorization before replacing
-protected content. Its session-reload message explains how to continue.
+Your agent continues the task while the CLI handles a required compatible update.
+You can also run `postplus update` to update the CLI and its matching skills.
+Official skill names are managed by PostPlus: local changes are overwritten and
+retired skills are removed without prompts or backups. Keep custom skills under
+separate names. Correct installations are reused.
+Follow the reported action only if an update fails or a new agent session is required;
+do not repeat maintenance blindly.
 
 ```bash
 postplus status

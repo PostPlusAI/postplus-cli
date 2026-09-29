@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { cp, symlink, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { symlink, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -89,67 +89,39 @@ for (const scope of ['global', 'project'] as const) {
     }
     for (const name of retired) await rm(join(bundle, 'skills', name), { recursive: true });
     await publish(['demo'], 'skills-2026-09-19.1');
-    const baselineBefore = await readFile(baselinePath, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; });
-    const hashesBefore = await Promise.all(retiredPaths.map(path => hashSkillDirectory(path)));
     const result = await install();
-    if (condition !== 'trusted') {
-      assert.equal(result.code, 1, result.stdout + result.stderr);
-      assert.equal(JSON.parse(result.stdout).error.code, condition === 'lock-only' ? 'postplus_skills_content_unverified' : 'postplus_skills_requires_human');
-      assert.deepEqual(await Promise.all(retiredPaths.map(path => hashSkillDirectory(path))), hashesBefore);
-      assert.equal(await readFile(baselinePath, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; }), baselineBefore);
-      const approved = await install('--yes');
-      const backups = await readdir(join(config, 'skill-backups'));
-      assert.equal(backups.length, 1);
-      const backup = JSON.parse(await readFile(join(config, 'skill-backups', backups[0]!, 'manifest.json'), 'utf8'));
-      assert.deepEqual([...new Set(backup.skills.map((entry: { name: string }) => entry.name))].sort(), [...retired].sort());
-      for (const entry of backup.skills) assert.equal(await hashSkillDirectory(entry.backupPath), entry.actualContentHash);
-      assert.equal(approved.code, 0, approved.stdout + approved.stderr);
-    } else assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    await assert.rejects(readdir(join(config, 'skill-backups')), {code:'ENOENT'});
+    assert.equal(JSON.parse(await readFile(baselinePath, 'utf8')).releaseId, 'skills-2026-09-19.1');
     assert.deepEqual((await list()).map(entry => entry.name), ['demo']);
     assert.deepEqual(await Promise.all(demo.map(async entry => ({ path: entry.path, hash: await hashSkillDirectory(entry.path), mtime: (await lstat(join(entry.path, 'SKILL.md'))).mtimeMs }))), beforeDemo);
     if (scope === 'global' && condition === 'trusted') {
-      const planDirectory = (await readdir(config)).find(name => name.startsWith('retirement-'))!;
-      const plan = JSON.parse(await readFile(join(config, planDirectory, 'manifest.json'), 'utf8'));
-      // Restore only this isolated fixture to exercise the narrow ABI directly.
-      for (const entry of plan.entries.filter((entry: { path: string; realPath: string }) => entry.path === entry.realPath)) await cp(entry.backupPath, entry.path, { recursive: true });
-      for (const entry of plan.entries.filter((entry: { path: string; realPath: string }) => entry.path !== entry.realPath)) await symlink(entry.realPath, entry.path);
-      const retained = plan.entries[0];
-      plan.entries = plan.entries.filter((entry: { path: string }) => entry.path !== retained.path);
-      assert.ok(plan.entries.some((entry: { name: string }) => entry.name === retained.name), 'Negative control must retain another directory of the same skill');
-      const retainedHash = await hashSkillDirectory(retained.path);
-      const exactPlan = join(root, 'exact-retirement.json');
-      const invoke = async (value: unknown) => { await writeFile(exactPlan, JSON.stringify(value)); return run([installer, 'remove', '--postplus-retirement-plan', exactPlan]); };
-      const controls = [
-        { ...plan, retiredNames: [] },
-        { ...plan, entries: plan.entries.map((entry: object) => ({ ...entry, authorization: 'none' })) },
-        { ...plan, entries: plan.entries.map((entry: object) => ({ ...entry, backupManifestPath: join(root, 'missing') })) },
-        { ...plan, entries: plan.entries.map((entry: object) => ({ ...entry, contentHash: '0'.repeat(64) })) },
-        { ...plan, entries: plan.entries.map((entry: object) => ({ ...entry, path: join(root, 'outside') })) },
-      ];
-      for (const control of controls) {
-        const rejected = await invoke(control);
+      const removable = join(home, '.codex/skills/retired-example');
+      const unrelated = join(root, 'outside');
+      await mkdir(removable, {recursive:true});
+      await mkdir(unrelated);
+      await writeFile(join(removable, 'SKILL.md'), 'Old same-name content');
+      await writeFile(join(unrelated, 'keep'), 'Unrelated content');
+      const plan = {schemaVersion:2, scope:'global', names:['retired-example'], entries:[{name:'retired-example',path:removable,realPath:await realpath(removable)}]};
+      const planFile = join(root, 'removal.json');
+      const invoke = async (value: unknown) => {await writeFile(planFile, JSON.stringify(value)); return run([installer,'remove','--postplus-remove-plan',planFile]);};
+      for (const invalid of [
+        {...plan,names:[]},
+        {...plan,entries:[{...plan.entries[0],path:unrelated,realPath:unrelated}]},
+        {...plan,entries:[{...plan.entries[0],realPath:unrelated}]},
+      ]) {
+        const rejected = await invoke(invalid);
         assert.notEqual(rejected.code, 0, rejected.stdout + rejected.stderr);
-        for (const entry of plan.entries) assert.equal(await hashSkillDirectory(entry.path), entry.contentHash);
+        assert.equal(await readFile(join(removable,'SKILL.md'),'utf8'), 'Old same-name content');
       }
-      const sharedTarget = plan.entries.find((entry: { name: string }) => entry.name === retained.name);
-      await rm(retained.path, { recursive: true }); await symlink(sharedTarget.path, retained.path);
-      assert.notEqual((await invoke(plan)).code, 0, 'Unapproved link must not lose its shared content');
-      await rm(retained.path); await cp(retained.backupPath, retained.path, { recursive: true });
-      for (const directory of [plan.entries[0].path, plan.entries[0].backupPath]) {
-        const file = join(directory, 'SKILL.md'); const bytes = await readFile(file);
-        await writeFile(file, 'Changed after the snapshot');
-        assert.notEqual((await invoke(plan)).code, 0, 'Changed current content or backup must stop removal');
-        await writeFile(file, bytes);
-      }
-      const swapped = plan.entries[0];
-      const external = join(root, 'outside'); await cp(swapped.realPath, external, { recursive: true });
-      await rm(swapped.path, { recursive: true }); await symlink(external, swapped.path);
-      assert.notEqual((await invoke(plan)).code, 0, 'Changed symlink must not authorize an outside directory');
-      assert.equal(await hashSkillDirectory(external), swapped.contentHash);
-      await rm(swapped.path); await cp(swapped.backupPath, swapped.path, { recursive: true });
-      const accepted = await invoke(plan);
-      assert.equal(accepted.code, 0, accepted.stdout + accepted.stderr);
-      assert.equal(await hashSkillDirectory(retained.path), retainedHash, 'Unapproved same-name directory in another agent root must remain');
+      // Removing an enumerated link must never traverse and delete its external target.
+      await rm(removable, {recursive:true}); await symlink(unrelated, removable);
+      assert.notEqual((await invoke(plan)).code, 0, 'Changed directory identity requires re-enumeration');
+      plan.entries[0]!.realPath = await realpath(removable);
+      const removed = await invoke(plan);
+      assert.equal(removed.code, 0, removed.stdout + removed.stderr);
+      await assert.rejects(lstat(removable), {code:'ENOENT'});
+      assert.equal(await readFile(join(unrelated,'keep'),'utf8'), 'Unrelated content');
     }
     assert.equal(await readFile(join(root, 'network-attempts'), 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; }), '');
   });

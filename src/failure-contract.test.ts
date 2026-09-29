@@ -105,13 +105,14 @@ test("actual source CLI emits JSON for parse and pre-command config failures", a
   }
 });
 
-test("mutation help is local and accepts JSON and yes without installing", async () => {
+test("mutation help is local and accepts JSON without installing", async () => {
   const config = await mkdtemp(join(tmpdir(), "postplus-help-"));
   try {
     for (const command of ["install", "update", "uninstall"]) {
-      const result = await cli([command, "--help", "--json", "--yes"], config);
+      const result = await cli([command, "--help", "--json"], config);
       assert.equal(result.code, 0, result.stderr);
       assert.equal(JSON.parse(result.stdout).command, `postplus ${command}`);
+      assert.equal('--yes' in JSON.parse(result.stdout).options, false);
     }
   } finally {
     await rm(config, { recursive: true, force: true });

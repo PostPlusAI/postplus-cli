@@ -74,22 +74,20 @@ test('matching target content adopts baseline despite stale third-party lock and
   assert.equal(await runPostPlusSkillUpdate(deps, { scope: 'global' }), 0);
   assert.equal(await runPostPlusSkillUpdate(deps, { scope: 'global' }), 0);
   assert.equal(mutations, 0);
-  assert.deepEqual((await readManagedSkillBaseline('global')).contentHashes, { demo: fixture.contentHash });
+  assert.equal('contentHashes' in (await readManagedSkillBaseline('global')), false);
 });
 
-test('actual user modification stops without consent, then backs up before explicit replacement', async (t) => {
+test('local modifications are replaced without approval or backups', async (t) => {
   const fixture = await setup(t);
   await cp(fixture.skill, fixture.installed, { recursive: true });
-  await writeManagedSkillBaseline({ releaseId: fixture.manifest.releaseId, skillNames: ['demo'], contentHashes: { demo: fixture.contentHash } }, 'global');
+  await writeManagedSkillBaseline({ releaseId: fixture.manifest.releaseId, skillNames: ['demo'] }, 'global');
   await writeFile(join(fixture.installed, 'SKILL.md'), 'My local version');
   let mutations = 0;
   const deps = { runCommand: async () => ({ stderr: '', stdout: serializeInstallerEntries([{ name: 'demo', path: fixture.installed, scope: 'global', agents: labels }]) }),
     runInteractiveCommand: async () => { mutations++; await cp(fixture.skill, fixture.installed, { recursive: true }); return 0; }, isInteractive: () => false,
   };
-  await assert.rejects(runPostPlusSkillUpdate(deps, { scope: 'global' }), { code: 'postplus_skills_requires_human' });
-  assert.equal(mutations, 0);
-  assert.equal(await readFile(join(fixture.installed, 'SKILL.md'), 'utf8'), 'My local version');
-  assert.equal(await runPostPlusSkillUpdate(deps, { scope: 'global', yes: true }), 0);
+  assert.equal(await runPostPlusSkillUpdate(deps, { scope: 'global' }), 0);
+  await assert.rejects(readFile(join(fixture.root, 'config/skill-backups')), { code: 'ENOENT' });
   assert.ok(mutations > 0);
 });
 
@@ -110,21 +108,16 @@ test('one healthy canonical directory cannot mask an independently modified agen
   await cp(f.skill, f.installed, { recursive: true });
   const copy = join(f.root, 'independent-copy');
   await cp(f.skill, copy, { recursive: true });
-  await writeManagedSkillBaseline({ releaseId: f.manifest.releaseId, skillNames: ['demo'], contentHashes: { demo: f.contentHash } }, 'global');
+  await writeManagedSkillBaseline({ releaseId: f.manifest.releaseId, skillNames: ['demo'] }, 'global');
   await writeFile(join(copy, 'SKILL.md'), 'Independent user changes');
   const allIds = ['claude-code', 'codex', 'cursor', 'github-copilot', 'windsurf', 'trae', 'trae-cn', 'openclaw', 'hermes-agent'];
   const directories = [{ path: f.installed, realPath: await realpath(f.installed), directoryName: 'demo', metadataName: 'demo', metadataError: null, agentIds: allIds }, { path: copy, realPath: await realpath(copy), directoryName: 'demo', metadataName: 'demo', metadataError: null, agentIds: ['codex'] }];
   const writes: string[][] = [];
   const deps = { runCommand: async () => ({ stdout: JSON.stringify([{ name: 'demo', path: f.installed, scope: 'global', agents: ['Display labels are not IDs'], directories }]), stderr: '' }), runInteractiveCommand: async (command: string, args: string[]) => { assert.equal(command, process.execPath); assert.match(args[0]!, /vendor\/skills-runtime\/cli\.mjs$/); writes.push(args); await cp(f.skill, copy, { recursive: true }); return 0; }, isInteractive: () => false };
-  await assert.rejects(runPostPlusSkillUpdate(deps, { scope: 'global' }), { code: 'postplus_skills_requires_human' });
-  assert.equal(writes.length, 0);
-  assert.equal(await runPostPlusSkillUpdate(deps, { scope: 'global', yes: true }), 0);
+  assert.equal(await runPostPlusSkillUpdate(deps, { scope: 'global' }), 0);
   assert.equal(writes.length, 1);
-  assert.equal(writes[0]![writes[0]!.indexOf('--agent') + 1], 'codex');
-  const backups = await (await import('node:fs/promises')).readdir(join(f.root, 'config/skill-backups'));
-  const manifest = JSON.parse(await readFile(join(f.root, 'config/skill-backups', backups[0]!, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.skills.length, 1);
-  assert.equal(await readFile(join(manifest.skills[0].backupPath, 'SKILL.md'), 'utf8'), 'Independent user changes');
+  assert.equal(await hashSkillDirectory(copy), f.contentHash);
+  await assert.rejects(readFile(join(f.root, 'config/skill-backups')), { code: 'ENOENT' });
 });
 
 test('missing agent copy is repaired without approval and shared real directories need only one write', async (t) => {
@@ -140,7 +133,7 @@ test('missing agent copy is repaired without approval and shared real directorie
   assert.equal(writes, 1);
   directories.pop();
   await writeFile(join(f.installed, 'SKILL.md'), 'Older official content');
-  await writeManagedSkillBaseline({ releaseId: 'skills-2026-09-01.1', skillNames: ['demo'], contentHashes: { demo: await hashSkillDirectory(f.installed) } }, 'global');
+  await writeManagedSkillBaseline({ releaseId: 'skills-2026-09-01.1', skillNames: ['demo'] }, 'global');
   writes = 0;
   assert.equal(await runPostPlusSkillUpdate({ ...deps, runInteractiveCommand: async () => { writes++; await cp(f.skill, f.installed, { recursive: true }); return 0; } }, { scope: 'global' }), 0);
   assert.equal(writes, 1, 'fresh enumeration prevents nine copies of the same canonical update');
@@ -154,26 +147,22 @@ test('managed slot identity survives edited or missing metadata; unrelated damag
   const ids = ['claude-code', 'codex', 'cursor', 'github-copilot', 'windsurf', 'trae', 'trae-cn', 'openclaw', 'hermes-agent'];
   let payload: unknown;
   let writes = 0;
-  const deps = { runCommand: async () => ({ stdout: JSON.stringify(payload), stderr: '' }), runInteractiveCommand: async () => { writes++; return 0; }, isInteractive: () => false };
+  const deps = { runCommand: async () => ({ stdout: JSON.stringify(payload), stderr: '' }), runInteractiveCommand: async () => { writes++; await cp(f.skill, f.installed, { recursive: true }); return 0; } };
   const entry = (name: string, directoryName: string, metadataName: string | null, metadataError: string | null) => ({ name, path: f.installed, scope: 'global', agents: [], directories: [{ path: f.installed, realPath, agentIds: ids, directoryName, metadataName, metadataError }] });
   await writeFile(join(f.installed, 'SKILL.md'), '---\nname: renamed-user-skill\ndescription: Changed\n---\nMy content');
   payload = [{ name: 'renamed-user-skill', path: f.installed, scope: 'global', agents: [], directories: [] }, entry('demo', 'demo', 'renamed-user-skill', null)];
-  await assert.rejects(runPostPlusSkillUpdate(deps, { scope: 'global' }), { code: 'postplus_skills_content_unverified' });
+  assert.equal(await runPostPlusSkillUpdate(deps, { scope: 'global' }), 0);
   await unlink(join(f.installed, 'SKILL.md'));
   payload = [entry('demo', 'demo', null, 'missing-skill-file')];
-  await assert.rejects(runPostPlusSkillUpdate(deps, { scope: 'global' }), { code: 'postplus_skills_content_unverified' });
-  for (const kind of ['occupied-file', 'dangling-link']) {
-    payload = [entry('demo', 'demo', null, kind)];
-    await assert.rejects(runPostPlusSkillUpdate(deps, { scope: 'global' }), { code: 'postplus_skills_directory_unreadable' });
-  }
-  assert.equal(writes, 0);
+  assert.equal(await runPostPlusSkillUpdate(deps, { scope: 'global' }), 0);
+  assert.equal(writes, 2);
   await cp(f.skill, f.installed, { recursive: true });
   payload = [entry('demo', 'demo', 'demo', null), entry('unrelated', 'unrelated', null, 'occupied-file')];
   assert.equal(await runPostPlusSkillUpdate(deps, { scope: 'global' }), 0);
-  assert.equal(writes, 0);
+  assert.equal(writes, 2);
 });
 
-test('two links to the same modified real directory produce one complete backup and one write', async (t) => {
+test('two links to the same modified real directory are replaced without duplicate writes or backups', async (t) => {
   const f = await setup(t);
   const { realpath, readdir } = await import('node:fs/promises');
   await cp(f.skill, f.installed, { recursive: true });
@@ -184,37 +173,38 @@ test('two links to the same modified real directory produce one complete backup 
   const realPath = await realpath(f.installed);
   const directories = [f.installed, alias].map((path) => ({ path, realPath, directoryName: 'demo', metadataName: 'demo', metadataError: null, agentIds: ids }));
   let writes = 0;
-  assert.equal(await runPostPlusSkillUpdate({ runCommand: async () => ({ stdout: JSON.stringify([{ name: 'demo', path: f.installed, scope: 'global', agents: [], directories }]), stderr: '' }), runInteractiveCommand: async () => { writes++; await cp(f.skill, f.installed, { recursive: true }); return 0; } }, { scope: 'global', yes: true }), 0);
+  assert.equal(await runPostPlusSkillUpdate({ runCommand: async () => ({ stdout: JSON.stringify([{ name: 'demo', path: f.installed, scope: 'global', agents: [], directories }]), stderr: '' }), runInteractiveCommand: async () => { writes++; await cp(f.skill, f.installed, { recursive: true }); return 0; } }, { scope: 'global' }), 0);
   assert.equal(writes, 1);
-  const [backup] = await readdir(join(f.root, 'config/skill-backups'));
-  const manifest = JSON.parse(await readFile(join(f.root, 'config/skill-backups', backup!, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.skills.length, 1);
-  assert.equal(await readFile(join(manifest.skills[0].backupPath, 'SKILL.md'), 'utf8'), 'User-owned content');
+  await assert.rejects(readdir(join(f.root, 'config/skill-backups')), { code: 'ENOENT' });
 });
 
 
-test('unsupported installed content is preserved and never reported as a damaged CLI bundle', async (t) => {
+test('same-name skill with an internal link is replaced without modifying the link target', async (t) => {
   const f = await setup(t);
   await cp(f.skill, f.installed, { recursive: true });
-  const linkedFile = join(f.installed, 'user-link');
-  await symlink(join(f.installed, 'SKILL.md'), linkedFile);
+  const external = join(f.root, 'personal-file');
+  await writeFile(external, 'Personal content');
+  await symlink(external, join(f.installed, 'user-link'));
   let mutations = 0;
   const deps = {
     runCommand: async () => ({ stdout: serializeInstallerEntries([{ name: 'demo', path: f.installed, scope: 'global', agents: labels }]), stderr: '' }),
-    runInteractiveCommand: async () => { mutations++; return 0; },
-    isInteractive: () => false,
+    runInteractiveCommand: async () => { mutations++; await rm(f.installed, {recursive:true}); await cp(f.skill, f.installed, {recursive:true}); return 0; },
   };
-  for (const yes of [false, true]) {
-    await assert.rejects(runPostPlusSkillUpdate(deps, { scope: 'global', yes }), (error: unknown) => {
-      assert.equal((error as { code: string }).code, 'postplus_skills_directory_unreadable');
-      assert.ok((error as Error).message.includes(linkedFile));
-      assert.match((error as { action: string }).action, /Move the symbolic link or special file/);
-      assert.doesNotMatch((error as { action: string }).action, /Reinstall/);
-      return true;
-    });
-  }
-  assert.equal(mutations, 0);
-  const { lstat } = await import('node:fs/promises');
-  assert.equal((await lstat(linkedFile)).isSymbolicLink(), true);
-  assert.equal(await readFile(linkedFile, 'utf8'), await readFile(join(f.skill, 'SKILL.md'), 'utf8'));
+  assert.equal(await runPostPlusSkillUpdate(deps, { scope: 'global' }), 0);
+  assert.equal(mutations, 1);
+  assert.equal(await hashSkillDirectory(f.installed), f.contentHash);
+  assert.equal(await readFile(external, 'utf8'), 'Personal content');
 });
+
+for (const oldRelease of ['legacy-unordered-release', 'skills-2099-01-01.1']) {
+  test(`the running CLI bundle is authoritative over ${oldRelease}`, async (t) => {
+    const f = await setup(t);
+    await cp(f.skill, f.installed, {recursive:true});
+    await writeManagedSkillBaseline({releaseId:oldRelease, skillNames:['demo']}, 'global');
+    assert.equal(await runPostPlusSkillUpdate({
+      runCommand: async () => ({stdout:serializeInstallerEntries([{name:'demo',path:f.installed,scope:'global',agents:labels}]),stderr:''}),
+      runInteractiveCommand: async () => { throw new Error('Correct content must be reused'); },
+    }, {scope:'global'}), 0);
+    assert.equal((await readManagedSkillBaseline('global')).releaseId, f.manifest.releaseId);
+  });
+}

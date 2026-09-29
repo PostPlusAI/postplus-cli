@@ -22802,49 +22802,24 @@ async function listInstalledSkillDirectories(global, cwd, agentFilter) {
   }
   return records;
 }
-async function removePostPlusRetiredPaths(planPath) {
-  const { createHash: createHash2 } = await import("node:crypto");
-  async function fingerprint(directory) {
-    const files = [];
-    async function visit(relative2) {
-      for (const item of await readdir(join(directory, relative2), { withFileTypes: true })) {
-        const name = relative2 ? `${relative2}/${item.name}` : item.name;
-        if (item.isDirectory()) await visit(name);
-        else if (item.isFile()) files.push(name);
-        else throw new Error("Retirement content contains a link or special file");
-      }
-    }
-    await visit("");
-    const hash = createHash2("sha256");
-    for (const name of files.sort()) {
-      const bytes = await readFile(join(directory, name));
-      hash.update(name).update("\0").update(String(bytes.length)).update("\0").update(bytes);
-    }
-    return hash.digest("hex");
-  }
+async function removePostPlusSkillPaths(planPath) {
   const plan = JSON.parse(await readFile(planPath, "utf8"));
-  if (plan.schemaVersion !== 1 || !["global", "current-directory"].includes(plan.scope) || !Array.isArray(plan.retiredNames) || !Array.isArray(plan.entries)) throw new Error("Invalid retirement authorization");
+  if (plan.schemaVersion !== 2 || !["global", "current-directory"].includes(plan.scope) || !Array.isArray(plan.names) || !Array.isArray(plan.entries)) throw new Error("Invalid PostPlus removal plan");
   const directories = await listInstalledSkillDirectories(plan.scope === "global", process.cwd());
-  const allowedRealPaths = new Set(directories.map((entry) => entry.path));
-  const plannedPaths = new Set(plan.entries.map((entry) => entry.path));
   const checked = [];
+  const seen = /* @__PURE__ */ new Set();
   for (const entry of plan.entries) {
-    if (!plan.retiredNames.includes(entry.name) || !["user-approved", "verified-baseline"].includes(entry.authorization)) throw new Error("Missing retirement approval");
+    if (!plan.names.includes(entry.name)) throw new Error("Removal name is not listed");
     const current = directories.find((item) => item.path === entry.path && item.directoryName === entry.name && item.realPath === entry.realPath);
-    if (!current || !allowedRealPaths.has(entry.realPath)) throw new Error("Retirement path is outside installed agent roots or changed");
-    if (await realpath(entry.path) !== entry.realPath) throw new Error("Retirement path changed");
-    const backup = JSON.parse(await readFile(entry.backupManifestPath, "utf8"));
-    if (backup.schemaVersion !== 1 || backup.scope !== plan.scope || !Array.isArray(backup.skills)) throw new Error("Invalid retirement backup");
-    const saved = backup.skills.find((item) => item.name === entry.name && item.backupPath === entry.backupPath && item.actualContentHash === entry.contentHash && item.installedPath === entry.backedUpInstalledPath);
-    if (!saved || await realpath(saved.installedPath) !== entry.realPath || (await lstat(entry.backupPath)).isSymbolicLink()) throw new Error("Retirement backup does not authorize this path");
-    if (entry.authorization === "verified-baseline" && saved.expectedContentHash !== entry.contentHash) throw new Error("Retirement baseline is not verified");
-    if (await fingerprint(entry.backupPath) !== entry.contentHash || await fingerprint(entry.path) !== entry.contentHash) throw new Error("Retirement content changed after backup");
-    if (entry.path === entry.realPath && directories.some((item) => item.realPath === entry.realPath && !plannedPaths.has(item.path))) throw new Error("Unapproved installed paths still use retirement content");
-    checked.push({ path: entry.path, link: (await lstat(entry.path)).isSymbolicLink(), name: entry.name });
+    if (!current) throw new Error("Removal path is outside installed agent roots or changed");
+    const physical = await resolveParentSymlinks(entry.path);
+    if (seen.has(physical)) continue;
+    seen.add(physical);
+    checked.push({ path: entry.path, link: (await lstat(entry.path)).isSymbolicLink() });
   }
   for (const entry of checked.sort((a2, b3) => Number(b3.link) - Number(a2.link))) await rm(entry.path, { recursive: !entry.link, force: false });
   const remaining = await listInstalledSkillDirectories(plan.scope === "global", process.cwd());
-  for (const name of new Set(plan.retiredNames)) if (!remaining.some((entry) => entry.directoryName === name)) {
+  for (const name of new Set(plan.names)) if (!remaining.some((entry) => entry.directoryName === name)) {
     if (plan.scope === "global") await removeSkillFromLock(name);
     else await removeSkillFromLocalLock(name, process.cwd());
   }
@@ -22984,10 +22959,10 @@ function resolveSkillsToRemove(requested, folderNames, lockKeys = []) {
   return Array.from(matched);
 }
 async function removeCommand(skillNames, options) {
-  const retirementArgument = process.argv.indexOf("--postplus-retirement-plan");
-  if (retirementArgument !== -1) {
+  const removalArgument = process.argv.indexOf("--postplus-remove-plan");
+  if (removalArgument !== -1) {
     try {
-      await removePostPlusRetiredPaths(process.argv[retirementArgument + 1]);
+      await removePostPlusSkillPaths(process.argv[removalArgument + 1]);
     } catch (error) {
       console.error(error.message);
       process.exitCode = 1;
