@@ -20,7 +20,7 @@
       "Advertising and social publishing guidance covers target selection, explicit write approval, and verification of external results.",
       "Official skills update automatically with the CLI, replacing same-name local edits and removing retired official skills while preserving unrelated skills.",
       "Compatible updates continue the original task once; failed updates or a required new agent session stop with a clear next step.",
-      "The retired Postiz publishing skill is replaced by channel-based social publishing guidance. Platform permissions and available account features still apply."
+      "The retired social publishing skill is replaced by channel-based social publishing guidance. Platform permissions and available account features still apply."
     ]
   },
   "source": "PostPlusAI/postplus-skills",
