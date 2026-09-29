@@ -13,6 +13,8 @@ const exec = promisify(execFile);
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 test('official bootstrap installs and reuses a complete managed runtime without system Node', { timeout: 240000 }, async t => {
+  let server;
+  const sockets = new Set();
   try {
   const windows = process.platform === 'win32';
   const archive = process.env.POSTPLUS_TEST_NODE_ARCHIVE;
@@ -30,7 +32,7 @@ test('official bootstrap installs and reuses a complete managed runtime without 
   await writeFile(opensslConfig, '[req]\ndistinguished_name=dn\nx509_extensions=extensions\nprompt=no\n[dn]\nCN=localhost\n[extensions]\nsubjectAltName=IP:127.0.0.1\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,digitalSignature,keyEncipherment,keyCertSign\n');
   await exec('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-keyout', key, '-out', cert, '-config', opensslConfig]);
   const downloads = { node: 0, cli: 0 };
-  const server = https.createServer({ key: await readFile(key), cert: await readFile(cert) }, (request, response) => {
+  server = https.createServer({ key: await readFile(key), cert: await readFile(cert) }, (request, response) => {
     const name = request.url === (windows ? '/node.zip' : '/node.tar.gz') ? 'node' : request.url === '/cli.tar.gz' ? 'cli' : null;
     if (!name) { response.writeHead(404); response.end(); return; }
     downloads[name]++;
@@ -38,9 +40,9 @@ test('official bootstrap installs and reuses a complete managed runtime without 
     createReadStream(name === 'node' ? archive : join(repo, `dist/postplus-cli-v${release.cliVersion}.tar.gz`)).pipe(response);
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-  const sockets = new Set();
-  server.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
-  t.after(() => { for (const socket of sockets) socket.destroy(); server.closeAllConnections(); server.close(); });
+  server.unref();
+  server.on('connection', socket => { socket.unref(); sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
+  server.on('tlsClientError', error => process.stderr.write('Acceptance TLS: ' + error.message + '\n'));
   const base = `https://127.0.0.1:${server.address().port}`;
   release.cli.url = `${base}/cli.tar.gz`;
   release.node.artifacts[`${process.platform}-${process.arch}`].url = `${base}/${windows ? 'node.zip' : 'node.tar.gz'}`;
@@ -50,6 +52,7 @@ test('official bootstrap installs and reuses a complete managed runtime without 
     POSTPLUS_CONFIG_DIR: config, POSTPLUS_INSTALL_ROOT: program, XDG_CONFIG_HOME: join(home, '.config'),
     CURL_CA_BUNDLE: cert, NODE_EXTRA_CA_CERTS: cert, DISABLE_TELEMETRY: '1', DO_NOT_TRACK: '1' };
   await assert.rejects(windows ? exec('where.exe', ['node'], { env: environment }) : exec('/bin/sh', ['-c', 'command -v node'], { env: environment }), 'test environment must not resolve a system Node');
+  if (windows) process.stderr.write((await exec(join(process.env.SystemRoot, 'System32/curl.exe'), ['--version'], { env: environment, timeout: 10000 })).stdout);
   const invoke = (repair = false) => exec(windows ? 'powershell.exe' : '/bin/sh', windows ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dist, 'install.ps1'), ...(repair ? ['-Repair'] : [])] : [join(dist, 'install.sh'), ...(repair ? ['--repair'] : [])], { cwd: project, env: environment, timeout: 120000, maxBuffer: 1024 * 1024 });
   process.stderr.write('Managed acceptance: first installation\n');
   const first = await invoke(); const installed = JSON.parse(first.stdout);
@@ -113,5 +116,8 @@ test('official bootstrap installs and reuses a complete managed runtime without 
   } catch (error) {
     process.stderr.write(String(error.stack ?? error) + '\n' + String(error.stdout ?? '').slice(-8000) + '\n' + String(error.stderr ?? '').slice(-8000) + '\n');
     throw error;
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    if (server) { server.closeAllConnections(); server.close(); }
   }
 });

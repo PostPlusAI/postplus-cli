@@ -79,4 +79,5 @@ jobs:
           POSTPLUS_EXPECT_PLATFORM: ${{ matrix.platform }}-${{ matrix.arch }}
         run: node scripts/download-runtime-test-artifact.mjs
       - name: Test final installation and update without system Node
+        timeout-minutes: 5
         run: pnpm test:runtime:acceptance

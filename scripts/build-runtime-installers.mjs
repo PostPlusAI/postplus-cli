@@ -101,7 +101,7 @@ ${JSON.stringify(release, null, 2)}
     # Do not use an unverified system Node or npm during bootstrap.
     $tlsArgs = if ($env:CURL_CA_BUNDLE) { @('--cacert', $env:CURL_CA_BUNDLE) } else { @() }
     & curl.exe @tlsArgs --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 300 $url -o $file
-    if ($LASTEXITCODE -ne 0) { throw 'This environment could not download PostPlus components.' }
+    if ($LASTEXITCODE -ne 0) { throw ('This environment could not download PostPlus components (curl exit ' + $LASTEXITCODE + ').') }
     if ((Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant() -ne $digest) { throw 'PostPlus download integrity verification failed.' }
   }
   [Console]::Error.WriteLine('Preparing the PostPlus runtime and program. Your system Node will not be changed.')
