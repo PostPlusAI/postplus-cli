@@ -16,6 +16,7 @@ import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import {
   POSTPLUS_CLI_UPDATE_COMMAND,
   POSTPLUS_UPDATE_COMMAND,
+  POSTPLUS_UPDATE_INTRODUCTION_GUIDANCE,
   type PostPlusClientUpgradePayload,
   readCurrentCliVersion,
 } from './client-compatibility.js';
@@ -217,7 +218,7 @@ export async function runPostPlusClientUpgradeRecovery(
           notes.title.length > 500 || notes.summary.length > 4000) throw new Error('Invalid update release notes.');
       // Keep the business command's stdout machine-readable. Agent tools receive
       // this short maintenance explanation on stderr alongside the final result.
-      writeError(`PostPlus updated: ${notes.title}\n${notes.summary}\n`);
+      writeError(`PostPlus updated: ${notes.title}\n${notes.summary}\n${POSTPLUS_UPDATE_INTRODUCTION_GUIDANCE}\n`);
     }
 
     if (result.session !== undefined) {

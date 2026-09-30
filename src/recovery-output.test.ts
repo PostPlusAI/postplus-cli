@@ -169,5 +169,6 @@ test('automatic update summary reaches the Agent on stderr without mixing into b
   const result = await recover({ notes: true });
   assert.equal(result.code, 0);
   assert.equal(JSON.parse(result.stdout).ok, true);
-  assert.equal(result.stderr, 'PostPlus updated: Marketing Channels\nPlan and publish from one channel workspace.\n');
+  assert.match(result.stderr, /^PostPlus updated: Marketing Channels\nPlan and publish from one channel workspace\.\n/);
+  assert.match(result.stderr, /After a successful update, briefly explain the official release notes/);
 });

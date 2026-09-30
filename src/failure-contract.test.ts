@@ -167,7 +167,7 @@ test('compatibility identifies old CLI, old skills, and missing local skill reco
   const facts = samples.map((compatibility) => toFailureFact(readPostPlusCompatibilityError({ code: 'postplus_client_upgrade_required', compatibility })));
   assert.deepEqual(facts.map((fact) => fact.compatibilityReason), ['cli_release_too_old', 'skills_release_mismatch', 'skills_baseline_missing']);
   assert.equal(new Set(facts.map((fact) => fact.message)).size, 3);
-  assert.ok(facts.every((fact) => fact.action === 'Run postplus update.'));
+  assert.ok(facts.every((fact) => fact.action.startsWith('Run postplus update. After a successful update,')));
   assert.equal(facts[2]?.versions?.skillsReleaseId, null);
 });
 

@@ -8,6 +8,7 @@ import {
 export const POSTPLUS_CLIENT_CONTRACT_VERSION = 4;
 export const POSTPLUS_CLIENT_RUNTIME = 'postplus-cli';
 export const POSTPLUS_UPDATE_COMMAND = 'postplus update';
+export const POSTPLUS_UPDATE_INTRODUCTION_GUIDANCE = 'After a successful update, briefly explain the official release notes to the user in their language, including relevant account restrictions, then follow the returned session action and continue their original task. Do not repeat the full product introduction or invent changes when no release notes are returned.';
 // Single source for the low-level npm self-update command. It lives beside the
 // compatibility commands so update-check.ts can import both without a cycle.
 export const POSTPLUS_CLI_UPDATE_COMMAND =
@@ -50,7 +51,7 @@ export class PostPlusClientUpgradeRequiredError extends Error {
   readonly retryable = false;
   readonly compatibilityReason: string;
   readonly summary: string;
-  readonly action = 'Run postplus update.';
+  readonly action = `Run postplus update. ${POSTPLUS_UPDATE_INTRODUCTION_GUIDANCE}`;
   readonly versions: { cliVersion: string | null; skillsReleaseId: string | null; requiredCliVersion: string | null; requiredSkillsReleaseId: string | null };
   // Commands that already own durable work resume that identity after updating.
   // Absent for requests rejected before work began: their original argv is safe.
@@ -158,6 +159,7 @@ export function formatPostPlusClientUpgradeError(payload: unknown) {
       ? record.error.trim()
       : 'Your PostPlus CLI or PostPlus skills are out of date.',
     `Run: ${updateCommand}.`,
+    POSTPLUS_UPDATE_INTRODUCTION_GUIDANCE,
     restart.trim(),
   ]
     .filter(Boolean)
