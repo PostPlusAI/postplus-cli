@@ -1,0 +1,2238 @@
+{
+  "version": 1,
+  "common": {
+    "CAC": {
+      "text": "User-set acquisition-cost ceiling, in account currency/customer; reuse the approved customer definition and value."
+    },
+    "CPL": {
+      "text": "User-set lead-cost ceiling, in account currency/lead; distinct from observed Cost per lead."
+    },
+    "Target CPA": {
+      "text": "User-set target acquisition cost in account currency/conversion; do not substitute the bidding target."
+    },
+    "Conversion Rate": {
+      "text": "User-defined numerator/denominator and percent-or-ratio convention. Reuse the supplied formula; if absent, propose and confirm it before evaluation."
+    },
+    "Time": {
+      "text": "Evaluation clock in the rule timezone; preserve explicit timezone and whole-week execution hours."
+    },
+    "CBO Dynamic Budget": {
+      "text": "Target CPA × Active ad sets in campaign, in account currency; preserve the rule multiplier and budget owner.",
+      "requires": [
+        "Target CPA",
+        "Active ad sets in campaign"
+      ]
+    }
+  },
+  "platforms": {
+    "meta-ads": {
+      "context": {
+        "report": "METAADS_GET_INSIGHTS: object_id=exact scoped ID, level=account/campaign/adset/ad matching that ID, fields=[only needed fields], time_range={since,until}; omit date_preset. Reuse action_attribution_windows (1d_click/7d_click/1d_view); do not add overlapping windows. Read numeric strings at B.data[]."
+      },
+      "metrics": {
+        "Spend": {
+          "text": "spend → B.data[].spend; account currency.",
+          "context": [
+            "report"
+          ]
+        },
+        "Impressions": {
+          "text": "impressions → B.data[].impressions; count.",
+          "context": [
+            "report"
+          ]
+        },
+        "_allClicks": {
+          "text": "clicks → B.data[].clicks; all-click count.",
+          "context": [
+            "report"
+          ]
+        },
+        "_linkClicks": {
+          "text": "inline_link_clicks → B.data[].inline_link_clicks; link-click count.",
+          "context": [
+            "report"
+          ]
+        },
+        "Frequency": {
+          "text": "frequency → B.data[].frequency; same-scope whole-window time_increment=all_days, not averaged daily frequency.",
+          "context": [
+            "report"
+          ]
+        },
+        "CTR": {
+          "text": "100 × _allClicks / Impressions; percentage points (1%=1).",
+          "requires": [
+            "_allClicks",
+            "Impressions"
+          ]
+        },
+        "CTR (Link clicks)": {
+          "text": "100 × _linkClicks / Impressions; percentage points (1%=1).",
+          "requires": [
+            "_linkClicks",
+            "Impressions"
+          ]
+        },
+        "CPC (Link)": {
+          "text": "Spend / _linkClicks; currency/link click.",
+          "requires": [
+            "Spend",
+            "_linkClicks"
+          ]
+        },
+        "CPM": {
+          "text": "1000 × Spend / Impressions; currency/1000 impressions.",
+          "requires": [
+            "Spend",
+            "Impressions"
+          ]
+        },
+        "Purchases": {
+          "text": "actions → B.data[].actions[action_type=the bound event].value; parse numeric strings as event counts.",
+          "requires": [
+            "Event: Purchases"
+          ],
+          "context": [
+            "report"
+          ]
+        },
+        "Website purchases": {
+          "text": "actions → B.data[].actions[action_type=the bound event].value; parse numeric strings as event counts.",
+          "requires": [
+            "Event: Website purchases"
+          ],
+          "context": [
+            "report"
+          ]
+        },
+        "Mobile app purchases": {
+          "text": "actions → B.data[].actions[action_type=the bound event].value; parse numeric strings as event counts.",
+          "requires": [
+            "Event: Mobile app purchases"
+          ],
+          "context": [
+            "report"
+          ]
+        },
+        "Mobile app installs": {
+          "text": "actions → B.data[].actions[action_type=the bound event].value; parse numeric strings as event counts.",
+          "requires": [
+            "Event: Mobile app installs"
+          ],
+          "context": [
+            "report"
+          ]
+        },
+        "Leads": {
+          "text": "actions → B.data[].actions[action_type=the bound event].value; parse numeric strings as event counts.",
+          "requires": [
+            "Event: Leads"
+          ],
+          "context": [
+            "report"
+          ]
+        },
+        "Cost per purchase": {
+          "text": "Spend / Purchases; account currency/event.",
+          "requires": [
+            "Spend",
+            "Purchases"
+          ]
+        },
+        "Cost per website purchase": {
+          "text": "Spend / Website purchases; account currency/event.",
+          "requires": [
+            "Spend",
+            "Website purchases"
+          ]
+        },
+        "Cost per mobile app purchase": {
+          "text": "Spend / Mobile app purchases; account currency/event.",
+          "requires": [
+            "Spend",
+            "Mobile app purchases"
+          ]
+        },
+        "Cost per mobile app install": {
+          "text": "Spend / Mobile app installs; account currency/event.",
+          "requires": [
+            "Spend",
+            "Mobile app installs"
+          ]
+        },
+        "Cost per lead": {
+          "text": "Spend / Leads; account currency/event.",
+          "requires": [
+            "Spend",
+            "Leads"
+          ]
+        },
+        "Purchase ROAS": {
+          "text": "action_values → B.data[].action_values[action_type=same event as Purchases].value / Spend; currency/currency ratio, not percent.",
+          "requires": [
+            "Spend",
+            "Event: Purchases"
+          ],
+          "context": [
+            "report"
+          ]
+        },
+        "Website purchase ROAS": {
+          "text": "action_values → B.data[].action_values[action_type=same event as Website purchases].value / Spend; currency/currency ratio, not percent.",
+          "requires": [
+            "Spend",
+            "Event: Website purchases"
+          ],
+          "context": [
+            "report"
+          ]
+        },
+        "Mobile app purchase ROAS": {
+          "text": "action_values → B.data[].action_values[action_type=same event as Mobile app purchases].value / Spend; currency/currency ratio, not percent.",
+          "requires": [
+            "Spend",
+            "Event: Mobile app purchases"
+          ],
+          "context": [
+            "report"
+          ]
+        },
+        "Leads value": {
+          "text": "action_values → B.data[].action_values[action_type=same verified lead event].value; account currency. Use approved CRM value if supplied; missing value is unknown, not lead count.",
+          "requires": [
+            "Event: Leads"
+          ],
+          "context": [
+            "report"
+          ]
+        },
+        "ROAS (Leads)": {
+          "text": "Leads value / Spend; currency/currency ratio.",
+          "requires": [
+            "Leads value",
+            "Spend"
+          ]
+        },
+        "Hours since creation": {
+          "text": "METAADS_GET_OBJECT(object_id,fields=[id,created_time]): (evaluation timestamp − B.created_time)/3600 seconds; hours since actual creation."
+        },
+        "Daily budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "METAADS_GET_OBJECT(object_id=campaign ID,fields=[daily_budget]): B.daily_budget; currency/day after verifying raw units."
+            },
+            "adset": {
+              "text": "METAADS_READ_ADSETS(ad_account_id,fields=[id,campaign_id,daily_budget]): B.data[].daily_budget for the exact ad-set ID; verify raw units and ABO/CBO owner."
+            },
+            "ad": {
+              "text": "No ad-owned daily budget. Resolve budget ownership with the user; do not substitute its parent."
+            },
+            "selected": {
+              "text": "Resolve the exact budget-owning object and units before choosing a budget field."
+            }
+          }
+        },
+        "Bid amount": {
+          "byTarget": {
+            "adset": {
+              "text": "METAADS_READ_ADSETS(ad_account_id,fields=[id,bid_amount,bid_strategy]): B.data[].bid_amount for the exact ad-set ID; verify raw units and bidding applicability."
+            },
+            "ad": {
+              "text": "METAADS_LIST_ADS(ad_account_id,fields=CSV id,bid_amount): B.data[].bid_amount for the exact ad ID; verify raw units and bidding applicability."
+            },
+            "campaign": {
+              "text": "No campaign bid-amount binding; do not substitute an ad-set bid."
+            },
+            "selected": {
+              "text": "Resolve the exact bid-owning object and unit before using bid_amount."
+            }
+          }
+        },
+        "Ads in ad set": {
+          "text": "METAADS_LIST_ADS(ad_account_id,fields=CSV id,adset_id,status,effective_status): count distinct B.data[].id matching the parent adset_id. Incomplete pagination means unknown."
+        },
+        "Active ads in ad set": {
+          "text": "METAADS_LIST_ADS(ad_account_id,fields=CSV id,adset_id,status,effective_status): count distinct B.data[].id matching the parent adset_id and agreed active status/effective_status. Incomplete pagination means unknown."
+        },
+        "Active ad sets in campaign": {
+          "text": "METAADS_READ_ADSETS(ad_account_id,fields=[id,campaign_id,status,effective_status]): count distinct B.data[].id under the exact campaign and agreed active definition; incomplete pagination means unknown."
+        },
+        "Event: Purchases": {
+          "text": "action_type=omni_purchase (all purchase channels; verify this matches the chosen business scope). Verify this event in the returned data and reuse its attribution; never add overlapping action types."
+        },
+        "Event: Website purchases": {
+          "text": "action_type=offsite_conversion.fb_pixel_purchase (website purchase). Verify this event in the returned data and reuse its attribution; never add overlapping action types."
+        },
+        "Event: Mobile app purchases": {
+          "text": "action_type=app_custom_event.fb_mobile_purchase (in-app purchase). Verify this event in the returned data and reuse its attribution; never add overlapping action types."
+        },
+        "Event: Mobile app installs": {
+          "text": "action_type=mobile_app_install (app install). Verify this event in the returned data and reuse its attribution; never add overlapping action types."
+        },
+        "Event: Leads": {
+          "text": "action_type=lead (aggregate lead; verify website/instant-form scope against the chosen event). Verify this event in the returned data and reuse its attribution; never add overlapping action types."
+        }
+      },
+      "actions": {
+        "Notify": {
+          "text": "Return matching values here; external delivery requires the user-selected destination and sending capability."
+        },
+        "Duplicate": {
+          "text": "No verified exact-duplication binding for this target. Preserve source/copy count and let the user choose manual duplication or another supported operation; creation alone is not duplication."
+        },
+        "Pause": {
+          "byTarget": {
+            "campaign": {
+              "text": "METAADS_UPDATE_CAMPAIGN(campaign_id,status=PAUSED); read back same ID with METAADS_GET_OBJECT(fields=[id,status,effective_status])."
+            },
+            "adset": {
+              "text": "No verified AI-direct Pause binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Pause binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Pause binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Start": {
+          "byTarget": {
+            "campaign": {
+              "text": "METAADS_UPDATE_CAMPAIGN(campaign_id,status=ACTIVE); read back same ID with METAADS_GET_OBJECT(fields=[id,status,effective_status])."
+            },
+            "adset": {
+              "text": "No verified AI-direct Start binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Start binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Start binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Increase budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "METAADS_UPDATE_CAMPAIGN(campaign_id,daily_budget=calculated amount) exposes the field but its write-unit contract is unresolved. Verify units first or offer exact manual amount; read back same campaign. Never assume ×100."
+            },
+            "adset": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Decrease budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "METAADS_UPDATE_CAMPAIGN(campaign_id,daily_budget=calculated amount) exposes the field but its write-unit contract is unresolved. Verify units first or offer exact manual amount; read back same campaign. Never assume ×100."
+            },
+            "adset": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Set budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "METAADS_UPDATE_CAMPAIGN(campaign_id,daily_budget=calculated amount) exposes the field but its write-unit contract is unresolved. Verify units first or offer exact manual amount; read back same campaign. Never assume ×100."
+            },
+            "adset": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Increase bid": {
+          "byTarget": {
+            "campaign": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "adset": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Add to name": {
+          "byTarget": {
+            "campaign": {
+              "text": "METAADS_UPDATE_CAMPAIGN(campaign_id,name=final name); change only the requested marker once; GET_OBJECT readback of the same campaign name."
+            },
+            "adset": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Remove from name": {
+          "byTarget": {
+            "campaign": {
+              "text": "METAADS_UPDATE_CAMPAIGN(campaign_id,name=final name); change only the requested marker once; GET_OBJECT readback of the same campaign name."
+            },
+            "adset": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        }
+      }
+    },
+    "google-ads": {
+      "context": {
+        "report": "GOOGLEADS_SEARCH_STREAM_GAQL(customer_id=selected child customer,query): FROM customer/campaign/ad_group/ad_group_ad for the exact scope, WHERE segments.date BETWEEN resolved dates. GAQL snake_case → B.results[] camelCase; preserve customer timezone and attribution. Open query strings do not prove field compatibility.",
+        "event": "Select the actual conversion_action.resource_name/category/type matching the user event; filter segments.conversion_action. Query spend separately without conversion segmentation and join by exact scope/window; never duplicate spend across conversion rows."
+      },
+      "metrics": {
+        "Spend": {
+          "text": "metrics.cost_micros → B.results[].metrics.costMicros / 1000000; account currency.",
+          "context": [
+            "report"
+          ]
+        },
+        "Impressions": {
+          "text": "metrics.impressions → B.results[].metrics.impressions; count.",
+          "context": [
+            "report"
+          ]
+        },
+        "_clicks": {
+          "text": "metrics.clicks → B.results[].metrics.clicks; platform clicks. Confirm the requested click definition; no automatic Meta all/link equivalent.",
+          "context": [
+            "report"
+          ]
+        },
+        "Frequency": {
+          "text": "metrics.average_impression_frequency_per_user → B.results[].metrics.averageImpressionFrequencyPerUser; campaign Display/Video/Discovery/App only, ≤92 days, non-additive; unsupported scope remains unknown.",
+          "context": [
+            "report"
+          ]
+        },
+        "CTR": {
+          "text": "100 × _clicks / Impressions; percentage points; verify all-click intent.",
+          "requires": [
+            "_clicks",
+            "Impressions"
+          ]
+        },
+        "CTR (Link clicks)": {
+          "text": "100 × _clicks / Impressions only when the confirmed click definition matches link clicks; otherwise unknown.",
+          "requires": [
+            "_clicks",
+            "Impressions"
+          ]
+        },
+        "CPC (Link)": {
+          "text": "Spend / _clicks only for the confirmed link-click definition; account currency/click.",
+          "requires": [
+            "Spend",
+            "_clicks"
+          ]
+        },
+        "CPM": {
+          "text": "1000 × Spend / Impressions; currency/1000 impressions.",
+          "requires": [
+            "Spend",
+            "Impressions"
+          ]
+        },
+        "Purchases": {
+          "text": "metrics.conversions → B.results[].metrics.conversions for the verified purchase conversion action; count may be fractional, never mixed conversions.",
+          "context": [
+            "report"
+          ],
+          "requires": [
+            "Event: Purchases"
+          ]
+        },
+        "Website purchases": {
+          "text": "metrics.conversions → B.results[].metrics.conversions for the verified website purchase conversion action; count may be fractional, never mixed conversions.",
+          "context": [
+            "report"
+          ],
+          "requires": [
+            "Event: Website purchases"
+          ]
+        },
+        "Leads": {
+          "text": "metrics.conversions → B.results[].metrics.conversions for the verified lead conversion action; count may be fractional, never mixed conversions.",
+          "context": [
+            "report"
+          ],
+          "requires": [
+            "Event: Leads"
+          ]
+        },
+        "Mobile app purchases": {
+          "text": "metrics.conversions → B.results[].metrics.conversions for the verified in-app purchase conversion action; count may be fractional, never mixed conversions.",
+          "context": [
+            "report"
+          ],
+          "requires": [
+            "Event: Mobile app purchases"
+          ]
+        },
+        "Mobile app installs": {
+          "text": "metrics.conversions → B.results[].metrics.conversions for the verified app install conversion action; count may be fractional, never mixed conversions.",
+          "context": [
+            "report"
+          ],
+          "requires": [
+            "Event: Mobile app installs"
+          ]
+        },
+        "Cost per purchase": {
+          "text": "Spend / Purchases; account currency/event.",
+          "requires": [
+            "Spend",
+            "Purchases"
+          ]
+        },
+        "Cost per website purchase": {
+          "text": "Spend / Website purchases; account currency/event.",
+          "requires": [
+            "Spend",
+            "Website purchases"
+          ]
+        },
+        "Cost per lead": {
+          "text": "Spend / Leads; account currency/event.",
+          "requires": [
+            "Spend",
+            "Leads"
+          ]
+        },
+        "Cost per mobile app purchase": {
+          "text": "Spend / Mobile app purchases; account currency/event.",
+          "requires": [
+            "Spend",
+            "Mobile app purchases"
+          ]
+        },
+        "Cost per mobile app install": {
+          "text": "Spend / Mobile app installs; account currency/event.",
+          "requires": [
+            "Spend",
+            "Mobile app installs"
+          ]
+        },
+        "Purchase ROAS": {
+          "text": "metrics.conversions_value → B.results[].metrics.conversionsValue for the same action as Purchases, divided by Spend; value is account currency, ROAS is a ratio. Missing monetary value is unknown.",
+          "requires": [
+            "Spend",
+            "Event: Purchases"
+          ],
+          "context": [
+            "report",
+            "event"
+          ]
+        },
+        "Website purchase ROAS": {
+          "text": "metrics.conversions_value → B.results[].metrics.conversionsValue for the same action as Website purchases, divided by Spend; value is account currency, ROAS is a ratio. Missing monetary value is unknown.",
+          "requires": [
+            "Spend",
+            "Event: Website purchases"
+          ],
+          "context": [
+            "report",
+            "event"
+          ]
+        },
+        "Mobile app purchase ROAS": {
+          "text": "metrics.conversions_value → B.results[].metrics.conversionsValue for the same action as Mobile app purchases, divided by Spend; value is account currency, ROAS is a ratio. Missing monetary value is unknown.",
+          "requires": [
+            "Spend",
+            "Event: Mobile app purchases"
+          ],
+          "context": [
+            "report",
+            "event"
+          ]
+        },
+        "ROAS (Leads)": {
+          "text": "metrics.conversions_value → B.results[].metrics.conversionsValue for the same action as Leads, divided by Spend; value is account currency, ROAS is a ratio. Missing monetary value is unknown.",
+          "requires": [
+            "Spend",
+            "Event: Leads"
+          ],
+          "context": [
+            "report",
+            "event"
+          ]
+        },
+        "Leads value": {
+          "text": "metrics.conversions_value → B.results[].metrics.conversionsValue for the verified lead conversion action; account currency, not lead count.",
+          "requires": [
+            "Event: Leads"
+          ],
+          "context": [
+            "report",
+            "event"
+          ]
+        },
+        "Daily budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "Read campaign.campaign_budget → B.results[].campaign.campaignBudget, then query that campaign_budget resource: amount_micros/period/reference_count/resource_name → B.results[].campaignBudget.amountMicros/period/referenceCount/resourceName. amountMicros/1000000 is currency/day only for DAILY; shared budgets (referenceCount>1) cannot be written.",
+              "context": [
+                "report"
+              ]
+            },
+            "adset": {
+              "text": "Google ad groups have no independent daily budget. A parent campaign_budget is a different object; explain and ask the user to choose scope."
+            },
+            "ad": {
+              "text": "Google ads have no independent daily budget; ask the user to choose a supported budget owner."
+            },
+            "selected": {
+              "text": "Resolve the chosen campaign and linked campaign_budget; do not infer a group-owned budget."
+            }
+          }
+        },
+        "Bid amount": {
+          "text": "For applicable Manual CPC: ad_group.cpc_bid_micros → B.results[].adGroup.cpcBidMicros/1000000, currency/click. Current GOOGLEADS_MUTATE_AD_GROUPS update has no bid field; do not invent one.",
+          "context": [
+            "report"
+          ]
+        },
+        "Hours since creation": {
+          "text": "Creation timestamp requires verified creation evidence/export; campaign start_date is not creation time. Unknown until supplied."
+        },
+        "Ads in ad set": {
+          "text": "Unsegmented ad_group_ad.resource_name/ad_group/status → B.results[].adGroupAd.resourceName/adGroup/status; count distinct resources under exact parent; require complete coverage.",
+          "context": [
+            "report"
+          ]
+        },
+        "Active ads in ad set": {
+          "text": "Unsegmented ad_group_ad.resource_name/ad_group/status → B.results[].adGroupAd.resourceName/adGroup/status; count distinct resources under exact parent using the agreed active definition (ENABLED alone is configured state); require complete coverage.",
+          "context": [
+            "report"
+          ]
+        },
+        "Active ad sets in campaign": {
+          "text": "Unsegmented ad_group.id/campaign/status → B.results[].adGroup.id/campaign/status; count unique children under the campaign and agreed active definition; complete coverage required.",
+          "context": [
+            "report"
+          ]
+        },
+        "Event: Purchases": {
+          "text": "Bind the actual purchase conversion_action.resource_name/category/type and filter segments.conversion_action; reuse the chosen action, not mixed goals.",
+          "context": [
+            "event"
+          ]
+        },
+        "Event: Website purchases": {
+          "text": "Bind the actual website purchase conversion_action.resource_name/category/type and filter segments.conversion_action; reuse the chosen action, not mixed goals.",
+          "context": [
+            "event"
+          ]
+        },
+        "Event: Leads": {
+          "text": "Bind the actual lead conversion_action.resource_name/category/type and filter segments.conversion_action; reuse the chosen action, not mixed goals.",
+          "context": [
+            "event"
+          ]
+        },
+        "Event: Mobile app purchases": {
+          "text": "Bind the actual in-app purchase conversion_action.resource_name/category/type and filter segments.conversion_action; reuse the chosen action, not mixed goals.",
+          "context": [
+            "event"
+          ]
+        },
+        "Event: Mobile app installs": {
+          "text": "Bind the actual app install conversion_action.resource_name/category/type and filter segments.conversion_action; reuse the chosen action, not mixed goals.",
+          "context": [
+            "event"
+          ]
+        }
+      },
+      "actions": {
+        "Notify": {
+          "text": "Return matching values here; external delivery requires the user-selected destination and sending capability."
+        },
+        "Duplicate": {
+          "text": "No verified exact-duplication binding for this target. Preserve source/copy count and let the user choose manual duplication or another supported operation; creation alone is not duplication."
+        },
+        "Pause": {
+          "byTarget": {
+            "campaign": {
+              "text": "GOOGLEADS_MUTATE_CAMPAIGNS_V2(customer_id,operations=[{operation_type:update,update:{resource_name,status:paused},update_mask:status}],partial_failure=false,validate_only); read back exact campaign via GAQL."
+            },
+            "adset": {
+              "text": "GOOGLEADS_MUTATE_AD_GROUPS(customer_id,operations=[{update:{resource_name,status:PAUSED}}],partial_failure=false,validate_only); read back exact ad_group via GAQL."
+            },
+            "ad": {
+              "text": "GOOGLEADS_MUTATE_AD_GROUP_ADS(customer_id,operations=[{update:{resource_name,status:PAUSED},update_mask:status}],partial_failure=false,validate_only); verify eligible campaign type and read back exact ad_group_ad via GAQL."
+            },
+            "selected": {
+              "text": "No verified AI-direct Pause binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Start": {
+          "byTarget": {
+            "campaign": {
+              "text": "GOOGLEADS_MUTATE_CAMPAIGNS_V2(customer_id,operations=[{operation_type:update,update:{resource_name,status:enabled},update_mask:status}],partial_failure=false,validate_only); read back exact campaign via GAQL."
+            },
+            "adset": {
+              "text": "GOOGLEADS_MUTATE_AD_GROUPS(customer_id,operations=[{update:{resource_name,status:ENABLED}}],partial_failure=false,validate_only); read back exact ad_group via GAQL."
+            },
+            "ad": {
+              "text": "GOOGLEADS_MUTATE_AD_GROUP_ADS(customer_id,operations=[{update:{resource_name,status:ENABLED},update_mask:status}],partial_failure=false,validate_only); verify eligible campaign type and read back exact ad_group_ad via GAQL."
+            },
+            "selected": {
+              "text": "No verified AI-direct Start binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Increase budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "GOOGLEADS_MUTATE_CAMPAIGN_BUDGETS: customer_id, operations=[{update:{resource_name:linked budget,amount_micros:positive integer string(final currency amount×1000000)},update_mask:amount_micros}], partial_failure=false, validate_only. DAILY only, referenceCount≤1; confirm same budget readback. validate_only=true does not execute."
+            },
+            "adset": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Decrease budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "GOOGLEADS_MUTATE_CAMPAIGN_BUDGETS: customer_id, operations=[{update:{resource_name:linked budget,amount_micros:positive integer string(final currency amount×1000000)},update_mask:amount_micros}], partial_failure=false, validate_only. DAILY only, referenceCount≤1; confirm same budget readback. validate_only=true does not execute."
+            },
+            "adset": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Set budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "GOOGLEADS_MUTATE_CAMPAIGN_BUDGETS: customer_id, operations=[{update:{resource_name:linked budget,amount_micros:positive integer string(final currency amount×1000000)},update_mask:amount_micros}], partial_failure=false, validate_only. DAILY only, referenceCount≤1; confirm same budget readback. validate_only=true does not execute."
+            },
+            "adset": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Increase bid": {
+          "byTarget": {
+            "campaign": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "adset": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Add to name": {
+          "byTarget": {
+            "campaign": {
+              "text": "GOOGLEADS_MUTATE_CAMPAIGNS_V2: customer_id, operations[].operation_type=update, update.{resource_name,name}, update_mask=name; partial_failure=false, validate_only. Read/modify marker once and read back exact campaign."
+            },
+            "adset": {
+              "text": "GOOGLEADS_MUTATE_AD_GROUPS: customer_id, operations[].update.{resource_name,name}, partial_failure=false, validate_only; change marker once and read back exact ad_group."
+            },
+            "ad": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Remove from name": {
+          "byTarget": {
+            "campaign": {
+              "text": "GOOGLEADS_MUTATE_CAMPAIGNS_V2: customer_id, operations[].operation_type=update, update.{resource_name,name}, update_mask=name; partial_failure=false, validate_only. Read/modify marker once and read back exact campaign."
+            },
+            "adset": {
+              "text": "GOOGLEADS_MUTATE_AD_GROUPS: customer_id, operations[].update.{resource_name,name}, partial_failure=false, validate_only; change marker once and read back exact ad_group."
+            },
+            "ad": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        }
+      }
+    },
+    "tiktok-ads": {
+      "context": {
+        "smart": "TIKTOK_ADS_GET_SMART_PLUS_MATERIAL_REPORT: advertiser_id, report_type=BREAKDOWN, dimensions, metrics, start_date/end_date; omit query_lifetime. B.rows[] has open keys, no assumed metrics wrapper. Verify reporting timezone/currency. Material scope is not a campaign/group aggregate.",
+        "gmv": "TIKTOK_ADS_GET_GMV_MAX_REPORT: advertiser_id, exactly one store_ids entry, dimensions, metrics, start_date/end_date in advertiser timezone. Read B.rows[].metrics and dimensions; verify account-currency units. Orders/value include organic/affiliate contributions; not paid-only ROAS."
+      },
+      "metrics": {
+        "Spend": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Request spend; bind actual B.rows[] key, verified account-currency amount.",
+              "context": [
+                "smart"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Spend definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Spend; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "cost → B.rows[].metrics.cost; GMV Max cost in verified currency units.",
+              "context": [
+                "gmv"
+              ]
+            }
+          }
+        },
+        "Impressions": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Request impressions; bind actual B.rows[] key, count.",
+              "context": [
+                "smart"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Impressions definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Impressions; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Impressions mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "_clicks": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Request clicks; bind actual B.rows[] key; verify all/link-click meaning.",
+              "context": [
+                "smart"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact _clicks definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding _clicks; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad _clicks mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Frequency": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "No verified Smart+ material frequency field; require whole-window export."
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Frequency definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Frequency; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Frequency mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "CTR": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "100 × _clicks / Impressions for confirmed all-click scope; percentage points.",
+              "requires": [
+                "_clicks",
+                "Impressions"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact CTR definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding CTR; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad CTR mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "CTR (Link clicks)": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "100 × _clicks / Impressions only for confirmed link-click scope; percentage points.",
+              "requires": [
+                "_clicks",
+                "Impressions"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact CTR (Link clicks) definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding CTR (Link clicks); read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad CTR (Link clicks) mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "CPC (Link)": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Spend / _clicks only for verified link clicks; currency/click.",
+              "requires": [
+                "Spend",
+                "_clicks"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact CPC (Link) definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding CPC (Link); read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad CPC (Link) mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "CPM": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "1000 × Spend / Impressions; currency/1000 impressions.",
+              "requires": [
+                "Spend",
+                "Impressions"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact CPM definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding CPM; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad CPM mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Purchases": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Request complete_payment for web completed payments or purchase for the verified app event; resolve the selected event before use, never combine them; bind actual B.rows[] key and attribution; count.",
+              "context": [
+                "smart"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Purchases definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Purchases; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "orders → B.rows[].metrics.orders; includes attributed organic/affiliate orders. Use only if this order definition matches user intent; otherwise ask before replacing paid purchases.",
+              "context": [
+                "gmv"
+              ]
+            }
+          }
+        },
+        "Website purchases": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Request complete_payment, website completed-payment event; bind actual B.rows[] key and attribution; count.",
+              "context": [
+                "smart"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Website purchases definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Website purchases; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Website purchases mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Mobile app purchases": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Request purchase, verified app-purchase event; bind actual B.rows[] key and attribution; count.",
+              "context": [
+                "smart"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Mobile app purchases definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Mobile app purchases; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Mobile app purchases mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Mobile app installs": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Request app_install, app-install event; bind actual B.rows[] key and attribution; count.",
+              "context": [
+                "smart"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Mobile app installs definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Mobile app installs; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Mobile app installs mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Leads": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Request form for the verified form event or sales_lead for the verified lead event; resolve the actual event, never combine them; bind actual B.rows[] key and attribution; count.",
+              "context": [
+                "smart"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Leads definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Leads; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Leads mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Cost per purchase": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Spend / Purchases; currency/event at matching material scope.",
+              "requires": [
+                "Spend",
+                "Purchases"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Cost per purchase definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Cost per purchase; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "cost_per_order → B.rows[].metrics.cost_per_order, or cost/orders; currency/order, only when the user accepts the GMV Max order definition.",
+              "requires": [
+                "Spend",
+                "Purchases"
+              ],
+              "context": [
+                "gmv"
+              ]
+            }
+          }
+        },
+        "Cost per website purchase": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Spend / Website purchases; currency/event at matching material scope.",
+              "requires": [
+                "Spend",
+                "Website purchases"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Cost per website purchase definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Cost per website purchase; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Cost per website purchase mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Cost per lead": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Spend / Leads; currency/event at matching material scope.",
+              "requires": [
+                "Spend",
+                "Leads"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Cost per lead definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Cost per lead; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Cost per lead mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Cost per mobile app purchase": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Spend / Mobile app purchases; currency/event at matching material scope.",
+              "requires": [
+                "Spend",
+                "Mobile app purchases"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Cost per mobile app purchase definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Cost per mobile app purchase; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Cost per mobile app purchase mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Cost per mobile app install": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Spend / Mobile app installs; currency/event at matching material scope.",
+              "requires": [
+                "Spend",
+                "Mobile app installs"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Cost per mobile app install definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Cost per mobile app install; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Cost per mobile app install mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Website purchase ROAS": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Request complete_payment_roas; bind actual B.rows[] key, ratio for the verified completed-payment attribution; no daily averaging.",
+              "context": [
+                "smart"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Website purchase ROAS definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Website purchase ROAS; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Website purchase ROAS mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Purchase ROAS": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "For a verified web-payment goal use complete_payment_roas; app-value requires a matching app-purchase attribution/value family. Do not pair total_purchase_value with purchase merely by name. Unresolved event scope needs confirmation.",
+              "context": [
+                "smart"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Purchase ROAS definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Purchase ROAS; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "roi → B.rows[].metrics.roi, gross_revenue/cost. This is organic-inclusive GMV Max ROI, not paid-only ROAS; preserve threshold and ask user whether to change the metric definition.",
+              "requires": [
+                "Spend"
+              ],
+              "context": [
+                "gmv"
+              ]
+            }
+          }
+        },
+        "Mobile app purchase ROAS": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Request total_purchase_value only with a verified matching app-purchase count/attribution family, then divide account-currency value by Spend. Do not assume it matches purchase; unresolved family remains unknown.",
+              "requires": [
+                "Spend",
+                "Mobile app purchases"
+              ],
+              "context": [
+                "smart"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Mobile app purchase ROAS definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Mobile app purchase ROAS; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Mobile app purchase ROAS mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Leads value": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Use approved CRM/monetary lead value for the same event and attribution; no fixed lead-value field in this mapping.",
+              "requires": [
+                "Leads"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact Leads value definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding Leads value; read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad Leads value mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "ROAS (Leads)": {
+          "byCampaignType": {
+            "smart-plus": {
+              "text": "Leads value / Spend; ratio.",
+              "requires": [
+                "Leads value",
+                "Spend"
+              ]
+            },
+            "manual": {
+              "text": "No integrated manual-campaign metric report in this directory; use an authorized Ads Manager export with exact ROAS (Leads) definition, scope, dates and units."
+            },
+            "unspecified": {
+              "text": "Resolve actual manual/Smart+/GMV Max campaign type before binding ROAS (Leads); read only that family’s relevant mapping."
+            },
+            "gmv-max": {
+              "text": "No verified paid-ad ROAS (Leads) mapping for GMV Max; product totals/organic-inclusive ROI cannot replace this metric. Explain the mismatch and ask the user before changing event/scope."
+            }
+          }
+        },
+        "Daily budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "TIKTOK_ADS_LIST_CAMPAIGNS(advertiser_id): B.campaigns[].budget/budget_mode; verify currency units and daily period."
+            },
+            "adset": {
+              "text": "TIKTOK_ADS_LIST_AD_GROUPS(advertiser_id): B.ad_groups[].budget/budget_mode; verify units, period and CBO ownership. Upgraded Smart+ needs TIKTOK_ADS_LIST_SMART_PLUS_ADGROUPS with exact adgroup_ids for current/scheduled controls."
+            },
+            "ad": {
+              "text": "No ad-owned daily budget; ask user to resolve budget owner."
+            },
+            "selected": {
+              "text": "Resolve actual budget-owning campaign/ad group before selecting budget and budget_mode."
+            }
+          }
+        },
+        "Bid amount": {
+          "text": "TIKTOK_ADS_LIST_AD_GROUPS(advertiser_id): B.ad_groups[].bid_price/conversion_bid_price; choose only the applicable bidding event/mode, verify units. No general bid-write binding."
+        },
+        "Hours since creation": {
+          "text": "TIKTOK_ADS_LIST_CAMPAIGNS/LIST_AD_GROUPS/LIST_ADS(advertiser_id): B.campaigns[]/ad_groups[]/ads[].create_time for the exact object; resolve timezone, then (now−creation)/3600 hours."
+        },
+        "Ads in ad set": {
+          "text": "TIKTOK_ADS_LIST_ADS(advertiser_id): count distinct B.ads[] IDs under exact parent; complete pagination, never count a partial first page."
+        },
+        "Active ads in ad set": {
+          "text": "TIKTOK_ADS_LIST_ADS(advertiser_id): count distinct B.ads[] IDs under exact parent; use agreed operation_status/secondary_status active definition; complete pagination, never count a partial first page."
+        },
+        "Active ad sets in campaign": {
+          "text": "TIKTOK_ADS_LIST_AD_GROUPS(advertiser_id): count distinct B.ad_groups[] IDs under exact parent; use agreed operation_status/secondary_status active definition; complete pagination, never count a partial first page."
+        }
+      },
+      "actions": {
+        "Notify": {
+          "text": "Return matching values here; external delivery requires the user-selected destination and sending capability."
+        },
+        "Duplicate": {
+          "text": "No verified exact-duplication binding for this target. Preserve source/copy count and let the user choose manual duplication or another supported operation; creation alone is not duplication."
+        },
+        "Pause": {
+          "byTarget": {
+            "campaign": {
+              "byCampaignType": {
+                "smart-plus": {
+                  "text": "TIKTOK_ADS_SET_SMART_PLUS_DELIVERY_STATUS(advertiser_id,resource_type=CAMPAIGN,resource_ids=[exact IDs],operation_status=DISABLE); independently list the same resource type and verify operation_status."
+                },
+                "manual": {
+                  "text": "No general manual-campaign status operation; explain and ask user to select manual execution, preserving exact target."
+                },
+                "gmv-max": {
+                  "text": "Smart+ delivery status does not establish GMV Max support. Verify relevant GMV Max operation or ask for manual execution; never substitute Smart+."
+                },
+                "unspecified": {
+                  "text": "Resolve campaign type before status-tool selection; no generic TikTok status action is established."
+                }
+              }
+            },
+            "adset": {
+              "byCampaignType": {
+                "smart-plus": {
+                  "text": "TIKTOK_ADS_SET_SMART_PLUS_DELIVERY_STATUS(advertiser_id,resource_type=ADGROUP,resource_ids=[exact IDs],operation_status=DISABLE); independently list the same resource type and verify operation_status."
+                },
+                "manual": {
+                  "text": "No general manual-campaign status operation; explain and ask user to select manual execution, preserving exact target."
+                },
+                "gmv-max": {
+                  "text": "Smart+ delivery status does not establish GMV Max support. Verify relevant GMV Max operation or ask for manual execution; never substitute Smart+."
+                },
+                "unspecified": {
+                  "text": "Resolve campaign type before status-tool selection; no generic TikTok status action is established."
+                }
+              }
+            },
+            "ad": {
+              "byCampaignType": {
+                "smart-plus": {
+                  "text": "TIKTOK_ADS_SET_SMART_PLUS_DELIVERY_STATUS(advertiser_id,resource_type=AD,resource_ids=[exact IDs],operation_status=DISABLE); independently list the same resource type and verify operation_status."
+                },
+                "manual": {
+                  "text": "No general manual-campaign status operation; explain and ask user to select manual execution, preserving exact target."
+                },
+                "gmv-max": {
+                  "text": "Smart+ delivery status does not establish GMV Max support. Verify relevant GMV Max operation or ask for manual execution; never substitute Smart+."
+                },
+                "unspecified": {
+                  "text": "Resolve campaign type before status-tool selection; no generic TikTok status action is established."
+                }
+              }
+            },
+            "selected": {
+              "text": "No verified AI-direct Pause binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Start": {
+          "byTarget": {
+            "campaign": {
+              "byCampaignType": {
+                "smart-plus": {
+                  "text": "TIKTOK_ADS_SET_SMART_PLUS_DELIVERY_STATUS(advertiser_id,resource_type=CAMPAIGN,resource_ids=[exact IDs],operation_status=ENABLE); independently list the same resource type and verify operation_status."
+                },
+                "manual": {
+                  "text": "No general manual-campaign status operation; explain and ask user to select manual execution, preserving exact target."
+                },
+                "gmv-max": {
+                  "text": "Smart+ delivery status does not establish GMV Max support. Verify relevant GMV Max operation or ask for manual execution; never substitute Smart+."
+                },
+                "unspecified": {
+                  "text": "Resolve campaign type before status-tool selection; no generic TikTok status action is established."
+                }
+              }
+            },
+            "adset": {
+              "byCampaignType": {
+                "smart-plus": {
+                  "text": "TIKTOK_ADS_SET_SMART_PLUS_DELIVERY_STATUS(advertiser_id,resource_type=ADGROUP,resource_ids=[exact IDs],operation_status=ENABLE); independently list the same resource type and verify operation_status."
+                },
+                "manual": {
+                  "text": "No general manual-campaign status operation; explain and ask user to select manual execution, preserving exact target."
+                },
+                "gmv-max": {
+                  "text": "Smart+ delivery status does not establish GMV Max support. Verify relevant GMV Max operation or ask for manual execution; never substitute Smart+."
+                },
+                "unspecified": {
+                  "text": "Resolve campaign type before status-tool selection; no generic TikTok status action is established."
+                }
+              }
+            },
+            "ad": {
+              "byCampaignType": {
+                "smart-plus": {
+                  "text": "TIKTOK_ADS_SET_SMART_PLUS_DELIVERY_STATUS(advertiser_id,resource_type=AD,resource_ids=[exact IDs],operation_status=ENABLE); independently list the same resource type and verify operation_status."
+                },
+                "manual": {
+                  "text": "No general manual-campaign status operation; explain and ask user to select manual execution, preserving exact target."
+                },
+                "gmv-max": {
+                  "text": "Smart+ delivery status does not establish GMV Max support. Verify relevant GMV Max operation or ask for manual execution; never substitute Smart+."
+                },
+                "unspecified": {
+                  "text": "Resolve campaign type before status-tool selection; no generic TikTok status action is established."
+                }
+              }
+            },
+            "selected": {
+              "text": "No verified AI-direct Start binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Increase budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "adset": {
+              "byCampaignType": {
+                "smart-plus": {
+                  "text": "TIKTOK_ADS_UPDATE_SMART_PLUS_ADGROUP_BUDGETS(advertiser_id,scheduled_budget=[{adgroup_id,scheduled_budget:final amount}]) changes next-day daily budget, not immediate daily budget. Upgraded Smart+ only; CBO needs existing min/max controls and may mean maximum control. Verify units and user timing/ownership choice. Read same IDs via LIST_SMART_PLUS_ADGROUPS."
+                },
+                "manual": {
+                  "text": "No general manual ad-group budget write; preserve exact calculated amount and ask user to choose manual execution."
+                },
+                "gmv-max": {
+                  "text": "No verified GMV Max ad-group daily-budget write in this mapping; do not apply Upgraded Smart+ controls."
+                },
+                "unspecified": {
+                  "text": "Resolve campaign type, budget owner, unit and effective date before choosing a budget action."
+                }
+              }
+            },
+            "ad": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Decrease budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "adset": {
+              "byCampaignType": {
+                "smart-plus": {
+                  "text": "TIKTOK_ADS_UPDATE_SMART_PLUS_ADGROUP_BUDGETS(advertiser_id,scheduled_budget=[{adgroup_id,scheduled_budget:final amount}]) changes next-day daily budget, not immediate daily budget. Upgraded Smart+ only; CBO needs existing min/max controls and may mean maximum control. Verify units and user timing/ownership choice. Read same IDs via LIST_SMART_PLUS_ADGROUPS."
+                },
+                "manual": {
+                  "text": "No general manual ad-group budget write; preserve exact calculated amount and ask user to choose manual execution."
+                },
+                "gmv-max": {
+                  "text": "No verified GMV Max ad-group daily-budget write in this mapping; do not apply Upgraded Smart+ controls."
+                },
+                "unspecified": {
+                  "text": "Resolve campaign type, budget owner, unit and effective date before choosing a budget action."
+                }
+              }
+            },
+            "ad": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Set budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "adset": {
+              "byCampaignType": {
+                "smart-plus": {
+                  "text": "TIKTOK_ADS_UPDATE_SMART_PLUS_ADGROUP_BUDGETS(advertiser_id,scheduled_budget=[{adgroup_id,scheduled_budget:final amount}]) changes next-day daily budget, not immediate daily budget. Upgraded Smart+ only; CBO needs existing min/max controls and may mean maximum control. Verify units and user timing/ownership choice. Read same IDs via LIST_SMART_PLUS_ADGROUPS."
+                },
+                "manual": {
+                  "text": "No general manual ad-group budget write; preserve exact calculated amount and ask user to choose manual execution."
+                },
+                "gmv-max": {
+                  "text": "No verified GMV Max ad-group daily-budget write in this mapping; do not apply Upgraded Smart+ controls."
+                },
+                "unspecified": {
+                  "text": "Resolve campaign type, budget owner, unit and effective date before choosing a budget action."
+                }
+              }
+            },
+            "ad": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Increase bid": {
+          "byTarget": {
+            "campaign": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "adset": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Add to name": {
+          "byTarget": {
+            "campaign": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "adset": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Remove from name": {
+          "byTarget": {
+            "campaign": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "adset": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        }
+      }
+    },
+    "reddit-ads": {
+      "context": {
+        "report": "REDDIT_ADS_GET_A_REPORT: ad_account_id, data.{starts_at,ends_at,fields,breakdowns,filter,time_zone_id}; UTC ISO boundaries aligned with account timezone; breakdown CAMPAIGN/AD_GROUP/AD for scope. B.data.metrics[] has open keys; bind returned keys, paginate literal page.size/page.token."
+      },
+      "metrics": {
+        "Spend": {
+          "text": "Request SPEND; bind its actual key in B.data.metrics[] and verify currency/unit before comparison (no declared unit).",
+          "context": [
+            "report"
+          ]
+        },
+        "Impressions": {
+          "text": "Request IMPRESSIONS; bind actual B.data.metrics[] key; count.",
+          "context": [
+            "report"
+          ]
+        },
+        "_clicks": {
+          "text": "Request CLICKS; bind actual B.data.metrics[] key and click definition; not automatically all/link equivalents.",
+          "context": [
+            "report"
+          ]
+        },
+        "CTR": {
+          "text": "100 × _clicks / Impressions; percentage points only when all-click definition matches.",
+          "requires": [
+            "_clicks",
+            "Impressions"
+          ]
+        },
+        "CTR (Link clicks)": {
+          "text": "100 × _clicks / Impressions only when the returned click definition matches link clicks; otherwise unknown.",
+          "requires": [
+            "_clicks",
+            "Impressions"
+          ]
+        },
+        "CPC (Link)": {
+          "text": "Spend / _clicks only for verified link clicks; currency/click after unit verification.",
+          "requires": [
+            "Spend",
+            "_clicks"
+          ]
+        },
+        "CPM": {
+          "text": "1000 × Spend / Impressions; currency/1000 impressions after unit verification.",
+          "requires": [
+            "Spend",
+            "Impressions"
+          ]
+        },
+        "Purchases": {
+          "text": "CONVERSIONS is mixed; no fixed event-specific returned key for Purchases in this contract. Verify the exact event/count key and attribution in the relevant report section or supplied export; unresolved count stays unknown.",
+          "context": [
+            "report"
+          ]
+        },
+        "Website purchases": {
+          "text": "CONVERSIONS is mixed; no fixed event-specific returned key for Website purchases in this contract. Verify the exact event/count key and attribution in the relevant report section or supplied export; unresolved count stays unknown.",
+          "context": [
+            "report"
+          ]
+        },
+        "Leads": {
+          "text": "CONVERSIONS is mixed; no fixed event-specific returned key for Leads in this contract. Verify the exact event/count key and attribution in the relevant report section or supplied export; unresolved count stays unknown.",
+          "context": [
+            "report"
+          ]
+        },
+        "Mobile app purchases": {
+          "text": "CONVERSIONS is mixed; no fixed event-specific returned key for Mobile app purchases in this contract. Verify the exact event/count key and attribution in the relevant report section or supplied export; unresolved count stays unknown.",
+          "context": [
+            "report"
+          ]
+        },
+        "Mobile app installs": {
+          "text": "CONVERSIONS is mixed; no fixed event-specific returned key for Mobile app installs in this contract. Verify the exact event/count key and attribution in the relevant report section or supplied export; unresolved count stays unknown.",
+          "context": [
+            "report"
+          ]
+        },
+        "Cost per purchase": {
+          "text": "Spend / Purchases; verified currency/event.",
+          "requires": [
+            "Spend",
+            "Purchases"
+          ]
+        },
+        "Cost per website purchase": {
+          "text": "Spend / Website purchases; verified currency/event.",
+          "requires": [
+            "Spend",
+            "Website purchases"
+          ]
+        },
+        "Cost per lead": {
+          "text": "Spend / Leads; verified currency/event.",
+          "requires": [
+            "Spend",
+            "Leads"
+          ]
+        },
+        "Cost per mobile app purchase": {
+          "text": "Spend / Mobile app purchases; verified currency/event.",
+          "requires": [
+            "Spend",
+            "Mobile app purchases"
+          ]
+        },
+        "Cost per mobile app install": {
+          "text": "Spend / Mobile app installs; verified currency/event.",
+          "requires": [
+            "Spend",
+            "Mobile app installs"
+          ]
+        },
+        "Leads value": {
+          "text": "No fixed event-value key; bind approved lead monetary value from the actual report/export with matching attribution; unknown if absent.",
+          "requires": [
+            "Leads"
+          ]
+        },
+        "Purchase ROAS": {
+          "text": "Verified monetary value for the same event as Purchases / Spend; ratio. Event-specific value key is unresolved in the open report schema; never use count as value.",
+          "requires": [
+            "Spend",
+            "Purchases"
+          ]
+        },
+        "Website purchase ROAS": {
+          "text": "Verified monetary value for the same event as Website purchases / Spend; ratio. Event-specific value key is unresolved in the open report schema; never use count as value.",
+          "requires": [
+            "Spend",
+            "Website purchases"
+          ]
+        },
+        "Mobile app purchase ROAS": {
+          "text": "Verified monetary value for the same event as Mobile app purchases / Spend; ratio. Event-specific value key is unresolved in the open report schema; never use count as value.",
+          "requires": [
+            "Spend",
+            "Mobile app purchases"
+          ]
+        },
+        "ROAS (Leads)": {
+          "text": "Verified monetary value for the same event as Leads / Spend; ratio. Event-specific value key is unresolved in the open report schema; never use count as value.",
+          "requires": [
+            "Spend",
+            "Leads"
+          ]
+        },
+        "Frequency": {
+          "text": "No typed frequency key; require verified same-scope whole-window report/export frequency."
+        },
+        "Daily budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "REDDIT_ADS_LIST_CAMPAIGNS(ad_account_id): B.data[].goal_type/goal_value/is_campaign_budget_optimization; daily only for the verified daily goal type. Read amount units unspecified; spend_cap is a lifetime cap, not daily_budget."
+            },
+            "adset": {
+              "text": "REDDIT_ADS_LIST_AD_GROUPS(ad_account_id): B.data[].goal_type/goal_value; confirm daily goal and raw unit. No daily_budget property."
+            },
+            "ad": {
+              "text": "No ad-owned daily budget; resolve budget owner with user."
+            },
+            "selected": {
+              "text": "Resolve campaign/group owner, goal_type and goal_value units before selecting a budget."
+            }
+          }
+        },
+        "Bid amount": {
+          "byTarget": {
+            "campaign": {
+              "text": "REDDIT_ADS_LIST_CAMPAIGNS: B.data[].bid_value/bid_type/bid_strategy; read unit unspecified; verify CBO applicability."
+            },
+            "adset": {
+              "text": "REDDIT_ADS_LIST_AD_GROUPS: B.data[].bid_value is cents; divide by 100, currency/bid event. Verify bid_type/bid_strategy; never copy into campaign micros."
+            },
+            "ad": {
+              "text": "No verified ad bid binding; do not substitute group bid."
+            },
+            "selected": {
+              "text": "Resolve exact bid-owning object and unit."
+            }
+          }
+        },
+        "Hours since creation": {
+          "text": "REDDIT_ADS_LIST_CAMPAIGNS/LIST_AD_GROUPS(ad_account_id): B.data[].created_at; (now−timestamp)/3600 hours. Ad rows are open; verify creation key before use."
+        },
+        "Ads in ad set": {
+          "text": "REDDIT_ADS_LIST_ADS(ad_account_id): count distinct B.data[] IDs under exact parent; complete pagination.next_url pages. Ad rows are open and Max campaigns expose one ad only; verify coverage."
+        },
+        "Active ads in ad set": {
+          "text": "REDDIT_ADS_LIST_ADS(ad_account_id): count distinct B.data[] IDs under exact parent; use configured_status/effective_status/delivery_status for agreed active definition; complete pagination.next_url pages. Ad rows are open and Max campaigns expose one ad only; verify coverage."
+        },
+        "Active ad sets in campaign": {
+          "text": "REDDIT_ADS_LIST_AD_GROUPS(ad_account_id): count distinct B.data[] IDs under exact parent; use configured_status/effective_status/delivery_status for agreed active definition; complete pagination.next_url pages. Ad rows are open and Max campaigns expose one ad only; verify coverage."
+        }
+      },
+      "actions": {
+        "Notify": {
+          "text": "Return matching values here; external delivery requires the user-selected destination and sending capability."
+        },
+        "Duplicate": {
+          "text": "No verified exact-duplication binding for this target. Preserve source/copy count and let the user choose manual duplication or another supported operation; creation alone is not duplication."
+        },
+        "Pause": {
+          "byTarget": {
+            "campaign": {
+              "text": "REDDIT_ADS_UPDATE_CAMPAIGN(campaign_id,data={configured_status:PAUSED}); independently read same campaign with REDDIT_ADS_LIST_CAMPAIGNS(ad_account_id,id=[campaign_id])."
+            },
+            "adset": {
+              "text": "No verified AI-direct Pause binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Pause binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Pause binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Start": {
+          "byTarget": {
+            "campaign": {
+              "text": "REDDIT_ADS_UPDATE_CAMPAIGN(campaign_id,data={configured_status:ACTIVE}); independently read same campaign with REDDIT_ADS_LIST_CAMPAIGNS(ad_account_id,id=[campaign_id])."
+            },
+            "adset": {
+              "text": "No verified AI-direct Start binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Start binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Start binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Increase budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "REDDIT_ADS_UPDATE_CAMPAIGN(campaign_id,data={goal_value:final currency amount×1000000}); only verified CBO daily goal_type. Verify read units separately; spend_cap is lifetime. LIST_CAMPAIGNS readback at same ID."
+            },
+            "adset": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Decrease budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "REDDIT_ADS_UPDATE_CAMPAIGN(campaign_id,data={goal_value:final currency amount×1000000}); only verified CBO daily goal_type. Verify read units separately; spend_cap is lifetime. LIST_CAMPAIGNS readback at same ID."
+            },
+            "adset": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Set budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "REDDIT_ADS_UPDATE_CAMPAIGN(campaign_id,data={goal_value:final currency amount×1000000}); only verified CBO daily goal_type. Verify read units separately; spend_cap is lifetime. LIST_CAMPAIGNS readback at same ID."
+            },
+            "adset": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Increase bid": {
+          "byTarget": {
+            "campaign": {
+              "text": "REDDIT_ADS_UPDATE_CAMPAIGN(campaign_id,data={bid_value:final currency amount×1000000}); verify CBO and bid type/strategy, campaign read unit, then LIST_CAMPAIGNS readback. Ad-group bid cents are not campaign micros."
+            },
+            "adset": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Add to name": {
+          "byTarget": {
+            "campaign": {
+              "text": "REDDIT_ADS_UPDATE_CAMPAIGN(campaign_id,data={name:final name}); modify only requested marker, then LIST_CAMPAIGNS(ad_account_id,id) readback."
+            },
+            "adset": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Remove from name": {
+          "byTarget": {
+            "campaign": {
+              "text": "REDDIT_ADS_UPDATE_CAMPAIGN(campaign_id,data={name:final name}); modify only requested marker, then LIST_CAMPAIGNS(ad_account_id,id) readback."
+            },
+            "adset": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        }
+      }
+    },
+    "pinterest-ads": {
+      "context": {
+        "report": "PINTEREST_ADS_GET_ANALYTICS: ad_account_id, entity_level=AD_ACCOUNT/CAMPAIGN/AD_GROUP/AD, entity_ids for non-account scope, start_date/end_date (UTC), columns=[needed fields], granularity. Retain click_window_days/view_window_days/conversion_report_time. B.rows[] is open; HOUR has no conversion metrics."
+      },
+      "metrics": {
+        "Spend": {
+          "text": "SPEND_IN_MICRO_DOLLAR → B.rows[].SPEND_IN_MICRO_DOLLAR / 1000000; account currency.",
+          "context": [
+            "report"
+          ]
+        },
+        "Impressions": {
+          "text": "PAID_IMPRESSION → B.rows[].PAID_IMPRESSION; paid count, not TOTAL_IMPRESSION.",
+          "context": [
+            "report"
+          ]
+        },
+        "_clicks": {
+          "text": "TOTAL_CLICKTHROUGH → B.rows[].TOTAL_CLICKTHROUGH; clickthrough count, not all Meta clicks.",
+          "context": [
+            "report"
+          ]
+        },
+        "_linkClicks": {
+          "text": "OUTBOUND_CLICK_1 → B.rows[].OUTBOUND_CLICK_1; outbound count; confirm this matches the intended link-click definition.",
+          "context": [
+            "report"
+          ]
+        },
+        "CTR": {
+          "text": "100 × _clicks / Impressions only for confirmed paid/clickthrough scope; percentage points.",
+          "requires": [
+            "_clicks",
+            "Impressions"
+          ]
+        },
+        "CTR (Link clicks)": {
+          "text": "100 × _linkClicks / Impressions only for matching paid scope; percentage points.",
+          "requires": [
+            "_linkClicks",
+            "Impressions"
+          ]
+        },
+        "CPC (Link)": {
+          "text": "Spend / _linkClicks; currency/outbound click for matching paid scope.",
+          "requires": [
+            "Spend",
+            "_linkClicks"
+          ]
+        },
+        "CPM": {
+          "text": "1000 × Spend / Impressions; currency/1000 paid impressions.",
+          "requires": [
+            "Spend",
+            "Impressions"
+          ]
+        },
+        "Purchases": {
+          "text": "TOTAL_CHECKOUT → B.rows[].TOTAL_CHECKOUT; checkout across the verified event scope count. Verify attribution, never use mixed TOTAL_CONVERSIONS.",
+          "context": [
+            "report"
+          ]
+        },
+        "Website purchases": {
+          "text": "TOTAL_WEB_CHECKOUT → B.rows[].TOTAL_WEB_CHECKOUT; website checkout count. Verify attribution, never use mixed TOTAL_CONVERSIONS.",
+          "context": [
+            "report"
+          ]
+        },
+        "Leads": {
+          "text": "TOTAL_LEAD → B.rows[].TOTAL_LEAD; lead count. Verify attribution, never use mixed TOTAL_CONVERSIONS.",
+          "context": [
+            "report"
+          ]
+        },
+        "Mobile app purchases": {
+          "text": "No verified app-specific count binding in the current analytics contract; do not substitute total checkouts/conversions. Verify only the relevant event section or obtain matching export."
+        },
+        "Mobile app installs": {
+          "text": "No verified app-specific count binding in the current analytics contract; do not substitute total checkouts/conversions. Verify only the relevant event section or obtain matching export."
+        },
+        "Cost per purchase": {
+          "text": "Spend / Purchases; currency/event, unknown if the event binding is unavailable.",
+          "requires": [
+            "Spend",
+            "Purchases"
+          ]
+        },
+        "Cost per website purchase": {
+          "text": "Spend / Website purchases; currency/event, unknown if the event binding is unavailable.",
+          "requires": [
+            "Spend",
+            "Website purchases"
+          ]
+        },
+        "Cost per lead": {
+          "text": "Spend / Leads; currency/event, unknown if the event binding is unavailable.",
+          "requires": [
+            "Spend",
+            "Leads"
+          ]
+        },
+        "Cost per mobile app purchase": {
+          "text": "Spend / Mobile app purchases; currency/event, unknown if the event binding is unavailable.",
+          "requires": [
+            "Spend",
+            "Mobile app purchases"
+          ]
+        },
+        "Cost per mobile app install": {
+          "text": "Spend / Mobile app installs; currency/event, unknown if the event binding is unavailable.",
+          "requires": [
+            "Spend",
+            "Mobile app installs"
+          ]
+        },
+        "Purchase ROAS": {
+          "text": "CHECKOUT_ROAS → B.rows[].CHECKOUT_ROAS; ratio for verified checkout scope/attribution, not a lead/app ratio.",
+          "context": [
+            "report"
+          ]
+        },
+        "Website purchase ROAS": {
+          "text": "TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR → B.rows[].TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR/1000000, divided by Spend; ratio using matching website-checkout attribution.",
+          "requires": [
+            "Spend"
+          ],
+          "context": [
+            "report"
+          ]
+        },
+        "Leads value": {
+          "text": "No verified lead monetary-value column; use the approved CRM/export value and matching event, currency and attribution. Missing value stays unknown.",
+          "requires": [
+            "Leads"
+          ]
+        },
+        "ROAS (Leads)": {
+          "text": "Leads value / Spend; ratio.",
+          "requires": [
+            "Leads value",
+            "Spend"
+          ]
+        },
+        "Mobile app purchase ROAS": {
+          "text": "No verified app-specific monetary-value binding; require a matching export/value definition, never substitute CHECKOUT_ROAS.",
+          "requires": [
+            "Mobile app purchases",
+            "Spend"
+          ]
+        },
+        "Frequency": {
+          "text": "No frequency/reach column in this contract; require same-window frequency export. Impressions alone cannot establish frequency."
+        },
+        "Daily budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "PINTEREST_ADS_LIST_CAMPAIGNS(ad_account_id): B.items[].daily_spend_cap/1000000, account-currency daily cap; lifetime_spend_cap is different. A cap is not automatically an allocated daily budget."
+            },
+            "adset": {
+              "text": "PINTEREST_ADS_LIST_AD_GROUPS(ad_account_id): B.items[].budget_in_micro_currency/1000000, account currency; budget_type must be DAILY."
+            },
+            "ad": {
+              "text": "No ad-owned budget; resolve the intended owner with the user."
+            },
+            "selected": {
+              "text": "Resolve campaign cap versus ad-group budget ownership before comparison."
+            }
+          }
+        },
+        "Bid amount": {
+          "text": "PINTEREST_ADS_LIST_AD_GROUPS(ad_account_id): B.items[].bid_in_micro_currency/1000000; currency per billable_event. Verify bidding applicability; no bid write tool."
+        },
+        "Hours since creation": {
+          "text": "Use the matching PINTEREST_ADS_LIST_CAMPAIGNS/LIST_AD_GROUPS/LIST_ADS(ad_account_id): B.items[].created_time is Unix time; (now−created_time)/3600 hours."
+        },
+        "Ads in ad set": {
+          "text": "PINTEREST_ADS_LIST_ADS(ad_account_id): count unique B.items[].id under the exact ad_group_id; page through has_more/next_cursor."
+        },
+        "Active ads in ad set": {
+          "text": "PINTEREST_ADS_LIST_ADS(ad_account_id): count unique B.items[].id under the exact ad_group_id; filter agreed status/summary_status; page through has_more/next_cursor."
+        },
+        "Active ad sets in campaign": {
+          "text": "PINTEREST_ADS_LIST_AD_GROUPS(ad_account_id): count unique B.items[].id under the exact campaign_id; filter agreed status/summary_status; page through has_more/next_cursor."
+        }
+      },
+      "actions": {
+        "Notify": {
+          "text": "Return matching values here; external delivery requires the user-selected destination and sending capability."
+        },
+        "Duplicate": {
+          "text": "No verified exact-duplication binding for this target. Preserve source/copy count and let the user choose manual duplication or another supported operation; creation alone is not duplication."
+        },
+        "Pause": {
+          "byTarget": {
+            "campaign": {
+              "text": "PINTEREST_ADS_UPDATE_CAMPAIGNS(ad_account_id,updates=[{id:campaign ID,status:PAUSED}]); inspect per-item success and read same campaign via LIST_CAMPAIGNS(campaign_ids)."
+            },
+            "adset": {
+              "text": "No verified AI-direct Pause binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Pause binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Pause binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Start": {
+          "byTarget": {
+            "campaign": {
+              "text": "PINTEREST_ADS_UPDATE_CAMPAIGNS(ad_account_id,updates=[{id:campaign ID,status:ACTIVE}]); inspect per-item success and read same campaign via LIST_CAMPAIGNS(campaign_ids)."
+            },
+            "adset": {
+              "text": "No verified AI-direct Start binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Start binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Start binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Increase budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "adset": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Increase budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Decrease budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "adset": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Decrease budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Set budget": {
+          "byTarget": {
+            "campaign": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "adset": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Set budget binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Increase bid": {
+          "byTarget": {
+            "campaign": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "adset": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Increase bid binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Add to name": {
+          "byTarget": {
+            "campaign": {
+              "text": "PINTEREST_ADS_UPDATE_CAMPAIGNS(ad_account_id,updates=[{id:campaign ID,name:final name}]); modify marker once and read same campaign via LIST_CAMPAIGNS."
+            },
+            "adset": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Add to name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        },
+        "Remove from name": {
+          "byTarget": {
+            "campaign": {
+              "text": "PINTEREST_ADS_UPDATE_CAMPAIGNS(ad_account_id,updates=[{id:campaign ID,name:final name}]); modify marker once and read same campaign via LIST_CAMPAIGNS."
+            },
+            "adset": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "ad": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            },
+            "selected": {
+              "text": "No verified AI-direct Remove from name binding at this exact level. Explain the limitation and ask the user to choose an adjustment or manual operation; do not substitute a parent."
+            }
+          }
+        }
+      }
+    }
+  }
+}
