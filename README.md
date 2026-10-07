@@ -133,3 +133,27 @@ separate commercial license if you need rights outside the public license.
 In the `postplus-cli` repository, `pnpm test` builds once and runs the full source-level and compiled-command test suite with at most two test files in parallel. Existing offline, account-state, recovery and installer assertions remain.
 
 For an individual command test file, run `pnpm build` first, then `pnpm exec tsx --test src/<name>.test.ts`. Rebuild after source changes so command tests exercise the current code.
+
+### Public ad library
+
+Browse stored competitor ads without login or credit consumption:
+
+```bash
+postplus ad-library categories --json
+postplus ad-library formats --json
+postplus ad-library search --category ai-meeting-assistants --product-type software --limit 10 --output ads.json
+postplus ad-library search --brand plaud --visual-format product-demo --json
+```
+
+Use returned category and format slugs rather than guessing them. Search accepts
+`--query`, `--brand`, `--category`, `--subcategory`, `--product-type`
+(`software|hardware`), `--visual-format`, `--status` (`active|inactive|unknown`),
+`--limit` (1–50), and `--offset` (0–10000). Each filter accepts one value;
+different filters combine with AND. All three commands output JSON and support
+`--output <path>`. They use the configured PostPlus API origin.
+
+Coverage is `stored-snapshots`: timestamps describe when evidence was observed,
+not a live check. An empty result does not prove a brand has no Meta ads.
+Format descriptions and `how_to_apply` explain their use; associated format
+evidence must support an example-specific claim. Fresh collection remains a
+separate `postplus research run facebook-ads-library` task and can spend credits.
