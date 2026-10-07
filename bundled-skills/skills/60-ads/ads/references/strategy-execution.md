@@ -178,7 +178,7 @@ a single pass or user-initiated review does not. Creating a new object does not
 implement exact duplication; verify source and every new copy separately.
 
 For an explicitly requested Slack notification, route to the
-[Channel Messaging Skill](../../../50-publishing/channel-messaging/SKILL.md)
+$channel-messaging
 with the approved destination and alert content. Its connection and tool schema
 own delivery. An email destination needs its own available sending capability;
 do not substitute Slack or this conversation for a requested email delivery.

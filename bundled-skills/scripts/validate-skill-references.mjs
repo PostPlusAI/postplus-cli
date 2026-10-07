@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import { readSkillReferenceGraph } from "./lib/skill-reference-graph.mjs";
 import { assertNoRetiredPublicSkillReferences } from "./lib/retired-public-skills.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -102,26 +103,10 @@ const markdownFiles = walkFiles(SKILLS_ROOT, (filePath) =>
 );
 
 const indexedBusinessReferences = new Set();
-const REFERENCE_LINK_PATTERN = /(?:^|[`(])((?:\.\/)?references\/[^`)\s]+\.md)(?:[`)]|$)/gmu;
-
 for (const skillFile of skillFiles) {
-  const text = fs.readFileSync(skillFile, "utf8");
-  const skillDir = path.dirname(skillFile);
-  const repoPath = toRepoPath(skillFile);
-
-  for (const match of text.matchAll(REFERENCE_LINK_PATTERN)) {
-    const reference = normalizeReference(match[1].replace(/^\.\//u, ""));
-    const target = path.resolve(skillDir, reference);
-    if (!target.startsWith(`${skillDir}${path.sep}`)) {
-      report(errors, `${repoPath}: reference ${reference} escapes the skill directory.`);
-      continue;
-    }
-    if (!fs.existsSync(target)) {
-      report(errors, `${repoPath}: indexed reference ${reference} is missing.`);
-      continue;
-    }
-    indexedBusinessReferences.add(toSkillsPath(target));
-  }
+  const graph = readSkillReferenceGraph(skillFile);
+  for (const target of graph.reachable) indexedBusinessReferences.add(toSkillsPath(target));
+  for (const error of graph.errors) report(errors, `${toRepoPath(error.source)}: ${error.message}`);
 }
 
 for (const markdownFile of markdownFiles) {

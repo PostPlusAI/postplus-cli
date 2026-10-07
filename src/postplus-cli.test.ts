@@ -212,8 +212,8 @@ function createVideoAnalysisCatalogResponse(): Response {
           status: 'released',
         },
         {
-          name: 'image-batch-runner',
-          path: 'skills/image-batch-runner/SKILL.md',
+          name: 'generate',
+          path: 'skills/generate/SKILL.md',
           requirements: {
             endpointKeys: ['image-bad'],
             capabilities: ['media'],

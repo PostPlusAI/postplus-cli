@@ -13,12 +13,12 @@ prompt and request.
 
 Typical routes:
 
-| Task | Optional preparation | Runner |
+| Task | Optional preparation | Execution |
 | --- | --- | --- |
-| Image generation/edit | `image-generation` or `reference-decode` when useful | `image-batch-runner` |
-| Video from prompt, frames, references, audio, or motion | ad-format skill or `reference-decode` when useful | `video-batch-runner` |
-| TTS, voice design, or voice clone | `audio-generation` when useful | `voice-batch-runner` |
-| Talking-head video | generate/approve voice first when needed | `voice-batch-runner`, then `video-batch-runner` |
+| Image generation/edit | Read supplied assets; use media-analysis only when interpretation is needed | generate |
+| Video from prompt, frames, references, audio or motion | ad-creative for requested strategy; media-analysis for requested reference breakdown | generate |
+| Voice design or clone | Approved script and voice description/reference | generate |
+| Talking-head video | Obtain actual completed approved audio when missing | generate, audio then video |
 
 Use current PostPlus schema for endpoint availability, media cardinality, field
 names, enums, and defaults. Omit a reference whose intended influence is unclear;

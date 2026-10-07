@@ -105,8 +105,8 @@ beat evidence, the ordered `Style Grammar Report`, and a concise handoff.
 
 Keep the handoff concise and derived from the report:
 
-- **Image Generation:** Extract static framing, subject state, scene, lighting, palette, product placement, `must_keep`, `can_vary`, and `avoid`. Hand this to creative planning before `image-batch-runner`.
-- **Video Prompt Architecture:** Extract camera language, movement, edit rhythm, sound, speech posture, emotional progression, product behavior, continuity, and generator risks before `video-batch-runner`.
+- **Image Generation:** Extract static framing, subject state, scene, lighting, palette, product placement, `must_keep`, `can_vary`, and `avoid`. Hand this to creative planning before `generate`.
+- **Video Prompt Architecture:** Extract camera language, movement, edit rhythm, sound, speech posture, emotional progression, product behavior, continuity, and generator risks before `generate`.
 - **Repeated production:** Retain the report as source evidence; do not treat a report as an executable workflow or hosted result.
 
 Do not create separate handoff files unless the user explicitly requests them.

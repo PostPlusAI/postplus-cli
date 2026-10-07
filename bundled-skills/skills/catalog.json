@@ -52,6 +52,17 @@
   },
   "skills": [
     {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "ad-creative",
+      "description": "Develop or review advertising concepts and shot scripts for creator-led demos, commercials, lifestyle, before-and-after, authority, educational, animated and street-interview ads. Connect claims to visible proof and hand approved work to generation.",
+      "category": "advertise",
+      "example": "Develop a creator-led demo, product commercial, or educational ad with a clear script and visible proof.",
+      "path": "skills/40-creative/ad-creative/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
       "familyId": "ads",
       "familyName": "Paid Advertising",
       "name": "ads",
@@ -59,17 +70,6 @@
       "category": "advertise",
       "example": "Review last week's Google and Meta ad results, explain the next tests, and prepare an account change for my approval.",
       "path": "skills/60-ads/ads/SKILL.md",
-      "status": "released",
-      "supportedModels": []
-    },
-    {
-      "familyId": "routing-contracts",
-      "familyName": "Routing & Contracts",
-      "name": "audio-generation",
-      "description": "Plan TTS, voice cloning, voice change, translated dub, or lip-sync audio. Resolve voice and reference policy before handing a ready request to voice-batch-runner.",
-      "category": "generate",
-      "example": "Plan a translated dub that preserves the speaker’s approved voice.",
-      "path": "skills/10-routing/audio-generation/SKILL.md",
       "status": "released",
       "supportedModels": []
     },
@@ -101,44 +101,11 @@
     {
       "familyId": "media-production",
       "familyName": "Media and Creative Production",
-      "name": "authority-ad",
-      "description": "Design or review expert-led, insider, case-story, or interview ads that explain a problem mechanism using approved evidence and a credible product solution.",
-      "category": "advertise",
-      "example": "Write an expert-led ad explaining the problem this product solves.",
-      "path": "skills/40-creative/authority-ad/SKILL.md",
-      "status": "released",
-      "supportedModels": []
-    },
-    {
-      "familyId": "media-production",
-      "familyName": "Media and Creative Production",
-      "name": "before-after-ad",
-      "description": "Design or review before-and-after ads with matched comparisons, approved transformation evidence, and a clear product role. Produce a grounded shot script.",
-      "category": "advertise",
-      "example": "Create a before-and-after ad using these approved product results.",
-      "path": "skills/40-creative/before-after-ad/SKILL.md",
-      "status": "released",
-      "supportedModels": []
-    },
-    {
-      "familyId": "media-production",
-      "familyName": "Media and Creative Production",
       "name": "benchmark-to-brief",
       "description": "Turn existing benchmark reports, pattern tables, or audience evidence into grounded campaign briefs, concepts, hooks, and test plans.",
       "category": "analyze",
       "example": "Turn this competitor research into a campaign brief and three testable concepts.",
       "path": "skills/40-creative/benchmark-to-brief/SKILL.md",
-      "status": "released",
-      "supportedModels": []
-    },
-    {
-      "familyId": "media-production",
-      "familyName": "Media and Creative Production",
-      "name": "cartoon-ad",
-      "description": "Design or review animated ads that explain a product through visual arguments, metaphors, and grounded proof. Produce a script ready for creative production.",
-      "category": "advertise",
-      "example": "Make an animated ad concept that explains this product visually.",
-      "path": "skills/40-creative/cartoon-ad/SKILL.md",
       "status": "released",
       "supportedModels": []
     },
@@ -150,28 +117,6 @@
       "category": "publish",
       "example": "Reply in this Slack thread, or prepare a WhatsApp reply for the named customer.",
       "path": "skills/50-publishing/channel-messaging/SKILL.md",
-      "status": "released",
-      "supportedModels": []
-    },
-    {
-      "familyId": "media-production",
-      "familyName": "Media and Creative Production",
-      "name": "commercial-ad",
-      "description": "Design or review product commercials with a controlled visual mechanism, observable product behavior, sound, and payoff. Produce a brief or shot script.",
-      "category": "advertise",
-      "example": "Write a short product commercial with a striking reveal and clear proof.",
-      "path": "skills/40-creative/commercial-ad/SKILL.md",
-      "status": "released",
-      "supportedModels": []
-    },
-    {
-      "familyId": "media-production",
-      "familyName": "Media and Creative Production",
-      "name": "educational-ad",
-      "description": "Design or review educational and explainer ads that answer a viewer question with clear reasoning, visual evidence, and an earned product introduction.",
-      "category": "advertise",
-      "example": "Explain this customer problem in an educational ad for our product.",
-      "path": "skills/40-creative/educational-ad/SKILL.md",
       "status": "released",
       "supportedModels": []
     },
@@ -206,34 +151,105 @@
       }
     },
     {
-      "familyId": "marketplace-sourcing",
-      "familyName": "Marketplace, Sourcing, and Growth",
-      "name": "google-trends-research",
-      "description": "Research Google Trends keyword momentum, regional interest, and related queries. Use search-interest evidence without treating it as sales or total demand.",
-      "category": "research",
-      "example": "Compare search interest in these product ideas across two markets.",
-      "path": "skills/20-research/google-trends-research/SKILL.md",
-      "status": "released",
-      "supportedModels": [],
-      "requirements": {
-        "capabilities": [
-          "research"
-        ],
-        "routeKeys": [
-          "google-trends-fast"
-        ]
-      }
-    },
-    {
       "familyId": "media-production",
       "familyName": "Media and Creative Production",
-      "name": "image-batch-runner",
-      "description": "Execute ready image briefs and edits, including product or persona images and batch variants. Use resolved references and return image assets with saved run results.",
+      "name": "generate",
+      "description": "Create or edit images, generate videos, and synthesize or clone voices from a request and supplied references. Handle single outputs or batches and return actual media results.",
       "category": "generate",
-      "example": "Generate these approved image variants using the supplied references.",
-      "path": "skills/40-creative/image-batch-runner/SKILL.md",
+      "example": "Create product images, a short video, or a voice take from this brief and the supplied references.",
+      "path": "skills/40-creative/generate/SKILL.md",
       "status": "released",
       "supportedModels": [
+        {
+          "key": "video-seedance-2-image",
+          "name": "Doubao Seedance 2 0 260128",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-text",
+          "name": "Doubao Seedance 2 0 260128",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-fast-image",
+          "name": "Doubao Seedance 2 0 Fast 260128",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-fast-text",
+          "name": "Doubao Seedance 2 0 Fast 260128",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-mini-image",
+          "name": "Doubao Seedance 2 0 Mini 260615",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-mini-text",
+          "name": "Doubao Seedance 2 0 Mini 260615",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-5-edit",
+          "name": "Doubao Seedance 2.5",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-5-extend",
+          "name": "Doubao Seedance 2.5",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-5-first-frame",
+          "name": "Doubao Seedance 2.5",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-5-first-last-frame",
+          "name": "Doubao Seedance 2.5",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-5-reference",
+          "name": "Doubao Seedance 2.5",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-seedance-2-5-text",
+          "name": "Doubao Seedance 2.5",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-infinitetalk",
+          "name": "InfiniteTalk",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-kling-v2-6-pro-motion-control",
+          "name": "Kwaivgi Kling v2.6 Pro Motion Control",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-kling-v3-0-pro-image",
+          "name": "Kwaivgi Kling v3.0 Pro Image To Video",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-kling-v3-0-pro-text",
+          "name": "Kwaivgi Kling v3.0 Pro Text To Video",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-kling-v3-0-std-image",
+          "name": "Kwaivgi Kling v3.0 Std Image To Video",
+          "source": "endpointKey"
+        },
+        {
+          "key": "video-kling-v3-0-std-text",
+          "name": "Kwaivgi Kling v3.0 Std Text To Video",
+          "source": "endpointKey"
+        },
         {
           "key": "image-nano-banana-2-edit",
           "name": "Nano Banana 2 Edit",
@@ -285,6 +301,16 @@
           "source": "endpointKey"
         },
         {
+          "key": "voice-clone",
+          "name": "Qwen3 TTS Voice Clone",
+          "source": "endpointKey"
+        },
+        {
+          "key": "voice-design",
+          "name": "Qwen3 TTS Voice Design",
+          "source": "endpointKey"
+        },
+        {
           "key": "image-seedream-v5-lite-text",
           "name": "Seedream v5.0 Lite",
           "source": "endpointKey"
@@ -329,20 +355,48 @@
           "image-seedream-v5-lite-edit",
           "image-seedream-v5-lite-edit-sequential",
           "image-seedream-v5-lite-sequential",
-          "image-seedream-v5-lite-text"
+          "image-seedream-v5-lite-text",
+          "video-infinitetalk",
+          "video-kling-v2-6-pro-motion-control",
+          "video-kling-v3-0-pro-image",
+          "video-kling-v3-0-pro-text",
+          "video-kling-v3-0-std-image",
+          "video-kling-v3-0-std-text",
+          "video-seedance-2-5-edit",
+          "video-seedance-2-5-extend",
+          "video-seedance-2-5-first-frame",
+          "video-seedance-2-5-first-last-frame",
+          "video-seedance-2-5-reference",
+          "video-seedance-2-5-text",
+          "video-seedance-2-fast-image",
+          "video-seedance-2-fast-text",
+          "video-seedance-2-image",
+          "video-seedance-2-mini-image",
+          "video-seedance-2-mini-text",
+          "video-seedance-2-text",
+          "voice-clone",
+          "voice-design"
         ]
       }
     },
     {
-      "familyId": "routing-contracts",
-      "familyName": "Routing & Contracts",
-      "name": "image-generation",
-      "description": "Plan image creation or edits from prompts, products, or references. Resolve task type, model, and reference rules before handing ready requests to image-batch-runner.",
-      "category": "generate",
-      "example": "Plan three product images using these photos and our launch brief.",
-      "path": "skills/10-routing/image-generation/SKILL.md",
+      "familyId": "marketplace-sourcing",
+      "familyName": "Marketplace, Sourcing, and Growth",
+      "name": "google-trends-research",
+      "description": "Research Google Trends keyword momentum, regional interest, and related queries. Use search-interest evidence without treating it as sales or total demand.",
+      "category": "research",
+      "example": "Compare search interest in these product ideas across two markets.",
+      "path": "skills/20-research/google-trends-research/SKILL.md",
       "status": "released",
-      "supportedModels": []
+      "supportedModels": [],
+      "requirements": {
+        "capabilities": [
+          "research"
+        ],
+        "routeKeys": [
+          "google-trends-fast"
+        ]
+      }
     },
     {
       "familyId": "instagram",
@@ -367,17 +421,6 @@
           "instagram-search"
         ]
       }
-    },
-    {
-      "familyId": "media-production",
-      "familyName": "Media and Creative Production",
-      "name": "lifestyle-ad",
-      "description": "Design lifestyle ads where product capability supports a desirable human state. Produce or review shot scripts with grounded product behavior and subtle proof.",
-      "category": "advertise",
-      "example": "Turn these product features into a calm, aspirational lifestyle ad.",
-      "path": "skills/40-creative/lifestyle-ad/SKILL.md",
-      "status": "released",
-      "supportedModels": []
     },
     {
       "familyId": "measurement",
@@ -477,17 +520,6 @@
       }
     },
     {
-      "familyId": "routing-contracts",
-      "familyName": "Routing & Contracts",
-      "name": "reference-decode",
-      "description": "Turn reference videos, frames, or contact sheets into reusable hook and visual rules for new creative prompts, with clear imitation boundaries.",
-      "category": "analyze",
-      "example": "Extract reusable visual and hook rules from these reference frames.",
-      "path": "skills/10-routing/reference-decode/SKILL.md",
-      "status": "released",
-      "supportedModels": []
-    },
-    {
       "familyId": "social",
       "familyName": "Organic Social",
       "name": "social",
@@ -495,17 +527,6 @@
       "category": "publish",
       "example": "Adapt this launch for Facebook, Instagram, and TikTok, then show me the posts and destinations for approval.",
       "path": "skills/50-publishing/social/SKILL.md",
-      "status": "released",
-      "supportedModels": []
-    },
-    {
-      "familyId": "media-production",
-      "familyName": "Media and Creative Production",
-      "name": "street-interview-ad",
-      "description": "Design or review street-interview and vox-pop ads using candid conversation, a clear question, product interaction, and grounded proof.",
-      "category": "advertise",
-      "example": "Write a street-interview ad that tests this product claim with a demonstration.",
-      "path": "skills/40-creative/street-interview-ad/SKILL.md",
       "status": "released",
       "supportedModels": []
     },
@@ -536,144 +557,6 @@
     {
       "familyId": "media-production",
       "familyName": "Media and Creative Production",
-      "name": "ugc-ad",
-      "description": "Design or review creator-led product ads, testimonials, demos, tutorials, unboxings, or POV concepts with believable interaction and approved proof.",
-      "category": "advertise",
-      "example": "Write a natural creator-led product demo based on this brief.",
-      "path": "skills/40-creative/ugc-ad/SKILL.md",
-      "status": "released",
-      "supportedModels": []
-    },
-    {
-      "familyId": "media-production",
-      "familyName": "Media and Creative Production",
-      "name": "video-batch-runner",
-      "description": "Generate videos from briefs, prompts, images, audio, or reference clips. Choose a supported model, submit one or many clips, resume runs, and download results.",
-      "category": "generate",
-      "example": "Generate a short video from this approved script and reference image.",
-      "path": "skills/40-creative/video-batch-runner/SKILL.md",
-      "status": "released",
-      "supportedModels": [
-        {
-          "key": "video-seedance-2-image",
-          "name": "Doubao Seedance 2 0 260128",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-seedance-2-text",
-          "name": "Doubao Seedance 2 0 260128",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-seedance-2-fast-image",
-          "name": "Doubao Seedance 2 0 Fast 260128",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-seedance-2-fast-text",
-          "name": "Doubao Seedance 2 0 Fast 260128",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-seedance-2-mini-image",
-          "name": "Doubao Seedance 2 0 Mini 260615",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-seedance-2-mini-text",
-          "name": "Doubao Seedance 2 0 Mini 260615",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-seedance-2-5-edit",
-          "name": "Doubao Seedance 2.5",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-seedance-2-5-extend",
-          "name": "Doubao Seedance 2.5",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-seedance-2-5-first-frame",
-          "name": "Doubao Seedance 2.5",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-seedance-2-5-first-last-frame",
-          "name": "Doubao Seedance 2.5",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-seedance-2-5-reference",
-          "name": "Doubao Seedance 2.5",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-seedance-2-5-text",
-          "name": "Doubao Seedance 2.5",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-infinitetalk",
-          "name": "InfiniteTalk",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-kling-v2-6-pro-motion-control",
-          "name": "Kwaivgi Kling v2.6 Pro Motion Control",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-kling-v3-0-pro-image",
-          "name": "Kwaivgi Kling v3.0 Pro Image To Video",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-kling-v3-0-pro-text",
-          "name": "Kwaivgi Kling v3.0 Pro Text To Video",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-kling-v3-0-std-image",
-          "name": "Kwaivgi Kling v3.0 Std Image To Video",
-          "source": "endpointKey"
-        },
-        {
-          "key": "video-kling-v3-0-std-text",
-          "name": "Kwaivgi Kling v3.0 Std Text To Video",
-          "source": "endpointKey"
-        }
-      ],
-      "requirements": {
-        "capabilities": [
-          "media"
-        ],
-        "endpointKeys": [
-          "video-infinitetalk",
-          "video-kling-v2-6-pro-motion-control",
-          "video-kling-v3-0-pro-image",
-          "video-kling-v3-0-pro-text",
-          "video-kling-v3-0-std-image",
-          "video-kling-v3-0-std-text",
-          "video-seedance-2-5-edit",
-          "video-seedance-2-5-extend",
-          "video-seedance-2-5-first-frame",
-          "video-seedance-2-5-first-last-frame",
-          "video-seedance-2-5-reference",
-          "video-seedance-2-5-text",
-          "video-seedance-2-fast-image",
-          "video-seedance-2-fast-text",
-          "video-seedance-2-image",
-          "video-seedance-2-mini-image",
-          "video-seedance-2-mini-text",
-          "video-seedance-2-text"
-        ]
-      }
-    },
-    {
-      "familyId": "media-production",
-      "familyName": "Media and Creative Production",
       "name": "video-transcription",
       "description": "Transcribe speech in local or remote videos with timestamps. Convert existing timed transcripts locally into SRT or ASS; use media-analysis for visual understanding.",
       "category": "transcribe",
@@ -693,37 +576,6 @@
         ],
         "endpointKeys": [
           "transcription-video"
-        ]
-      }
-    },
-    {
-      "familyId": "media-production",
-      "familyName": "Media and Creative Production",
-      "name": "voice-batch-runner",
-      "description": "Execute approved voice design or cloning requests from scripts and persona references. Return reusable audio takes and saved run results with consistent voice identity.",
-      "category": "generate",
-      "example": "Generate these approved voice takes from the scripts and voice reference.",
-      "path": "skills/40-creative/voice-batch-runner/SKILL.md",
-      "status": "released",
-      "supportedModels": [
-        {
-          "key": "voice-clone",
-          "name": "Qwen3 TTS Voice Clone",
-          "source": "endpointKey"
-        },
-        {
-          "key": "voice-design",
-          "name": "Qwen3 TTS Voice Design",
-          "source": "endpointKey"
-        }
-      ],
-      "requirements": {
-        "capabilities": [
-          "media"
-        ],
-        "endpointKeys": [
-          "voice-clone",
-          "voice-design"
         ]
       }
     },

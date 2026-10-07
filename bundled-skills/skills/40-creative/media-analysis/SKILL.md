@@ -16,6 +16,11 @@ For multi-reference comparison or requested detailed shot-by-shot evidence, read
 [multi-source shot analysis](references/multi-source-shot-analysis.md). This branch
 keeps sources independent before synthesis; ordinary analysis skips it.
 
+For a requested creative breakdown into reusable hook, viewer question and visual
+grammar, read [reference decode](references/reference-decode.md). Keep observed
+evidence separate from brief-derived ideas. Ordinary analysis does not enter
+creative planning or generation.
+
 ## Choose the work
 
 - **Video understanding:** use `postplus media analyze video-analysis` for
