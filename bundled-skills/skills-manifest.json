@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-09-30.1-onboarding-copy",
+  "releaseId": "skills-2026-10-07.1-ad-strategy",
   "skills": [
     {
       "name": "ads",
       "path": "skills/60-ads/ads/SKILL.md",
-      "contentHash": "586a608109ad44c0b7b6381eced79a57e13accdfb6f64ccbea0991b7a1aac7ed"
+      "contentHash": "72ae9de380c87d682af980df7fed81cc99fba0a9c22a3408e956b8ed555e36ff"
     },
     {
       "name": "audio-generation",

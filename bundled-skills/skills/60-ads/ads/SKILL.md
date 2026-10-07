@@ -38,7 +38,7 @@ account connection.
 
 | Request | Read when relevant |
 | --- | --- |
-| Apply a copied Ad Strategy, evaluate its rules, or execute its selected actions | [Strategy execution](references/strategy-execution.md), [parameter source](references/strategy-parameters.json); use applicable embedded fields/actions directly; platform references are for platform changes, missing/inapplicable parameters or tool conflicts. |
+| Apply a copied Ad Strategy, evaluate its rules, or execute its selected actions | [Strategy execution](references/strategy-execution.md); use applicable embedded fields/actions directly; platform references are for platform changes, missing/inapplicable parameters or tool conflicts. |
 | Plan a first campaign, choose channels, structure a test or decide where to spend | [Audience planning](references/audience-planning.md), [Payback](references/payback.md), and the selected platform; add [B2B growth](references/b2b-growth.md) for a sales-led journey. |
 | Daily/weekly report, period comparison, account anomaly | [Performance reports](references/performance-report.md) and the selected platform below. |
 | Google Search diagnosis, search terms, RSA submission, campaign or budget changes | [Google Ads](references/google-ads.md). |

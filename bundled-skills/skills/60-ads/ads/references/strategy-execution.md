@@ -41,7 +41,7 @@ its campaign or apply Smart+ tools to manual campaigns.
 | Pinterest / `pinterest-ads` | [Pinterest field lookup](pinterest-ads.md#strategy-field-lookup) |
 
 Copied prompts carry only the relevant concrete fields, event definitions, formulas,
-units and action parameters, projected from [strategy-parameters.json](strategy-parameters.json).
+units and action parameters, generated from the same internal parameter source as the platform references.
 Each platform's generated Prompt parameter bindings section uses the same source.
 Binding labels are not API parameters. If the prompt already supplies applicable
 bindings, use them; the reference supplies remapping and conflict resolution. Inspect `tools show` on first use of each

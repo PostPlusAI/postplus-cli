@@ -292,7 +292,7 @@ Provide an object-level table containing ID/name, window, spend, chosen conversi
 <!-- strategy-parameters:generated:start -->
 ## Prompt parameter bindings
 
-These bindings share [one parameter source](strategy-parameters.json) with copied Strategy prompts. Use only the required metrics, dependencies, target and campaign type. These are semantic bindings, not replacement tool schemas.
+These bindings are generated from the same internal parameter source as copied Strategy prompts. Use only the required metrics, dependencies, target and campaign type. These are semantic bindings, not replacement tool schemas.
 
 When platform and campaign type match, use embedded parameters directly. Read this section only for a platform change, missing/inapplicable binding or actual tool conflict. Preserve user rules and thresholds; explain unsupported scope/actions and let the user choose an adjustment.
 
