@@ -83,6 +83,8 @@ postplus skills verify
 
 `status` reports installation and account state; `skills verify` verifies skill
 content. `postplus doctor --help` explains readiness checks and their limits.
+Hosted diagnostics check configuration, not live provider access or whether a
+specific source can be downloaded. Those are verified when the request runs.
 No disk check proves a running agent has loaded newly installed instructions.
 
 ## Repository navigation

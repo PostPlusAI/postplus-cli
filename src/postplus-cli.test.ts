@@ -1052,6 +1052,7 @@ describe('doctor and status', () => {
     it(`renders ${testCase.name} subscription status in doctor output`, async () => {
       await withMockedSubscriptionStatusCloud(testCase, async () => {
         const formatted = formatDoctorReport(await generateDoctorReport());
+        assert.match(formatted, /Live provider access and source availability are checked when a request runs/);
 
         assert.match(
           formatted,
@@ -1062,7 +1063,7 @@ describe('doctor and status', () => {
         assert.match(
           formatted,
           new RegExp(
-            `Hosted capabilities: Ready \\(0 capability checks passed; subscription ${testCase.expectedLabel}\\)`,
+            `Hosted capabilities: Configuration checks passed \\(0 capabilities; subscription ${testCase.expectedLabel}\\)`,
           ),
         );
       });
