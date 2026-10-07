@@ -467,7 +467,7 @@ async function checkHostedCapabilities(
       skillScope
         ? `Hosted capabilities for ${skillScope.skill.skillId}`
         : 'Hosted capabilities',
-      `Ready (${relevantCapabilities.length} capability checks passed; subscription ${subscription})`,
+      `Configuration checks passed (${relevantCapabilities.length} capabilities; subscription ${subscription}). Live provider access and source availability are checked when a request runs.`,
     );
   } catch (error) {
     return createFail(
