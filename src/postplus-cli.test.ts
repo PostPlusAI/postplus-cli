@@ -2520,9 +2520,7 @@ syncBuiltinESMExports();
         [
           '--import',
           pathToFileURL(preloadPath).href,
-          '--import',
-          'tsx',
-          'src/index.ts',
+          'build/index.js',
           'auth',
           'login',
           ...(options.args ?? []),
@@ -2569,9 +2567,7 @@ syncBuiltinESMExports();
 
   it('prints auth login help without starting browser sign-in', async () => {
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'auth',
       'login',
       '--help',
@@ -4390,9 +4386,7 @@ describe('skill management commands', () => {
     });
 
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'quote',
       'confirm',
       '--json',
@@ -5882,9 +5876,7 @@ describe('skill management commands', () => {
   it('recognizes postplus install as the managed setup entrypoint', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         'install',
         '--mystery-scope',
       ]),
@@ -5905,9 +5897,7 @@ describe('skill management commands', () => {
   it('fails fast on unknown update options', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         'update',
         '--mystery-scope',
       ]),
@@ -5928,9 +5918,7 @@ describe('skill management commands', () => {
   it('fails fast on unknown uninstall options', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         'uninstall',
         '--mystery-scope',
       ]),
@@ -5951,9 +5939,7 @@ describe('skill management commands', () => {
   it('fails fast on unknown skills verify options', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         'skills',
         'verify',
         '--bogus',
@@ -5974,15 +5960,11 @@ describe('skill management commands', () => {
 
   it('prints the installed CLI version', async () => {
     const { stdout: versionStdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'version',
     ]);
     const { stdout: flagStdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       '--version',
     ]);
 
@@ -5994,9 +5976,7 @@ describe('skill management commands', () => {
 describe('hosted domain commands', () => {
   it('documents the thin public hosted command contracts', async () => {
     const { stdout: topLevelHelp } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'help',
     ]);
     assert.match(
@@ -6013,9 +5993,7 @@ describe('hosted domain commands', () => {
     );
 
     const { stdout: researchHelp } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'research',
       'help',
     ]);
@@ -6027,7 +6005,7 @@ describe('hosted domain commands', () => {
     );
 
     const { stdout: mediaHelp } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', 'src/index.ts', 'media', 'help',
+      'build/index.js', 'media', 'help',
     ]);
     assert.match(mediaHelp, /postplus media schema/u);
     assert.match(mediaHelp, /--endpoint <endpoint-key>/u);
@@ -6062,9 +6040,7 @@ describe('hosted domain commands', () => {
     ];
     for (const invocation of invocations) {
       const { stdout } = await execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         ...invocation,
       ]);
       assert.match(stdout, /postplus media-file upload --input-file/u);
@@ -6074,9 +6050,7 @@ describe('hosted domain commands', () => {
 
   it('prints manifest-driven public hosted request schemas without requiring auth', async () => {
     const { stdout: researchStdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'research',
       'schema',
       '--route',
@@ -6115,9 +6089,7 @@ describe('hosted domain commands', () => {
     );
 
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'media',
       'schema',
       '--endpoint',
@@ -6190,9 +6162,7 @@ describe('hosted domain commands', () => {
 
   it('prints manifest-driven transcription media field contract without example payloads', async () => {
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'media',
       'schema',
       '--endpoint',
@@ -6306,9 +6276,7 @@ describe('hosted domain commands', () => {
   it('rejects unknown hosted media schema endpoints', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         'media',
         'schema',
         '--endpoint',
@@ -6333,9 +6301,7 @@ describe('hosted domain commands', () => {
   it('rejects unknown hosted research schema routes', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         'research',
         'schema',
         '--route',
@@ -6359,9 +6325,7 @@ describe('hosted domain commands', () => {
 
   it('prints a per-endpoint flags-surface --help with the three-class field breakdown', async () => {
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'media',
       'transcribe',
       'transcription',
@@ -6392,9 +6356,7 @@ describe('hosted domain commands', () => {
     // seedance moved from request-json to the flags surface; the per-endpoint help
     // must still render the manifest enum sets, numeric ranges, and defaults.
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'media',
       'create',
       'video-seedance-2-text',
@@ -6424,9 +6386,7 @@ describe('hosted domain commands', () => {
 
   it('prints per-target help for semantic research and normalized video analysis', async () => {
     const { stdout: researchHelp } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'research',
       'run',
       'tiktok-videos',
@@ -6441,9 +6401,7 @@ describe('hosted domain commands', () => {
     );
 
     const { stdout: analyzeHelp } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'media',
       'analyze',
       'video-analysis',
@@ -8728,10 +8686,8 @@ globalThis.fetch=async(url,init)=>{
 };`;
       const invocation = [
         '--import',
-        'tsx',
-        '--import',
         `data:text/javascript,${encodeURIComponent(stub)}`,
-        'src/index.ts',
+        'build/index.js',
       ];
       const env = {
         ...process.env,
@@ -9736,10 +9692,8 @@ globalThis.fetch=async(url,init)=>{
     await assert.rejects(
       execFileAsync(process.execPath, [
         '--import',
-        'tsx',
-        '--import',
         `data:text/javascript,${encodeURIComponent(stub)}`,
-        'src/index.ts',
+        'build/index.js',
         'media',
         'poll',
         '--handle',
@@ -9774,10 +9728,8 @@ globalThis.fetch=async(url,init)=>{
     await assert.rejects(
       execFileAsync(process.execPath, [
         '--import',
-        'tsx',
-        '--import',
         `data:text/javascript,${encodeURIComponent(stub)}`,
-        'src/index.ts',
+        'build/index.js',
         'media',
         'poll',
         '--handle',
@@ -9876,10 +9828,8 @@ globalThis.fetch=async(url,init)=>{
       await assert.rejects(
         execFileAsync(process.execPath, [
           '--import',
-          'tsx',
-          '--import',
           `data:text/javascript,${encodeURIComponent(stub)}`,
-          'src/index.ts',
+          'build/index.js',
           'media',
           'poll',
           '--resume-from',
@@ -14421,13 +14371,13 @@ it('diagnostic help works offline and gives usable recovery help in text and JSO
   for (const command of ['doctor', 'status']) {
     for (const args of [[command, '--help'], [command, '-h'], ['help', command]]) {
       const { stdout, stderr } = await execFileAsync(process.execPath,
-        ['--import', 'tsx', 'src/index.ts', ...args],
+        ['build/index.js', ...args],
         { env: { ...process.env, NODE_USE_ENV_PROXY: '0', NODE_OPTIONS: '', https_proxy: 'unsupported://help-must-not-connect', HTTPS_PROXY: 'unsupported://must-not-connect' } });
       assert.match(stdout, new RegExp(`postplus ${command} \\[--skill`));
       assert.equal(stderr, '');
     }
     const { stdout } = await execFileAsync(process.execPath,
-      ['--import', 'tsx', 'src/index.ts', command, '--help', '--json']);
+      ['build/index.js', command, '--help', '--json']);
     assert.equal(JSON.parse(stdout).command, `postplus ${command}`);
   }
 });
@@ -14435,7 +14385,7 @@ it('diagnostic help works offline and gives usable recovery help in text and JSO
 describe('studio commands', () => {
   it('documents bundled public Local Studio in CLI help', async () => {
     const { stdout: mainHelp } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', 'src/index.ts', 'help',
+      'build/index.js', 'help',
     ]);
     assert.match(
       mainHelp,
@@ -14443,14 +14393,14 @@ describe('studio commands', () => {
     );
 
     const { stdout: studioHelp } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', 'src/index.ts', 'help', 'studio',
+      'build/index.js', 'help', 'studio',
     ]);
     assert.match(studioHelp, /public local workspace/);
     assert.match(studioHelp, /bundled local dashboard/);
     assert.doesNotMatch(studioHelp, /POSTPLUS_STUDIO_RUNTIME_ROOT/);
 
     const { stdout: openHelp } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', 'src/index.ts', 'studio', 'open', '--help',
+      'build/index.js', 'studio', 'open', '--help',
     ]);
     assert.equal(openHelp, studioHelp);
   });
@@ -14461,7 +14411,7 @@ describe('studio commands', () => {
     );
     tempDirs.push(studioWorkdir);
     const entrypointUrl = pathToFileURL(
-      resolve(process.cwd(), 'src/index.ts'),
+      resolve(process.cwd(), 'build/index.js'),
     ).href;
     const script = [
       "process.chdir('/');",
@@ -14471,7 +14421,7 @@ describe('studio commands', () => {
     ].join('\n');
 
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', '--input-type=module', '-e', script,
+      '--input-type=module', '-e', script,
     ]);
     const parsed = JSON.parse(stdout) as {
       pid?: number;
@@ -14508,7 +14458,7 @@ describe('studio commands', () => {
 
   it('prints Studio server help from the bundled runtime entrypoint', async () => {
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', 'src/studio-server.ts', '--help',
+      'build/studio-server.js', '--help',
     ]);
     assert.match(stdout, /node build\/studio-server\.js --studio-root/);
   });

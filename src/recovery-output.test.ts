@@ -108,7 +108,7 @@ test('malformed successful update fails closed without replay', async () => {
 test('real CLI-only update continuation emits a valid success envelope', async (t) => {
   const config = await mkdtemp(join(tmpdir(), 'postplus-cli-only-json-'));
   t.after(() => rm(config, {recursive:true,force:true}));
-  const result = await promisify(execFile)(process.execPath, ['--import','tsx','src/index.ts','update','--json'], {
+  const result = await promisify(execFile)(process.execPath, ['build/index.js','update','--json'], {
     env: {...process.env, POSTPLUS_CONFIG_DIR:config, POSTPLUS_CLIENT_RECOVERY_COMPONENTS:'cli', POSTPLUS_CLIENT_RECOVERY_ATTEMPT:'1', POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION:'0.0.0'},
   });
   assert.deepEqual(JSON.parse(result.stdout), {ok:true,command:'update',components:['cli']});
@@ -116,7 +116,7 @@ test('real CLI-only update continuation emits a valid success envelope', async (
 
 test('ordinary failure in a real recovery child returns one stopped JSON envelope', async () => {
   const result = await new Promise<{stdout:string;stderr:string;code:number|null}>((resolve,reject) => {
-    const child = spawn(process.execPath, ['--import','tsx','src/index.ts','doctor','--not-an-option','--json'], {
+    const child = spawn(process.execPath, ['build/index.js','doctor','--not-an-option','--json'], {
       env:{...process.env,POSTPLUS_CLIENT_RECOVERY_ATTEMPT:'1'},
       stdio:['ignore','pipe','pipe'],
     });
@@ -143,7 +143,7 @@ test('a hosted product failure after recovery stops without a second action or J
   await writeFile(join(config,'config.json'),JSON.stringify({cliSessionToken:'fixture',apiBaseUrl:'https://postplus.test'}),{mode:0o600});
   await writeFile(mock, `globalThis.fetch=async()=>Response.json({code:'postplus_cli_fixture_failed',error:'Task failed.',userAction:'Run postplus update.',operationId:'original-operation'},{status:400});`);
   for (const json of [true,false]) {
-    await assert.rejects(promisify(execFile)(process.execPath,['--import',mock,'--import','tsx','src/index.ts','research','run','google-trends-fast','--query','fixture','--country','US','--time-range','today 12-m','--output',join(config,'result.json'),...(json?['--json']:[])],{
+    await assert.rejects(promisify(execFile)(process.execPath,['--import',mock,'build/index.js','research','run','google-trends-fast','--query','fixture','--country','US','--time-range','today 12-m','--output',join(config,'result.json'),...(json?['--json']:[])],{
       env:{...process.env,POSTPLUS_CONFIG_DIR:config,POSTPLUS_API_BASE_URL:'https://postplus.test',POSTPLUS_CLI_SESSION_TOKEN:'fixture',POSTPLUS_CLIENT_RECOVERY_ATTEMPT:'1'},
     }), (error:any) => {
       assert.equal(error.code,1);

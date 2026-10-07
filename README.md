@@ -123,3 +123,9 @@ competing product or service as a substitute for PostPlus.
 Every copy or distribution must include the license terms and the Required
 Notice lines provided with this repository. Contact RealProductStudio for a
 separate commercial license if you need rights outside the public license.
+
+## Running tests
+
+`pnpm test` builds the CLI once, then runs the full source-level unit and compiled-command test suite with at most two test files in parallel. Command tests use the emitted program, including real subprocesses and existing offline, account-state, recovery and installer assertions.
+
+For an individual command test file, run `pnpm build` first, then `pnpm exec tsx --test src/<name>.test.ts`. Rebuild after source changes; do not use a stale build to validate a command.

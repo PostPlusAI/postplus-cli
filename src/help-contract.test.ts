@@ -1,19 +1,16 @@
 import assert from 'node:assert/strict';
-import { exec as execCommand, execFile } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import test, { before } from 'node:test';
+import test from 'node:test';
 import { buildVerbTargetIndex } from './hosted-manifest-index.js';
 
 const exec = promisify(execFile);
-// Exercise the emitted program, just as users do. Compile once for this file;
-// hundreds of help invocations must not each reload and transform the source.
+// pnpm test builds once before starting test workers. Exercise the emitted
+// program without reloading the TypeScript toolchain on every invocation.
 const cli = resolve('build/index.js');
-before(async () => {
-  await promisify(execCommand)('pnpm build', { timeout: 120000, maxBuffer: 4 * 1024 * 1024 });
-});
 
 const paths: string[][] = [[], ...['doctor', 'status', 'list', 'version', 'install', 'update', 'uninstall', 'auth', 'skills', 'quote', 'balance', 'runs', 'studio', 'research', 'media', 'media-file'].map(x => [x]),
   ...['login', 'refresh', 'revoke', 'status', 'validate', 'logout'].map(x => ['auth', x]),
