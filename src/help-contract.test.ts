@@ -1,13 +1,20 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { exec as execCommand, execFile } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import test from 'node:test';
+import test, { before } from 'node:test';
 import { buildVerbTargetIndex } from './hosted-manifest-index.js';
 
 const exec = promisify(execFile);
+// Exercise the emitted program, just as users do. Compile once for this file;
+// hundreds of help invocations must not each reload and transform the source.
+const cli = resolve('build/index.js');
+before(async () => {
+  await promisify(execCommand)('pnpm build', { timeout: 120000, maxBuffer: 4 * 1024 * 1024 });
+});
+
 const paths: string[][] = [[], ...['doctor', 'status', 'list', 'version', 'install', 'update', 'uninstall', 'auth', 'skills', 'quote', 'balance', 'runs', 'studio', 'research', 'media', 'media-file'].map(x => [x]),
   ...['login', 'refresh', 'revoke', 'status', 'validate', 'logout'].map(x => ['auth', x]),
   ['skills', 'verify'], ['quote', 'confirm'], ['runs', 'list'], ['runs', 'show'],
@@ -36,12 +43,12 @@ test('every public help path and alias is offline and leaves account state untou
   const env = { ...process.env, HOME: directory, POSTPLUS_CONFIG_DIR: directory,
     POSTPLUS_ACCESS_TOKEN: '', POSTPLUS_REFRESH_TOKEN: '', NODE_USE_ENV_PROXY: '0', NODE_OPTIONS: '', https_proxy: 'unsupported://help-must-not-connect', HTTPS_PROXY: 'unsupported://help-must-not-connect' };
   try {
-    // Four bounded children at a time; each runs the actual source entrypoint.
+    // Four bounded children at a time, all using the same compiled entrypoint.
     const cases = [...paths.flatMap(path => [[...path, '--help'], [...path, '-h'], ['help', ...path]]), ['list'], ['list', '--json']];
     for (let i = 0; i < cases.length; i += 4) {
       await Promise.all(cases.slice(i, i + 4).map(async args => {
         const { stdout, stderr } = await exec(process.execPath,
-          ['--import', guard, '--import', 'tsx', resolve('src/index.ts'), ...args],
+          ['--import', guard, cli, ...args],
           { env, timeout: 30000, maxBuffer: 1024 * 1024 });
         assert.match(stdout, /postplus/i, args.join(' '));
         assert.equal(stderr, '', args.join(' '));
@@ -60,13 +67,13 @@ test('bundled discovery is available even when the account config location is un
   await writeFile(occupied, 'Keep this existing file.');
   const env = { ...process.env, HOME: directory, POSTPLUS_CONFIG_DIR: occupied };
   for (const args of [['list'], ['list', '--json']]) {
-    const { stdout, stderr } = await exec(process.execPath, ['--import', 'tsx', resolve('src/index.ts'), ...args], { env });
+    const { stdout, stderr } = await exec(process.execPath, [cli, ...args], { env });
     assert.equal(stderr, '');
     assert.ok(stdout.length > 0);
     if (args.includes('--json')) assert.ok(JSON.parse(stdout).skills.length > 0);
   }
   // Control: commands that use account state must still reject the invalid location.
-  await assert.rejects(exec(process.execPath, ['--import', 'tsx', resolve('src/index.ts'), 'status', '--json'], { env }));
+  await assert.rejects(exec(process.execPath, [cli, 'status', '--json'], { env }));
   assert.equal(await readFile(occupied, 'utf8'), 'Keep this existing file.');
   assert.deepEqual(await readdir(directory), ['occupied']);
 });
@@ -76,14 +83,14 @@ test('invalid options suggest the nearest valid command help and diagnostics exp
   t.after(() => rm(directory, { recursive: true, force: true }));
   const options = { env: { ...process.env, HOME: directory, POSTPLUS_CONFIG_DIR: directory, POSTPLUS_ACCESS_TOKEN: '', POSTPLUS_REFRESH_TOKEN: '' } };
   for (const path of [['doctor'], ['auth', 'status'], ['skills', 'verify'], ['runs', 'list'], ['studio', 'open']]) {
-    await assert.rejects(exec(process.execPath, ['--import', 'tsx', 'src/index.ts', ...path, '--not-an-option', '--json'], options), (error: any) => {
+    await assert.rejects(exec(process.execPath, [cli, ...path, '--not-an-option', '--json'], options), (error: any) => {
       const failure = JSON.parse(error.stdout).error;
       assert.equal(failure.code, 'postplus_invalid_arguments');
       assert.equal(failure.action, `Run postplus ${path.join(' ')} --help.`);
       return true;
     });
   }
-  const { stdout } = await exec(process.execPath, ['--import', 'tsx', 'src/index.ts', 'doctor', '--help', '--json'], options);
+  const { stdout } = await exec(process.execPath, [cli, 'doctor', '--help', '--json'], options);
   const help = JSON.parse(stdout);
   assert.equal(help.checks.length, 6);
   assert.equal(help.examples.length, 2);
@@ -95,7 +102,7 @@ test('invalid options suggest the nearest valid command help and diagnostics exp
 
 test('unknown public subcommands return one JSON failure and a valid family help action', async () => {
   for (const command of ['media','research','studio','runs','media-file']) {
-    await assert.rejects(exec(process.execPath,['--import','tsx','src/index.ts',command,'not-a-command','--json']), (error:any) => {
+    await assert.rejects(exec(process.execPath,[cli,command,'not-a-command','--json']), (error:any) => {
       const payload=JSON.parse(error.stdout);
       assert.equal(payload.ok,false,command);
       assert.equal(payload.error.code,'postplus_invalid_arguments',command);
@@ -106,7 +113,7 @@ test('unknown public subcommands return one JSON failure and a valid family help
 });
 
 test('retired publish command is absent from the public CLI', async () => {
-  await assert.rejects(exec(process.execPath, ['--import', 'tsx', 'src/index.ts', 'publish', '--json']), (error: any) => {
+  await assert.rejects(exec(process.execPath, [cli, 'publish', '--json']), (error: any) => {
     const payload = JSON.parse(error.stdout);
     assert.equal(payload.error.code, 'postplus_unknown_command');
     assert.equal(payload.error.action, 'Run postplus --help.');
@@ -117,7 +124,7 @@ test('retired publish command is absent from the public CLI', async () => {
 test('retired workflow commands are rejected as unknown top-level commands', async () => {
   await assert.rejects(
     exec(process.execPath, [
-      '--import', 'tsx', 'src/index.ts', 'workflow', 'list', '--json',
+      cli, 'workflow', 'list', '--json',
     ]),
     (error: any) => {
       assert.equal(error.stderr, '');
@@ -135,7 +142,7 @@ test('retired workflow commands are rejected as unknown top-level commands', asy
 test('unauthenticated doctor preserves the login action and local checks in JSON', async (t) => {
   const directory=await mkdtemp(join(tmpdir(),'postplus-no-session-'));
   t.after(()=>rm(directory,{recursive:true,force:true}));
-  await assert.rejects(exec(process.execPath,['--import','tsx','src/index.ts','doctor','--json'],{
+  await assert.rejects(exec(process.execPath,[cli,'doctor','--json'],{
     env:{...process.env,POSTPLUS_CONFIG_DIR:directory,POSTPLUS_CLI_SESSION_TOKEN:''},
   }), (error:any) => {
     const report=JSON.parse(error.stdout);
@@ -149,12 +156,12 @@ test('unauthenticated doctor preserves the login action and local checks in JSON
 
 
 test('package discovery and maintenance help keep the original task without shared onboarding', async () => {
-  const { stdout: top } = await exec(process.execPath, ['--import', 'tsx', 'src/index.ts', '--help']);
+  const { stdout: top } = await exec(process.execPath, [cli, '--help']);
   const catalog = JSON.parse(await readFile('bundled-skills/skills/catalog.json', 'utf8'));
   assert.ok(top.includes(catalog.productBrief.paragraphs[0]));
   assert.match(top, /postplus install → postplus list/);
   for (const command of ['install', 'update']) {
-    const { stdout } = await exec(process.execPath, ['--import', 'tsx', 'src/index.ts', command, '--help', '--json']);
+    const { stdout } = await exec(process.execPath, [cli, command, '--help', '--json']);
     const help = JSON.parse(stdout);
     assert.match(help.next, /Continue the original task/);
     assert.match(help.next, /new agent session only if/);

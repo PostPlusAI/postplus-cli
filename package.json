@@ -106,7 +106,7 @@
     "release:package": "node ./scripts/package-release.mjs",
     "start": "tsx src/index.ts",
     "test:acceptance": "node ./scripts/acceptance.mjs",
-    "test": "tsx --test src/*.test.ts",
+    "test": "tsx --test --test-concurrency=2 src/*.test.ts",
     "typecheck": "tsc --noEmit",
     "prepack": "node ./scripts/finalize-build.mjs",
     "vendor:skills:build": "node scripts/build-skills-runtime.mjs",
