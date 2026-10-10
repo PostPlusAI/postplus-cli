@@ -200,8 +200,27 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--query",
               "type": "string",
-              "required": true,
-              "description": "Public search phrase."
+              "required": false,
+              "description": "Brand keyword; use query OR page ID."
+            },
+            {
+              "name": "page_id",
+              "class": "intent",
+              "flag": "--page-id",
+              "type": "string",
+              "required": false,
+              "description": "Exact numeric Meta advertiser Page ID; use page ID OR query."
+            },
+            {
+              "name": "sort",
+              "class": "intent",
+              "flag": "--sort",
+              "type": "string",
+              "required": false,
+              "description": "Most recent ads first; requires a Page ID.",
+              "enumValues": [
+                "most_recent"
+              ]
             },
             {
               "name": "limit",
@@ -221,7 +240,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--country",
               "type": "string",
               "required": false,
-              "description": "Two-letter market code.",
+              "description": "Two-letter market code, or ALL for all countries.",
               "default": "US"
             },
             {
@@ -238,6 +257,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "all"
               ]
             }
+          ],
+          "requiredAnyOf": [
+            "query",
+            "page_id"
           ]
         },
         {
