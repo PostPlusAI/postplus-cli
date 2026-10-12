@@ -228,11 +228,11 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--limit",
               "type": "number",
               "required": false,
-              "description": "Maximum result count.",
-              "default": 20,
+              "description": "Requested ad count; keyword searches require at least 10. The source may return up to 30 extra ads.",
+              "default": 150,
               "integer": true,
               "min": 1,
-              "max": 200
+              "max": 9007199254740991
             },
             {
               "name": "country",
