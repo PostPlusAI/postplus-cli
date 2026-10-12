@@ -1,3 +1,4 @@
+import { runAdLibraryReport } from './ad-library-report.js';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -11,6 +12,7 @@ Usage:
     [--subcategory <slug>] [--product-type software|hardware] [--visual-format <slug>]
     [--status active|inactive|unknown] [--limit <1-50>] [--offset <0-10000>]
     [--json] [--output <result.json>]
+  postplus ad-library report --input <result.json> [--input <result.json>] --output <evidence.html>
   postplus ad-library formats [--json] [--output <result.json>]
   postplus ad-library categories [--json] [--output <result.json>]
 
@@ -64,6 +66,7 @@ export async function runAdLibraryCommand(args: string[], dependencies: {
   if (!args.length || args.some(arg => ['--help', '-h', 'help'].includes(arg))) {
     print(HELP); return 0;
   }
+  if (args[0] === 'report') return runAdLibraryReport(args.slice(1), print);
   const command = parseAdLibraryCommand(args);
   const baseUrl = dependencies.baseUrl ?? (await resolveApiBaseUrlState()).value;
   if (!baseUrl) throw new Error('PostPlus API URL is not configured.');
