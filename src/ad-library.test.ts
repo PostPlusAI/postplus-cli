@@ -6,17 +6,19 @@ import { join } from 'node:path';
 import { parseAdLibraryCommand, runAdLibraryCommand } from './ad-library.js';
 
 test('search combines single filters and encodes user input', () => {
-  const result = parseAdLibraryCommand(['search', '--query', 'AI & notes', '--brand', 'plaud', '--visual-format', 'product-demo', '--product-type', 'hardware', '--status', 'unknown', '--limit', '50', '--offset', '10000']);
+  const result = parseAdLibraryCommand(['search', '--query', 'AI & notes', '--brand', 'plaud', '--visual-format', 'product-demo', '--product-type', 'hardware', '--status', 'unknown', '--media-type', 'video', '--limit', '50', '--offset', '10000']);
   const url = new URL(result.path, 'https://postplus.io');
   assert.equal(url.searchParams.get('query'), 'AI & notes');
   assert.equal(url.searchParams.get('visual-format'), 'product-demo');
   assert.equal(url.searchParams.get('brand'), 'plaud');
+  assert.equal(url.searchParams.get('media-type'), 'video');
 });
 
 test('rejects unsupported flags, duplicate filters, and unbounded pagination before network', async () => {
   for (const args of [
     ['search', '--limit', '51'], ['search', '--limit', '0'], ['search', '--offset', '10001'],
     ['search', '--offset', '-1'], ['search', '--limit', '1.5'], ['search', '--brand'],
+    ['search', '--media-type', 'audio'], ['search', '--media-type', 'video', '--media-type', 'image'],
     ['search', '--status', 'all'], ['search', '--product-type', 'other'],
     ['search', '--brand', 'one', '--brand', 'two'], ['search', '--query', 'x'.repeat(201)],
     ['formats', '--query', 'test'], ['search', '--wait'], ['unknown'],

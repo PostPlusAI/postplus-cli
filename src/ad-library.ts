@@ -10,7 +10,7 @@ const HELP = `Browse stored public Meta ad snapshots. No login or credits requir
 Usage:
   postplus ad-library search [--query <text>] [--brand <slug>] [--category <slug>]
     [--subcategory <slug>] [--product-type software|hardware] [--visual-format <slug>]
-    [--status active|inactive|unknown] [--limit <1-50>] [--offset <0-10000>]
+    [--media-type video|image] [--status active|inactive|unknown] [--limit <1-50>] [--offset <0-10000>]
     [--json] [--output <result.json>]
   postplus ad-library report --input <result.json> [--input <result.json>] --output <evidence.html>
   postplus ad-library formats [--json] [--output <result.json>]
@@ -29,7 +29,7 @@ export function parseAdLibraryCommand(args: string[]) {
   const params = new URLSearchParams();
   const seen = new Set<string>();
   let output: string | undefined;
-  const filters = ['query', 'brand', 'category', 'subcategory', 'product-type', 'visual-format', 'status', 'limit', 'offset'];
+  const filters = ['query', 'brand', 'category', 'subcategory', 'product-type', 'visual-format', 'media-type', 'status', 'limit', 'offset'];
   for (let i = 0; i < tokens.length; i++) {
     const flag = tokens[i]!;
     if (seen.has(flag)) throw new Error(`Duplicate option: ${flag}`);
@@ -48,6 +48,8 @@ export function parseAdLibraryCommand(args: string[]) {
         throw new Error(`${flag} must be an integer from ${min} to ${max}.`);
     } else if (key === 'product-type' && !['software', 'hardware'].includes(value)) {
       throw new Error('--product-type must be software or hardware.');
+    } else if (key === 'media-type' && !['video', 'image'].includes(value)) {
+      throw new Error('--media-type must be video or image.');
     } else if (key === 'status' && !['active', 'inactive', 'unknown'].includes(value)) {
       throw new Error('--status must be active, inactive, or unknown.');
     } else if (value.length > 200) throw new Error(`${flag} must be at most 200 characters.`);
