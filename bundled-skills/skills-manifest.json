@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-10-11.1",
+  "releaseId": "skills-2026-10-13.1",
   "skills": [
     {
       "name": "ads",
@@ -55,7 +55,7 @@
     {
       "name": "facebook-research",
       "path": "skills/20-research/facebook-research/SKILL.md",
-      "contentHash": "5b3a76a7a56679d24e4717e82c54408b8d3d53d984f8e5ff3535a61fae8f022a"
+      "contentHash": "851cf4651bd5543e2b3d95f83da6303aaf143ba8fbd2a6f1c13a7f1ab93c5431"
     },
     {
       "name": "google-trends-research",
