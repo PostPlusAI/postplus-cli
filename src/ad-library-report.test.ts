@@ -137,7 +137,7 @@ test('offline command accepts repeated inputs, preserves source files and publis
         request: async () => assert.fail('report must not request network'),
       },
     );
-    assert.match(await readFile(out, 'utf8'), /1 unique ads/);
+    assert.match(await readFile(out, 'utf8'), /1 ads shown/);
     assert.equal(await readFile(source, 'utf8'), json);
     await assert.rejects(
       runAdLibraryCommand(['report', '--input', source, '--output', source]),
