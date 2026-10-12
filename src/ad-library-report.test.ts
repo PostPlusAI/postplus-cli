@@ -1,38 +1,40 @@
-import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { normalizeAdReport, renderAdReport } from "./ad-library-report.js";
-import { runAdLibraryCommand } from "./ad-library.js";
-const ad = (id = "123") => ({
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+
+import { normalizeAdReport, renderAdReport } from './ad-library-report.js';
+import { runAdLibraryCommand } from './ad-library.js';
+
+const ad = (id = '123') => ({
   ad_archive_id: id,
-  page_id: "99",
-  page_name: "Example",
+  page_id: '99',
+  page_name: 'Example',
   is_active: true,
-  publisher_platform: ["FACEBOOK", "INSTAGRAM"],
+  publisher_platform: ['FACEBOOK', 'INSTAGRAM'],
   start_date: 1750000000,
   snapshot: {
-    page_profile_picture_url: "https://example.test/logo.png",
-    body: { text: "Actual text" },
-    videos: [{ video_hd_url: "https://example.test/video.mp4" }],
-    title: "Headline",
-    cta_text: "Learn more",
-    link_url: "https://example.test/landing",
+    page_profile_picture_url: 'https://example.test/logo.png',
+    body: { text: 'Actual text' },
+    videos: [{ video_hd_url: 'https://example.test/video.mp4' }],
+    title: 'Headline',
+    cta_text: 'Learn more',
+    link_url: 'https://example.test/landing',
   },
 });
 const input = (items: unknown[]) => ({
-  name: "fresh.json",
+  name: 'fresh.json',
   payload: {
-    routeKey: "facebook-ads-library",
-    status: "completed",
-    output: { fetchedAt: "2026-10-12T01:00:00Z", items },
+    routeKey: 'facebook-ads-library',
+    status: 'completed',
+    output: { fetchedAt: '2026-10-12T01:00:00Z', items },
   },
 });
-test("retains more than 150 ads and all creative variants, deduplicates archive IDs", () => {
+test('retains more than 150 ads and all creative variants, deduplicates archive IDs', () => {
   const ads = Array.from({ length: 180 }, (_, i) => ad(String(i)));
-  const variant = ad("0");
-  variant.snapshot.body.text = "Second variant";
+  const variant = ad('0');
+  variant.snapshot.body.text = 'Second variant';
   const result = normalizeAdReport([input(ads), input([ads[0], variant])]);
   assert.equal(result.ads.length, 180);
   assert.equal(result.ads[0]!.creatives.length, 2);
@@ -40,46 +42,47 @@ test("retains more than 150 ads and all creative variants, deduplicates archive 
   assert.equal((html.match(/class="card"/g) || []).length, 180);
   assert.match(html, /preload="none"/);
   assert.match(html, /Checked:/);
-  assert.match(html, /Platforms: FACEBOOK, INSTAGRAM/);
+  assert.match(html, /aria-label="FACEBOOK"/);
+  assert.match(html, /aria-label="INSTAGRAM"/);
 });
-test("stored results normalize with correct observation, relative public logos and pagination disclosure", () => {
+test('stored results normalize with correct observation, relative public logos and pagination disclosure', () => {
   const result = {
-    name: "stored.json",
+    name: 'stored.json',
     payload: {
       schemaVersion: 1,
       nextOffset: 50,
       items: [
         {
-          archive_id: "123",
-          page_id: "99",
-          status: "inactive",
-          observed_at: "2026-10-01",
+          archive_id: '123',
+          page_id: '99',
+          status: 'inactive',
+          observed_at: '2026-10-01',
           brands: [
             {
-              name: "Example",
-              logo_url: "/images/ad-library/brands/example.webp",
+              name: 'Example',
+              logo_url: '/images/ad-library/brands/example.webp',
             },
           ],
-          media: [{ kind: "video", url: "https://example.test/v.mp4" }],
-          body: "Stored body",
+          media: [{ kind: 'video', url: 'https://example.test/v.mp4' }],
+          body: 'Stored body',
         },
       ],
     },
   };
   const data = normalizeAdReport([result]);
-  assert.equal(data.ads[0]!.status, "inactive");
+  assert.equal(data.ads[0]!.status, 'inactive');
   assert.match(data.ads[0]!.logo, /^https:\/\/postplus.io/);
   assert.match(renderAdReport([result]), /only one page/);
 });
-test("failed and pending outcomes are explicit, unknown payloads and missing items reject", () => {
-  for (const status of ["failed", "running", "pending"]) {
+test('failed and pending outcomes are explicit, unknown payloads and missing items reject', () => {
+  for (const status of ['failed', 'running', 'pending']) {
     const html = renderAdReport([
       {
-        name: "operation.json",
+        name: 'operation.json',
         payload: {
-          routeKey: "facebook-ads-library",
+          routeKey: 'facebook-ads-library',
           status,
-          error: { message: "Provider rejected request" },
+          error: { message: 'Provider rejected request' },
         },
       },
     ]);
@@ -87,95 +90,95 @@ test("failed and pending outcomes are explicit, unknown payloads and missing ite
     assert.match(html, /Provider rejected request/);
   }
   assert.throws(
-    () => normalizeAdReport([{ name: "x", payload: {} }]),
+    () => normalizeAdReport([{ name: 'x', payload: {} }]),
     /Unsupported/,
   );
   assert.throws(
     () =>
       normalizeAdReport([
         {
-          name: "x",
-          payload: { routeKey: "facebook-ads-library", status: "completed" },
+          name: 'x',
+          payload: { routeKey: 'facebook-ads-library', status: 'completed' },
         },
       ]),
     /Missing ad items/,
   );
 });
-test("escapes source content and rejects executable or credentialed URLs", () => {
+test('escapes source content and rejects executable or credentialed URLs', () => {
   const a = ad();
   a.snapshot.body.text = '</script><script>alert("x")</script>';
   a.page_name = '" onmouseover="alert(1)';
   const html = renderAdReport([input([a])]);
-  assert.ok(!html.includes("<script>alert"));
+  assert.ok(!html.includes('<script>alert'));
   assert.match(html, /&lt;\/script&gt;/);
   assert.equal((html.match(/<script>/g) || []).length, 1);
   for (const unsafe of [
-    "javascript:alert(1)",
-    "data:text/html,hi",
-    "file:///tmp/x",
-    "https://user:pass@example.test",
+    'javascript:alert(1)',
+    'data:text/html,hi',
+    'file:///tmp/x',
+    'https://user:pass@example.test',
   ]) {
     const a = ad();
     a.snapshot.link_url = unsafe;
     assert.throws(() => renderAdReport([input([a])]));
   }
 });
-test("offline command accepts repeated inputs, preserves source files and publishes HTML atomically", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "ad-report-"));
+test('offline command accepts repeated inputs, preserves source files and publishes HTML atomically', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ad-report-'));
   try {
-    const source = join(dir, "input.json"),
-      out = join(dir, "report.html");
+    const source = join(dir, 'input.json'),
+      out = join(dir, 'report.html');
     const json = JSON.stringify(input([ad()]).payload);
     await writeFile(source, json);
     await runAdLibraryCommand(
-      ["report", "--input", source, "--input", source, "--output", out],
+      ['report', '--input', source, '--input', source, '--output', out],
       {
         output: () => {},
-        request: async () => assert.fail("report must not request network"),
+        request: async () => assert.fail('report must not request network'),
       },
     );
-    assert.match(await readFile(out, "utf8"), /1 unique ads/);
-    assert.equal(await readFile(source, "utf8"), json);
+    assert.match(await readFile(out, 'utf8'), /1 unique ads/);
+    assert.equal(await readFile(source, 'utf8'), json);
     await assert.rejects(
-      runAdLibraryCommand(["report", "--input", source, "--output", source]),
+      runAdLibraryCommand(['report', '--input', source, '--output', source]),
       /overwrite/,
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
-test("stored presentation preserves per-creative evidence and matches media sort order", () => {
+test('stored presentation preserves per-creative evidence and matches media sort order', () => {
   const result = normalizeAdReport([
     {
-      name: "stored.json",
+      name: 'stored.json',
       payload: {
         schemaVersion: 1,
         items: [
           {
-            archive_id: "1",
-            page_id: "2",
-            advertiser: { name: "Actual advertiser" },
-            brands: [{ name: "Product brand" }],
+            archive_id: '1',
+            page_id: '2',
+            advertiser: { name: 'Actual advertiser' },
+            brands: [{ name: 'Product brand' }],
             presentation: {
-              publisherPlatforms: ["INSTAGRAM"],
+              publisherPlatforms: ['INSTAGRAM'],
               common: {
-                body: "Shared",
-                destinationUrl: "https://example.test",
+                body: 'Shared',
+                destinationUrl: 'https://example.test',
               },
               creatives: [
-                { sortOrder: 0, headline: "First", ctaText: "Try", body: null },
-                { sortOrder: 1, headline: "Second" },
+                { sortOrder: 0, headline: 'First', ctaText: 'Try', body: null },
+                { sortOrder: 1, headline: 'Second' },
               ],
             },
             media: [
               {
-                kind: "video",
-                url: "https://example.test/a.mp4",
+                kind: 'video',
+                url: 'https://example.test/a.mp4',
                 sort_order: 0,
               },
               {
-                kind: "image",
-                url: "https://example.test/b.png",
+                kind: 'image',
+                url: 'https://example.test/b.png',
                 sort_order: 1,
               },
             ],
@@ -184,9 +187,67 @@ test("stored presentation preserves per-creative evidence and matches media sort
       },
     },
   ]);
-  assert.equal(result.ads[0]!.advertiser, "Actual advertiser");
-  assert.deepEqual(result.ads[0]!.platforms, ["INSTAGRAM"]);
-  assert.equal(result.ads[0]!.creatives[0]!.body, "Shared");
+  assert.equal(result.ads[0]!.advertiser, 'Actual advertiser');
+  assert.deepEqual(result.ads[0]!.platforms, ['INSTAGRAM']);
+  assert.equal(result.ads[0]!.creatives[0]!.body, 'Shared');
   assert.equal(result.ads[0]!.creatives[0]!.media.length, 1);
-  assert.equal(result.ads[0]!.creatives[1]!.media[0]!.kind, "image");
+  assert.equal(result.ads[0]!.creatives[1]!.media[0]!.kind, 'image');
+});
+
+test('creative switching retains all variants, pauses hidden videos, and wraps in both directions', async () => {
+  const { runInNewContext } = await import('node:vm');
+  const item = ad();
+  const html = renderAdReport([input([item])]);
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
+  let paused = 0;
+  const variants = Array.from({ length: 3 }, (_, i) => ({
+    hidden: i !== 0,
+    textContent: `Creative ${i}`,
+    querySelectorAll: () => [{ pause: () => paused++ }],
+  }));
+  const listeners: Record<string, () => void> = {};
+  const controls = [-1, 1].map((step) => ({
+    dataset: { step: String(step) },
+    addEventListener: (_: string, fn: () => void) => {
+      listeners[step] = fn;
+    },
+  }));
+  const output = { textContent: '' };
+  const card = {
+    dataset: {} as Record<string, string>,
+    querySelectorAll: (selector: string) =>
+      selector === '.variant' ? variants : controls,
+    querySelector: () => output,
+  };
+  const document = {
+    querySelectorAll: (selector: string) =>
+      selector === '.card' ? [card] : [],
+    getElementById: () => ({ addEventListener() {} }),
+  };
+  runInNewContext(script, { document });
+  listeners[1]!();
+  assert.equal(card.dataset.current, '1');
+  assert.deepEqual(
+    variants.map((v) => v.hidden),
+    [true, false, true],
+  );
+  assert.equal(output.textContent, 'Creative 2 of 3');
+  listeners[-1]!();
+  listeners[-1]!();
+  assert.equal(card.dataset.current, '2');
+  assert.equal(output.textContent, 'Creative 3 of 3');
+  assert.ok(paused > 0);
+});
+
+test('source CTA, footer copy and collation counts retain their own meanings', () => {
+  const item = { ...ad(), collation_count: 4 };
+  item.snapshot.cta_text = 'Subscribe';
+  const html = renderAdReport([input([item])]);
+  assert.match(html, /class="cta"[^>]*>Subscribe<\/a>/);
+  assert.match(html, /class="domain">example.test<\/div>/);
+  assert.match(html, /<strong>4 ads<\/strong> use this creative and text/);
+  assert.ok(!html.includes('Creative 1 of 4'));
+  const withoutCta = ad();
+  withoutCta.snapshot.cta_text = '';
+  assert.ok(!renderAdReport([input([withoutCta])]).includes('class="cta"'));
 });
