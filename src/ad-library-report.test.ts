@@ -390,3 +390,55 @@ test('group selection and status filtering retain each original ad without dupli
   assert.equal(cards[0]!.control.hidden, true);
   assert.equal(controls.get('count').textContent, '1 of 2 ads · 1 card');
 });
+
+test('stored videos use only their matching thumbnail and reject unsafe poster URLs', () => {
+  const payload = {
+    schemaVersion: 1,
+    items: [
+      {
+        archive_id: '1',
+        page_id: '99',
+        media: [
+          {
+            kind: 'video',
+            url: 'https://example.test/first.mp4',
+            sort_order: 0,
+          },
+          {
+            kind: 'video',
+            url: 'https://example.test/second.mp4',
+            sort_order: 1,
+          },
+          {
+            kind: 'thumbnail',
+            url: 'https://example.test/second.jpg',
+            sort_order: 1,
+          },
+          {
+            kind: 'thumbnail',
+            url: 'https://example.test/first.jpg',
+            sort_order: 0,
+          },
+          {
+            kind: 'video',
+            url: 'https://example.test/third.mp4',
+            sort_order: 2,
+          },
+          { kind: 'thumbnail', url: '', sort_order: 2 },
+        ],
+      },
+    ],
+  };
+  const inputs = [{ name: 'stored.json', payload }];
+  const media = normalizeAdReport(inputs).ads[0]!.creatives[0]!.media;
+  assert.equal(media.length, 3);
+  assert.deepEqual(
+    media.map((item) => item.poster),
+    ['https://example.test/first.jpg', 'https://example.test/second.jpg', ''],
+  );
+  const html = renderAdReport(inputs);
+  assert.match(html, /poster="https:\/\/example.test\/first.jpg"/);
+  assert.ok(!html.includes('javascript:'));
+  payload.items[0]!.media[5]!.url = 'javascript:alert(1)';
+  assert.throws(() => renderAdReport(inputs), /Unsafe report URL/);
+});

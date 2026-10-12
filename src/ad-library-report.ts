@@ -146,7 +146,8 @@ export function normalizeAdReport(inputs: ReportInput[]) {
           : obj(raw);
         const media: ReportCreative['media'] = [];
         if (stored) {
-          for (const m of arr(a.media).map(obj))
+          const storedMedia = arr(a.media).map(obj);
+          for (const m of storedMedia)
             if (
               ['video', 'image'].includes(str(m.kind)) &&
               (!projected.length || m.sort_order === c.sortOrder)
@@ -154,7 +155,25 @@ export function normalizeAdReport(inputs: ReportInput[]) {
               media.push({
                 kind: str(m.kind),
                 url: url(m.url),
-                poster: '',
+                poster:
+                  m.kind === 'video' &&
+                  storedMedia.filter(
+                    (item) =>
+                      item.kind === 'video' && item.sort_order === m.sort_order,
+                  ).length === 1 &&
+                  storedMedia.filter(
+                    (item) =>
+                      item.kind === 'thumbnail' &&
+                      item.sort_order === m.sort_order,
+                  ).length === 1
+                    ? url(
+                        storedMedia.find(
+                          (thumbnail) =>
+                            thumbnail.kind === 'thumbnail' &&
+                            thumbnail.sort_order === m.sort_order,
+                        )?.url,
+                      )
+                    : '',
                 contentHash: str(m.content_sha256),
               });
         } else {
