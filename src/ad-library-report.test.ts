@@ -163,7 +163,7 @@ test("stored presentation preserves per-creative evidence and matches media sort
                 destinationUrl: "https://example.test",
               },
               creatives: [
-                { sortOrder: 0, headline: "First", ctaText: "Try" },
+                { sortOrder: 0, headline: "First", ctaText: "Try", body: null },
                 { sortOrder: 1, headline: "Second" },
               ],
             },

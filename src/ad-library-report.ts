@@ -128,7 +128,14 @@ export function normalizeAdReport(inputs: ReportInput[]) {
           ? arr(snapshot.cards)
           : [snapshot];
       const creatives = rawCreatives.map((raw) => {
-        const c = stored ? { ...common, ...obj(raw) } : obj(raw);
+        const c = stored
+          ? {
+              ...common,
+              ...Object.fromEntries(
+                Object.entries(obj(raw)).filter(([, value]) => value != null),
+              ),
+            }
+          : obj(raw);
         const media: ReportCreative["media"] = [];
         if (stored) {
           for (const m of arr(a.media).map(obj))
