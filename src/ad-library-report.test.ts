@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { normalizeAdReport, renderAdReport } from './ad-library-report.js';
+import {
+  normalizeAdReport,
+  renderAdReport,
+  reportCreativeGroupKey,
+} from './ad-library-report.js';
 import { runAdLibraryCommand } from './ad-library.js';
 
 const ad = (id = '123') => ({
@@ -214,15 +218,20 @@ test('creative switching retains all variants, pauses hidden videos, and wraps i
   }));
   const output = { textContent: '' };
   const card = {
-    dataset: {} as Record<string, string>,
+    textContent: 'Example',
+    dataset: { group: 'ad:123', ad: '123', media: 'video' } as Record<
+      string,
+      string
+    >,
     querySelectorAll: (selector: string) =>
       selector === '.variant' ? variants : controls,
-    querySelector: () => output,
+    querySelector: (selector: string) =>
+      selector === '.ad-group' ? null : output,
   };
   const document = {
     querySelectorAll: (selector: string) =>
       selector === '.card' ? [card] : [],
-    getElementById: () => ({ addEventListener() {} }),
+    getElementById: () => ({ value: '', addEventListener() {} }),
   };
   runInNewContext(script, { document });
   listeners[1]!();
@@ -250,4 +259,134 @@ test('source CTA, footer copy and collation counts retain their own meanings', (
   const withoutCta = ad();
   withoutCta.snapshot.cta_text = '';
   assert.ok(!renderAdReport([input([withoutCta])]).includes('class="cta"'));
+});
+
+test('only identical verified ordered videos of one advertiser group together', () => {
+  const make = (
+    id: string,
+    page = '99',
+    hash = 'a'.repeat(64),
+    kind = 'video',
+  ) => ({
+    archive_id: id,
+    page_id: page,
+    status: 'active',
+    media: [
+      { kind, url: 'https://example.test/video.mp4', content_sha256: hash },
+    ],
+  });
+  const { ads } = normalizeAdReport([
+    {
+      name: 'stored.json',
+      payload: {
+        schemaVersion: 1,
+        items: [
+          make('1'),
+          make('2'),
+          make('3', '100'),
+          make('4', '99', ''),
+          make('5', '99', 'a'.repeat(64), 'image'),
+          make('6', '99', 'b'.repeat(64)),
+        ],
+      },
+    },
+  ]);
+  assert.equal(
+    reportCreativeGroupKey(ads[0]!),
+    reportCreativeGroupKey(ads[1]!),
+  );
+  for (const other of ads.slice(2))
+    assert.notEqual(
+      reportCreativeGroupKey(ads[0]!),
+      reportCreativeGroupKey(other),
+    );
+});
+
+test('group selection and status filtering retain each original ad without duplicate cards', async () => {
+  const { runInNewContext } = await import('node:vm');
+  const html = renderAdReport([input([ad()])]);
+  const controls = new Map<string, any>();
+  const element = () => ({
+    value: '',
+    hidden: false,
+    textContent: '',
+    style: { cssText: '' },
+    children: [] as any[],
+    onChange: () => {},
+    setAttribute() {},
+    addEventListener(_event: string, fn: () => void) {
+      this.onChange = fn;
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    append(child: any) {
+      this.children.push(child);
+    },
+  });
+  for (const id of ['query', 'status', 'media', 'count', 'empty'])
+    controls.set(id, element());
+  const cards = ['active', 'inactive'].map((status, index) => {
+    const variant = {
+      hidden: false,
+      textContent: 'Novel writing',
+      querySelector: () => ({}),
+      querySelectorAll: () => [],
+    };
+    const card = {
+      dataset: {
+        ad: String(index + 1),
+        group: 'same-video',
+        brand: '99',
+        status,
+        media: 'video',
+      } as Record<string, string>,
+      textContent: 'Novel writing',
+      hidden: false,
+      control: null as any,
+      prepend(control: any) {
+        this.control = control;
+      },
+      querySelector(selector: string) {
+        return selector === '.ad-group'
+          ? this.control
+          : selector === '.meta'
+            ? { textContent: 'Novel writing' }
+            : null;
+      },
+      querySelectorAll(selector: string) {
+        return selector === '.variant' ? [variant] : [];
+      },
+    };
+    return card;
+  });
+  const document = {
+    querySelectorAll: (selector: string) => (selector === '.card' ? cards : []),
+    getElementById: (id: string) => controls.get(id),
+    createElement: element,
+  };
+  runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)![1]!, {
+    document,
+  });
+  assert.deepEqual(
+    cards.map((card) => card.hidden),
+    [false, true],
+  );
+  assert.equal(controls.get('count').textContent, '2 of 2 ads · 1 card');
+  assert.equal(cards[0]!.control.children.length, 2);
+  assert.equal(cards[1]!.control.children.length, 0);
+  cards[0]!.control.value = '2';
+  cards[0]!.control.onChange();
+  assert.deepEqual(
+    cards.map((card) => card.hidden),
+    [true, false],
+  );
+  controls.get('status').value = 'active';
+  controls.get('status').onChange();
+  assert.deepEqual(
+    cards.map((card) => card.hidden),
+    [false, true],
+  );
+  assert.equal(cards[0]!.control.hidden, true);
+  assert.equal(controls.get('count').textContent, '1 of 2 ads · 1 card');
 });
