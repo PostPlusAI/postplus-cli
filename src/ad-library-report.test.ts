@@ -31,15 +31,15 @@ const input = (items: unknown[]) => ({
     output: { fetchedAt: '2026-10-12T01:00:00Z', items },
   },
 });
-test('retains more than 150 ads and all creative variants, deduplicates archive IDs', () => {
-  const ads = Array.from({ length: 180 }, (_, i) => ad(String(i)));
+test('retains 720 ads beyond request page sizes and all creative variants, deduplicates archive IDs', () => {
+  const ads = Array.from({ length: 720 }, (_, i) => ad(String(i)));
   const variant = ad('0');
   variant.snapshot.body.text = 'Second variant';
   const result = normalizeAdReport([input(ads), input([ads[0], variant])]);
-  assert.equal(result.ads.length, 180);
+  assert.equal(result.ads.length, 720);
   assert.equal(result.ads[0]!.creatives.length, 2);
   const html = renderAdReport([input(ads)]);
-  assert.equal((html.match(/class="card"/g) || []).length, 180);
+  assert.equal((html.match(/class="card"/g) || []).length, 720);
   assert.match(html, /preload="none"/);
   assert.match(html, /Checked:/);
   assert.match(html, /aria-label="FACEBOOK"/);
