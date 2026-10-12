@@ -7433,11 +7433,17 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('returns the latest still-processing payload once the poll wait budget is spent', async () => {
+  it('returns the latest still-processing payload once the poll wait budget is spent', async (t) => {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
+    let elapsedMs = 0;
+    t.mock.method(performance, 'now', () => elapsedMs);
     globalThis.fetch = async () => {
       fetchCalls += 1;
+      // Control the polling deadline without a 120ms wall-clock race against
+      // the request timeout on a busy CI runner. The second observed response
+      // spends the wait budget while remaining honestly pending.
+      elapsedMs = fetchCalls === 1 ? 10 : 30_001;
       return new Response(
         JSON.stringify({
           output: { data: { id: 'run_1', status: 'processing' } },
@@ -7454,9 +7460,9 @@ describe('hosted domain commands', () => {
           '--handle',
           'run_1',
           '--wait-seconds',
-          '0.12',
+          '30',
           '--poll-interval-seconds',
-          '0.05',
+          '0.001',
         ],
         {
           auth: {
@@ -7467,7 +7473,7 @@ describe('hosted domain commands', () => {
       )) as { output: { data: { status: string } } };
       // Bounded: it re-checked at least once, then surfaced the honest
       // still-processing payload instead of waiting forever.
-      assert.ok(fetchCalls >= 2);
+      assert.equal(fetchCalls, 2);
       assert.equal(payload.output.data.status, 'processing');
     } finally {
       globalThis.fetch = originalFetch;
