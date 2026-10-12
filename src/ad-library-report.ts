@@ -117,17 +117,25 @@ export function normalizeAdReport(inputs: ReportInput[]) {
         brand = obj(arr(a.brands)[0]);
       const id = str(stored ? a.archive_id : a.ad_archive_id);
       if (!id) throw new Error(`Ad is missing its archive ID: ${input.name}`);
+      const presentation = obj(a.presentation);
+      const common = obj(presentation.common);
+      const projected = arr(presentation.creatives);
       const rawCreatives = stored
-        ? [a]
+        ? projected.length
+          ? projected
+          : [Object.keys(common).length ? common : a]
         : arr(snapshot.cards).length
           ? arr(snapshot.cards)
           : [snapshot];
       const creatives = rawCreatives.map((raw) => {
-        const c = obj(raw);
+        const c = stored ? { ...common, ...obj(raw) } : obj(raw);
         const media: ReportCreative["media"] = [];
         if (stored) {
           for (const m of arr(a.media).map(obj))
-            if (["video", "image"].includes(str(m.kind)))
+            if (
+              ["video", "image"].includes(str(m.kind)) &&
+              (!projected.length || m.sort_order === c.sortOrder)
+            )
               media.push({ kind: str(m.kind), url: url(m.url), poster: "" });
         } else {
           for (const v of [
@@ -156,17 +164,20 @@ export function normalizeAdReport(inputs: ReportInput[]) {
             str(obj(snapshot.body).text) ||
             str(snapshot.body),
           headline: str(c.headline || c.title),
-          description: str(c.link_description),
-          destination: url(c.link_url),
-          cta: str(c.cta_text),
+          description: str(c.description || c.link_description),
+          destination: url(c.destinationUrl || c.link_url),
+          cta: str(c.ctaText || c.cta_text),
           media,
         };
       });
       const ad: ReportAd = {
         id,
         advertiser:
-          str(stored ? brand.name : a.page_name || snapshot.page_name) ||
-          "Advertiser not provided",
+          str(
+            stored
+              ? obj(a.advertiser).name || brand.name
+              : a.page_name || snapshot.page_name,
+          ) || "Advertiser not provided",
         advertiserId: str(a.page_id) || str(brand.slug) || id,
         logo: url(
           stored ? brand.logo_url : snapshot.page_profile_picture_url,
@@ -184,7 +195,11 @@ export function normalizeAdReport(inputs: ReportInput[]) {
         observed: date(a.observed_at || data.fetchedAt),
         start: date(a.delivery_started_at || a.start_date),
         end: date(a.delivery_ended_at || a.end_date),
-        platforms: arr(a.publisher_platform || a.publisher_platforms).map(str),
+        platforms: arr(
+          presentation.publisherPlatforms ||
+            a.publisher_platform ||
+            a.publisher_platforms,
+        ).map(str),
         source:
           url(a.source_url || a.ad_library_url) ||
           `https://www.facebook.com/ads/library/?id=${encodeURIComponent(id)}`,

@@ -144,3 +144,49 @@ test("offline command accepts repeated inputs, preserves source files and publis
     await rm(dir, { recursive: true, force: true });
   }
 });
+test("stored presentation preserves per-creative evidence and matches media sort order", () => {
+  const result = normalizeAdReport([
+    {
+      name: "stored.json",
+      payload: {
+        schemaVersion: 1,
+        items: [
+          {
+            archive_id: "1",
+            page_id: "2",
+            advertiser: { name: "Actual advertiser" },
+            brands: [{ name: "Product brand" }],
+            presentation: {
+              publisherPlatforms: ["INSTAGRAM"],
+              common: {
+                body: "Shared",
+                destinationUrl: "https://example.test",
+              },
+              creatives: [
+                { sortOrder: 0, headline: "First", ctaText: "Try" },
+                { sortOrder: 1, headline: "Second" },
+              ],
+            },
+            media: [
+              {
+                kind: "video",
+                url: "https://example.test/a.mp4",
+                sort_order: 0,
+              },
+              {
+                kind: "image",
+                url: "https://example.test/b.png",
+                sort_order: 1,
+              },
+            ],
+          },
+        ],
+      },
+    },
+  ]);
+  assert.equal(result.ads[0]!.advertiser, "Actual advertiser");
+  assert.deepEqual(result.ads[0]!.platforms, ["INSTAGRAM"]);
+  assert.equal(result.ads[0]!.creatives[0]!.body, "Shared");
+  assert.equal(result.ads[0]!.creatives[0]!.media.length, 1);
+  assert.equal(result.ads[0]!.creatives[1]!.media[0]!.kind, "image");
+});
