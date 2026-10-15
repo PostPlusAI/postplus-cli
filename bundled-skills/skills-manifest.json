@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-10-15.1",
+  "releaseId": "skills-2026-10-15.2",
   "skills": [
     {
       "name": "ads",
@@ -50,7 +50,7 @@
     {
       "name": "facebook-research",
       "path": "skills/20-research/facebook-research/SKILL.md",
-      "contentHash": "851cf4651bd5543e2b3d95f83da6303aaf143ba8fbd2a6f1c13a7f1ab93c5431"
+      "contentHash": "ccd934e0bf7c6488e326b62161f3ee1281e5b60c95c0362aed368a6ae0e08e41"
     },
     {
       "name": "google-trends-research",
@@ -85,7 +85,7 @@
     {
       "name": "media-analysis",
       "path": "skills/40-creative/media-analysis/SKILL.md",
-      "contentHash": "1a947f80e8f5ea66aa43b8aef971de93d15f7613e8f55ca4c408621501aaea14"
+      "contentHash": "c5547bcd8df06693a4a7d941f1a183d557dd1dd0e518a90218f869fc03860195"
     },
     {
       "name": "pinterest-search",
@@ -110,7 +110,7 @@
     {
       "name": "social",
       "path": "skills/50-publishing/social/SKILL.md",
-      "contentHash": "e279a499c99a790a5be912b6dc376b7e35b66ed81103424051e9ef27f84f8a37"
+      "contentHash": "d01d0a7f9e736a9d5438ca77c1a3d45515207d3d87c1481ce9d9d7231a470352"
     },
     {
       "name": "street-interview-ad",
@@ -145,7 +145,7 @@
     {
       "name": "youtube-research",
       "path": "skills/20-research/youtube-research/SKILL.md",
-      "contentHash": "5952a473ffd25028ca7a23ca405f8ff60aed63b9187562e8c1b6e9662208923e"
+      "contentHash": "2fc96614bc0fc7ea5eaca91977ba1de82b5a6f40d0bf36648aab12d433ae36ea"
     }
   ]
 }
