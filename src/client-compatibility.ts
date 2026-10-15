@@ -5,7 +5,7 @@ import {
   updateLocalConfig,
 } from './local-state.js';
 
-export const POSTPLUS_CLIENT_CONTRACT_VERSION = 4;
+export const POSTPLUS_CLIENT_CONTRACT_VERSION = 5;
 export const POSTPLUS_CLIENT_RUNTIME = 'postplus-cli';
 export const POSTPLUS_UPDATE_COMMAND = 'postplus update';
 export const POSTPLUS_UPDATE_INTRODUCTION_GUIDANCE = 'After a successful update, briefly explain the official release notes to the user in their language, including relevant account restrictions, then follow the returned session action and continue their original task. Do not repeat the full product introduction or invent changes when no release notes are returned.';
