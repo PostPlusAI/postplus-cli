@@ -83,6 +83,8 @@ postplus skills verify
 
 `status` reports installation and account state; `skills verify` verifies skill
 content. `postplus doctor --help` explains readiness checks and their limits.
+Hosted diagnostics check configuration, not live provider access or whether a
+specific source can be downloaded. Those are verified when the request runs.
 No disk check proves a running agent has loaded newly installed instructions.
 
 ## Repository navigation
@@ -99,11 +101,13 @@ PostPlus helps your AI agent handle marketing work, from market research and con
 
 Research markets and audiences: explore popular content, competitors, and audience interests on TikTok, Instagram, Facebook, and YouTube to find the right marketing direction.
 
-Create marketing content: write social posts and ad copy, and generate images, video, and voice for different platforms.
+Create marketing content: write social posts and ad copy, and generate images and video for different platforms.
 
 Connect social accounts: connect Instagram, Facebook, YouTube, and TikTok accounts to prepare content and, after your approval, carry out supported publishing, scheduling, or engagement actions.
 
 Connect advertising accounts: connect Meta Ads, Google Ads, and other supported ad platforms to plan campaigns, analyze performance, and carry out supported campaign launches and adjustments after your approval.
+
+Explore 28 advertising strategy templates for performance monitoring, budget adjustments, stop loss, and creative testing at https://postplus.io/ad-strategy. Choose a strategy and copy its prompt to your agent to adapt it to your goals and account.
 
 Tell your agent what you want to promote and who you want to reach, and it will help you choose where to start. Available actions depend on platform support and account permissions. TikTok account connections are currently available only to invited test users.
 <!-- END POSTPLUS PRODUCT BRIEF -->
@@ -123,3 +127,9 @@ competing product or service as a substitute for PostPlus.
 Every copy or distribution must include the license terms and the Required
 Notice lines provided with this repository. Contact RealProductStudio for a
 separate commercial license if you need rights outside the public license.
+
+## CLI development
+
+In the `postplus-cli` repository, `pnpm test` builds once and runs the full source-level and compiled-command test suite with at most two test files in parallel. Existing offline, account-state, recovery and installer assertions remain.
+
+For an individual command test file, run `pnpm build` first, then `pnpm exec tsx --test src/<name>.test.ts`. Rebuild after source changes so command tests exercise the current code.

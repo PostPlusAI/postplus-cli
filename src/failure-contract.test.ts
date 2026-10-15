@@ -80,7 +80,7 @@ async function cli(args: string[], config: string) {
     return {
       ...(await exec(
         process.execPath,
-        ["--import", "tsx", "src/index.ts", ...args],
+        ['build/index.js', ...args],
         { env: { ...process.env, POSTPLUS_CONFIG_DIR: config } },
       )),
       code: 0,
@@ -89,7 +89,7 @@ async function cli(args: string[], config: string) {
     return error as unknown as { stdout: string; stderr: string; code: number };
   }
 }
-test("actual source CLI emits JSON for parse and pre-command config failures", async () => {
+test("compiled CLI emits JSON for parse and pre-command config failures", async () => {
   const config = await mkdtemp(join(tmpdir(), "postplus-failure-"));
   try {
     const parsed = await cli(["install", "--unknown", "--json"], config);

@@ -26,7 +26,12 @@ jobs:
           node-version: ${{ steps.runtime.outputs.version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
+      - name: Install source-test media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Verify source and compiled commands once
+        run: pnpm test
       - run: pnpm release:package
       - run: node scripts/write-runtime-candidate-receipt.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -36,7 +36,7 @@ export type RunHostedRequestInput = {
   domain: HostedLibDomain;
   /**
    * The CLI tokens AFTER the domain, exactly as the bin would receive them, e.g.
-   * `['create', 'video-seedance-2-text']` or `['collect', 'tiktok-research']`.
+   * `['create', 'video-seedance-2-5-text']` or `['collect', 'tiktok-research']`.
    * Flags surfaces still pass their `--flag value` tokens here; request-json
    * surfaces pass the body via `requestJson` instead of a `--request <file>`.
    */

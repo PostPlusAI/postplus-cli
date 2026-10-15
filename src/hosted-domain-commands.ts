@@ -1899,6 +1899,7 @@ async function runResearchRun(
         request: () =>
           pollHostedRunUntilSettled({
             pollIntervalMs,
+            initialPollIntervalMs: flags.values.has('poll-interval-seconds') ? undefined : 2_000,
             pollOnce: async () => {
               const payload = await postHostedJson({
                 body: { routeKey: resumeRouteKey, runHandle },
@@ -2016,6 +2017,7 @@ async function runResearchRun(
         }
         return pollHostedRunUntilSettled({
           pollIntervalMs: wait.pollIntervalMs,
+          initialPollIntervalMs: flags.values.has('poll-interval-seconds') ? undefined : 2_000,
           pollOnce: () =>
             postHostedJson({
               body: { routeKey, runHandle: run.runHandle },

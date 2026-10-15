@@ -136,7 +136,7 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
         } } });
       };
     `);
-    const entry = path.resolve('src/index.ts');
+    const entry = path.resolve('build/index.js');
     // The wrong installation on PATH must never receive update or task replay.
     const wrongCliMarker = path.join(root, 'wrong-cli');
     await writeFixtureCommand(bin, 'postplus', process.execPath, ['-e',
@@ -168,7 +168,7 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
       NODE_OPTIONS: `--import=${JSON.stringify(mock)} --import=${JSON.stringify(updateMock)}` };
     const run = async (args: string[]) => {
       try {
-        const result = await exec(process.execPath, ['--import', 'tsx', '--import', mock, entry, ...args], { env });
+        const result = await exec(process.execPath, ['--import', mock, entry, ...args], { env });
         return { ...result, code: 0 };
       } catch (error) {
         const result = error as { stdout: string; stderr: string; code: number };

@@ -1,16 +1,11 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-10-07.1-ad-strategy",
+  "releaseId": "skills-2026-10-15.1",
   "skills": [
     {
       "name": "ads",
       "path": "skills/60-ads/ads/SKILL.md",
       "contentHash": "72ae9de380c87d682af980df7fed81cc99fba0a9c22a3408e956b8ed555e36ff"
-    },
-    {
-      "name": "audio-generation",
-      "path": "skills/10-routing/audio-generation/SKILL.md",
-      "contentHash": "264ba117ba758c51b13aeb801cde1b5ce518d3a18ec26e17a13f6a3b0b57cfc5"
     },
     {
       "name": "audio-transcription",
@@ -55,12 +50,12 @@
     {
       "name": "facebook-research",
       "path": "skills/20-research/facebook-research/SKILL.md",
-      "contentHash": "c45f616ff1be21ca05d193e2afa170ae819fa3954f662b059c88a243e4abea5f"
+      "contentHash": "851cf4651bd5543e2b3d95f83da6303aaf143ba8fbd2a6f1c13a7f1ab93c5431"
     },
     {
       "name": "google-trends-research",
       "path": "skills/20-research/google-trends-research/SKILL.md",
-      "contentHash": "96d55486ff5674742394229154411cd962b8ecfdec96b9ef4f28f02593d2d449"
+      "contentHash": "749e7063d231a01ed489d9f47c53f91692f9a37040022e9b878ff57b66fb5b01"
     },
     {
       "name": "image-batch-runner",
@@ -70,12 +65,12 @@
     {
       "name": "image-generation",
       "path": "skills/10-routing/image-generation/SKILL.md",
-      "contentHash": "11f686ffb9816bbeb0dc0fdf3b47bf818a70ae1f3e484427115a1ac712003bdc"
+      "contentHash": "e095ec0cb8c5a041ddc7b532a82d0f51d7f0e1b7db603225248064735b0ec73d"
     },
     {
       "name": "instagram-research",
       "path": "skills/20-research/instagram-research/SKILL.md",
-      "contentHash": "70682535384f0e671c0d1517110cd722157fa067692b970e34f14779a6b37259"
+      "contentHash": "239a3fafe0fe42232797a2b4e9e514b34483733555c9b6c5f443ff10bae12550"
     },
     {
       "name": "lifestyle-ad",
@@ -95,7 +90,7 @@
     {
       "name": "pinterest-search",
       "path": "skills/20-research/pinterest-search/SKILL.md",
-      "contentHash": "df53b743fd73248bf8f618ab070a0a6579be1662f5eb9e1792295143f06c1902"
+      "contentHash": "f24488e1189002bfa7cda7ec47fb11b467da73ea708c0d41b959dbe507c1bc8a"
     },
     {
       "name": "postplus-workspace",
@@ -105,7 +100,7 @@
     {
       "name": "reddit-search",
       "path": "skills/20-research/reddit-search/SKILL.md",
-      "contentHash": "e4ecfed6a420adddbba074c38c40a3a0b74264a17e88f79b8aaa4e2b76ee6ae2"
+      "contentHash": "7909987b77044273c2b406b572e4caa0b89b5da5d70e9bfba5a3d87ad7ceac0a"
     },
     {
       "name": "reference-decode",
@@ -125,7 +120,7 @@
     {
       "name": "tiktok-research",
       "path": "skills/20-research/tiktok-research/SKILL.md",
-      "contentHash": "260b0eca3a139001c7db44594058b4c162a6c30f00aa410aea1fe411135d5c0f"
+      "contentHash": "52cdb71dd94fa5e52e3393101105ef46fbbe44b963324d07b70c2329fac92f36"
     },
     {
       "name": "ugc-ad",
@@ -135,7 +130,7 @@
     {
       "name": "video-batch-runner",
       "path": "skills/40-creative/video-batch-runner/SKILL.md",
-      "contentHash": "c57b08b3210cb8c09b1e26af117316ffa7099772cea15e8f73fdb480aef54489"
+      "contentHash": "8ebd691093726caae8a3bed8550d44f26d703c908dacaec02b7d78daf92c573e"
     },
     {
       "name": "video-transcription",
@@ -143,19 +138,14 @@
       "contentHash": "4762064ba149c0a81df6f107e0cc54cd66ca76c3578d78c78223f453eafc8f9d"
     },
     {
-      "name": "voice-batch-runner",
-      "path": "skills/40-creative/voice-batch-runner/SKILL.md",
-      "contentHash": "7f57574fd92029917b481bf49801bd9f58187fb6daf9c78d6f773abd19eb6215"
-    },
-    {
       "name": "x-research",
       "path": "skills/20-research/x-research/SKILL.md",
-      "contentHash": "910cda98fbb4938c74b5d7c7794e5d495401cc75f8ec868a9dc5029b18e4a6e1"
+      "contentHash": "03931bdfe464a811c2b08fd3b27dc95a967941070b8928db0bb09f3e9f9500ff"
     },
     {
       "name": "youtube-research",
       "path": "skills/20-research/youtube-research/SKILL.md",
-      "contentHash": "8d73648c6bf077008e5eae04a97e8708850d1d1e416e407c4f6a4717e4718cd8"
+      "contentHash": "5952a473ffd25028ca7a23ca405f8ff60aed63b9187562e8c1b6e9662208923e"
     }
   ]
 }

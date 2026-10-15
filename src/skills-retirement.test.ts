@@ -12,7 +12,7 @@ const installer = fileURLToPath(new URL('../vendor/skills-runtime/cli.mjs', impo
 const tsx = import.meta.resolve('tsx');
 
 // Real child processes and installer, isolated from the user's HOME and network.
-const retired = ['social-media-extractor', 'generation-router', 'media-router', 'postplus-shared'];
+const retired = ['voice-batch-runner', 'social-media-extractor', 'generation-router', 'media-router', 'postplus-shared'];
 for (const scope of ['global', 'project'] as const) {
  for (const condition of ['trusted', 'modified', 'lock-only', 'missing-metadata'] as const) {
   test(`retirement: ${scope} ${condition}`, { timeout: 180_000 }, async (t) => {

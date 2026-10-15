@@ -1056,10 +1056,8 @@ globalThis.fetch=async(url,init)=>{
 };`;
   const args = [
     '--import',
-    'tsx',
-    '--import',
     `data:text/javascript,${encodeURIComponent(stub)}`,
-    'src/index.ts',
+    'build/index.js',
     'media-file',
     'upload',
     '--input-file',

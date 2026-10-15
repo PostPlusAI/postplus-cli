@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runAdLibraryCommand } from './ad-library.js';
 import { HostedProductRequestError } from './hosted-command-runtime.js';
 import { runWorkspaceCommand } from './workspace-commands.js';
 import { runChannelsCommand } from './channel-commands.js';
@@ -112,6 +113,7 @@ Usage:
   postplus workspace status|list|use <workspace-id> [--json]
   postplus channels list|show|connect|wait|disconnect ... [--json]
   postplus channels tools list|show|run ... [--json]
+  postplus ad-library search|formats|categories [--json]
   postplus balance [--json]
   postplus runs list [--status <status>] [--since <iso>] [--limit <n>] [--json]
   postplus runs show <run-id> [--json]
@@ -599,7 +601,7 @@ async function main(): Promise<void> {
     ? [...inputArgs.slice(1), '--help'] : inputArgs;
   const [command, ...rest] = args;
   // Help and bundled capability discovery do not inspect or mutate account state.
-  if (command && command !== 'list' && !args.some(isHelpArg)) await assertConfigFilePermissions();
+  if (command && command !== 'list' && command !== 'ad-library' && !args.some(isHelpArg)) await assertConfigFilePermissions();
   const json = rest.includes('--json');
 
   switch (command) {
@@ -643,6 +645,9 @@ async function main(): Promise<void> {
       return;
     case 'channels':
       process.exitCode = await runChannelsCommand(rest);
+      return;
+    case 'ad-library':
+      process.exitCode = await runAdLibraryCommand(rest);
       return;
     case 'balance':
       process.exitCode = await runBalanceCommand(rest);

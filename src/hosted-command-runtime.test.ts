@@ -97,3 +97,17 @@ test('channel provider diagnosis survives product error parsing without private 
   assert.match(new HostedProductRequestError(error).message, /providerHttpStatus=403/);
   assert.ok(!JSON.stringify(error).includes('private'));
 });
+
+test('short research polling observes completion inside a budget shorter than the regular interval', async () => {
+  const { pollHostedRunUntilSettled } = await import('./hosted-command-runtime.js');
+  let calls = 0;
+  const result = await pollHostedRunUntilSettled({
+    pollIntervalMs: 200,
+    initialPollIntervalMs: 1,
+    waitBudgetMs: 100,
+    pollOnce: async () => ({ status: ++calls === 1 ? 'processing' : 'completed' }),
+    readStatus: (value) => (value as { status: string }).status,
+  });
+  assert.deepEqual(result, { status: 'completed' });
+  assert.equal(calls, 2);
+});

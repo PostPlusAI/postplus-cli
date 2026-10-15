@@ -399,6 +399,7 @@ export function shellQuoteArg(value: string): string {
 // is an independent short HTTP read; nothing holds a connection open.
 export async function pollHostedRunUntilSettled(input: {
   pollIntervalMs: number;
+  initialPollIntervalMs?: number;
   pollOnce: (timeoutMs?: number) => Promise<unknown>;
   readStatus: (payload: unknown) => string | null;
   waitBudgetMs: number;
@@ -466,7 +467,13 @@ export async function pollHostedRunUntilSettled(input: {
     if (remainingMs <= 0) {
       return payload;
     }
-    await sleepMs(Math.min(input.pollIntervalMs, remainingMs));
+    // Short research tasks should not sit finished for a full media polling
+    // interval. After 30 seconds retain the normal cadence for long tasks.
+    const interval = input.initialPollIntervalMs !== undefined &&
+      performance.now() - startedAt < 30_000
+      ? Math.min(input.initialPollIntervalMs, input.pollIntervalMs)
+      : input.pollIntervalMs;
+    await sleepMs(Math.min(interval, remainingMs));
     if (
       input.retryTransientErrors &&
       performance.now() - startedAt >= input.waitBudgetMs

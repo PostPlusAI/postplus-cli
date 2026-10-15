@@ -1052,6 +1052,7 @@ describe('doctor and status', () => {
     it(`renders ${testCase.name} subscription status in doctor output`, async () => {
       await withMockedSubscriptionStatusCloud(testCase, async () => {
         const formatted = formatDoctorReport(await generateDoctorReport());
+        assert.match(formatted, /Live provider access and source availability are checked when a request runs/);
 
         assert.match(
           formatted,
@@ -1062,7 +1063,7 @@ describe('doctor and status', () => {
         assert.match(
           formatted,
           new RegExp(
-            `Hosted capabilities: Ready \\(0 capability checks passed; subscription ${testCase.expectedLabel}\\)`,
+            `Hosted capabilities: Configuration checks passed \\(0 capabilities; subscription ${testCase.expectedLabel}\\)`,
           ),
         );
       });
@@ -2520,9 +2521,7 @@ syncBuiltinESMExports();
         [
           '--import',
           pathToFileURL(preloadPath).href,
-          '--import',
-          'tsx',
-          'src/index.ts',
+          'build/index.js',
           'auth',
           'login',
           ...(options.args ?? []),
@@ -2569,9 +2568,7 @@ syncBuiltinESMExports();
 
   it('prints auth login help without starting browser sign-in', async () => {
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'auth',
       'login',
       '--help',
@@ -3732,7 +3729,7 @@ describe('update checks', () => {
     const errors: string[] = [];
     const result = await runPostPlusClientUpgradeRecovery(
       {
-        originalArgs: ['media', 'schema', '--json'],
+        originalArgs: ['media', 'create', 'voice-design', '--text', 'hello', '--voice-description', 'warm'],
         payload: {
           code: 'postplus_client_upgrade_required',
           compatibility: {
@@ -4390,9 +4387,7 @@ describe('skill management commands', () => {
     });
 
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'quote',
       'confirm',
       '--json',
@@ -5882,9 +5877,7 @@ describe('skill management commands', () => {
   it('recognizes postplus install as the managed setup entrypoint', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         'install',
         '--mystery-scope',
       ]),
@@ -5905,9 +5898,7 @@ describe('skill management commands', () => {
   it('fails fast on unknown update options', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         'update',
         '--mystery-scope',
       ]),
@@ -5928,9 +5919,7 @@ describe('skill management commands', () => {
   it('fails fast on unknown uninstall options', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         'uninstall',
         '--mystery-scope',
       ]),
@@ -5951,9 +5940,7 @@ describe('skill management commands', () => {
   it('fails fast on unknown skills verify options', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         'skills',
         'verify',
         '--bogus',
@@ -5974,15 +5961,11 @@ describe('skill management commands', () => {
 
   it('prints the installed CLI version', async () => {
     const { stdout: versionStdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'version',
     ]);
     const { stdout: flagStdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       '--version',
     ]);
 
@@ -5994,9 +5977,7 @@ describe('skill management commands', () => {
 describe('hosted domain commands', () => {
   it('documents the thin public hosted command contracts', async () => {
     const { stdout: topLevelHelp } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'help',
     ]);
     assert.match(
@@ -6013,9 +5994,7 @@ describe('hosted domain commands', () => {
     );
 
     const { stdout: researchHelp } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'research',
       'help',
     ]);
@@ -6027,7 +6006,7 @@ describe('hosted domain commands', () => {
     );
 
     const { stdout: mediaHelp } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', 'src/index.ts', 'media', 'help',
+      'build/index.js', 'media', 'help',
     ]);
     assert.match(mediaHelp, /postplus media schema/u);
     assert.match(mediaHelp, /--endpoint <endpoint-key>/u);
@@ -6062,9 +6041,7 @@ describe('hosted domain commands', () => {
     ];
     for (const invocation of invocations) {
       const { stdout } = await execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         ...invocation,
       ]);
       assert.match(stdout, /postplus media-file upload --input-file/u);
@@ -6074,9 +6051,7 @@ describe('hosted domain commands', () => {
 
   it('prints manifest-driven public hosted request schemas without requiring auth', async () => {
     const { stdout: researchStdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'research',
       'schema',
       '--route',
@@ -6115,13 +6090,11 @@ describe('hosted domain commands', () => {
     );
 
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'media',
       'schema',
       '--endpoint',
-      'video-seedance-2-text',
+      'video-seedance-2-5-text',
       '--json',
     ]);
     const report = JSON.parse(stdout) as Record<string, unknown>;
@@ -6133,7 +6106,7 @@ describe('hosted domain commands', () => {
       /postplus media <verb> <endpoint-key>/u,
     );
     assert.ok(
-      (report.endpointKeys as string[]).includes('video-seedance-2-text'),
+      (report.endpointKeys as string[]).includes('video-seedance-2-5-text'),
     );
 
     // endpointKey is a real enum projected from the manifest, not a bare string.
@@ -6146,7 +6119,7 @@ describe('hosted domain commands', () => {
     assert.ok(requestSchema);
     assert.ok(
       requestSchema.jsonSchema.properties.endpointKey.enum?.includes(
-        'video-seedance-2-text',
+        'video-seedance-2-5-text',
       ),
     );
     assert.ok(
@@ -6167,20 +6140,19 @@ describe('hosted domain commands', () => {
       }>;
     }>;
     assert.equal(endpoints.length, 1);
-    assert.equal(endpoints[0].endpointKey, 'video-seedance-2-text');
+    assert.equal(endpoints[0].endpointKey, 'video-seedance-2-5-text');
     const resolutionField = endpoints[0].fields.find(
       (field) => field.name === 'resolution',
     );
-    // The non-turbo seedance endpoints advertise the full resolution ladder,
-    // including 480p, as priced in the cost table.
-    assert.deepEqual(resolutionField?.enumValues, ['480p', '720p', '1080p']);
+    // Seedance 2.5 exposes only its supported output resolutions.
+    assert.deepEqual(resolutionField?.enumValues, ['480p', '720p']);
     assert.equal(resolutionField?.kind, 'default');
     assert.equal(resolutionField?.default, '720p');
     const durationField = endpoints[0].fields.find(
       (field) => field.name === 'duration',
     );
     assert.equal(durationField?.min, 4);
-    assert.equal(durationField?.max, 15);
+    assert.equal(durationField?.max, 30);
     const operationIdField = endpoints[0].fields.find(
       (field) => field.name === 'operationId',
     );
@@ -6190,9 +6162,7 @@ describe('hosted domain commands', () => {
 
   it('prints manifest-driven transcription media field contract without example payloads', async () => {
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'media',
       'schema',
       '--endpoint',
@@ -6235,7 +6205,7 @@ describe('hosted domain commands', () => {
   });
 
   it('synthesizes a copy-pasteable example per media endpoint (required ∪ prompt, enums at first value)', () => {
-    for (const endpointKey of ['transcription', 'video-seedance-2-text']) {
+    for (const endpointKey of ['transcription', 'video-seedance-2-5-text']) {
       const report = buildHostedRequestSchemaReport({
         domain: 'media',
         endpointKey,
@@ -6306,9 +6276,7 @@ describe('hosted domain commands', () => {
   it('rejects unknown hosted media schema endpoints', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         'media',
         'schema',
         '--endpoint',
@@ -6333,9 +6301,7 @@ describe('hosted domain commands', () => {
   it('rejects unknown hosted research schema routes', async () => {
     await assert.rejects(
       execFileAsync(process.execPath, [
-        '--import',
-        'tsx',
-        'src/index.ts',
+        'build/index.js',
         'research',
         'schema',
         '--route',
@@ -6359,9 +6325,7 @@ describe('hosted domain commands', () => {
 
   it('prints a per-endpoint flags-surface --help with the three-class field breakdown', async () => {
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'media',
       'transcribe',
       'transcription',
@@ -6392,28 +6356,26 @@ describe('hosted domain commands', () => {
     // seedance moved from request-json to the flags surface; the per-endpoint help
     // must still render the manifest enum sets, numeric ranges, and defaults.
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'media',
       'create',
-      'video-seedance-2-text',
+      'video-seedance-2-5-text',
       '--help',
     ]);
 
-    assert.match(stdout, /media create video-seedance-2-text/u);
+    assert.match(stdout, /media create video-seedance-2-5-text/u);
     assert.match(stdout, /Surface: flags/u);
     assert.match(
       stdout,
-      /--aspect-ratio {2}\[string; optional; one of \{21:9, 16:9, 4:3, 1:1, 3:4, 9:16\}\]/u,
+      /--aspect-ratio {2}\[string; optional; one of \{adaptive, 21:9, 16:9, 4:3, 1:1, 3:4, 9:16\}; default adaptive\]/u,
     );
     assert.match(
       stdout,
-      /--resolution {2}\[string; optional; one of \{480p, 720p, 1080p\}; default 720p\]/u,
+      /--resolution {2}\[string; optional; one of \{480p, 720p\}; default 720p\]/u,
     );
     assert.match(
       stdout,
-      /--duration {2}\[number; optional; range 4\.\.15; default 5\]/u,
+      /--duration {2}\[number; optional; range 4\.\.30 or \{-1\}; default 5\]/u,
     );
     assert.match(
       stdout,
@@ -6424,9 +6386,7 @@ describe('hosted domain commands', () => {
 
   it('prints per-target help for semantic research and normalized video analysis', async () => {
     const { stdout: researchHelp } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'research',
       'run',
       'tiktok-videos',
@@ -6441,9 +6401,7 @@ describe('hosted domain commands', () => {
     );
 
     const { stdout: analyzeHelp } = await execFileAsync(process.execPath, [
-      '--import',
-      'tsx',
-      'src/index.ts',
+      'build/index.js',
       'media',
       'analyze',
       'video-analysis',
@@ -7474,11 +7432,17 @@ describe('hosted domain commands', () => {
     }
   });
 
-  it('returns the latest still-processing payload once the poll wait budget is spent', async () => {
+  it('returns the latest still-processing payload once the poll wait budget is spent', async (t) => {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
+    let elapsedMs = 0;
+    t.mock.method(performance, 'now', () => elapsedMs);
     globalThis.fetch = async () => {
       fetchCalls += 1;
+      // Control the polling deadline without a 120ms wall-clock race against
+      // the request timeout on a busy CI runner. The second observed response
+      // spends the wait budget while remaining honestly pending.
+      elapsedMs = fetchCalls === 1 ? 10 : 30_001;
       return new Response(
         JSON.stringify({
           output: { data: { id: 'run_1', status: 'processing' } },
@@ -7495,9 +7459,9 @@ describe('hosted domain commands', () => {
           '--handle',
           'run_1',
           '--wait-seconds',
-          '0.12',
+          '30',
           '--poll-interval-seconds',
-          '0.05',
+          '0.001',
         ],
         {
           auth: {
@@ -7508,7 +7472,7 @@ describe('hosted domain commands', () => {
       )) as { output: { data: { status: string } } };
       // Bounded: it re-checked at least once, then surfaced the honest
       // still-processing payload instead of waiting forever.
-      assert.ok(fetchCalls >= 2);
+      assert.equal(fetchCalls, 2);
       assert.equal(payload.output.data.status, 'processing');
     } finally {
       globalThis.fetch = originalFetch;
@@ -7683,7 +7647,7 @@ describe('hosted domain commands', () => {
     try {
       const result = await runHostedDomainCommand('media', [
         'create',
-        'video-seedance-2-text',
+        'video-seedance-2-5-text',
         '--prompt',
         'a blue sticky note slides across a white desk',
         '--resolution',
@@ -7697,7 +7661,7 @@ describe('hosted domain commands', () => {
       const body = postedBody as Record<string, unknown>;
       assert.equal(body.capability, 'media-generation');
       assert.equal(body.operation, 'request');
-      assert.equal(body.endpointKey, 'video-seedance-2-text');
+      assert.equal(body.endpointKey, 'video-seedance-2-5-text');
       assert.match(
         String(body.operationId),
         /^postplus-cli:media:media-generation:request:/u,
@@ -7709,10 +7673,48 @@ describe('hosted domain commands', () => {
         duration: 5,
         aspect_ratio: '9:16',
         generate_audio: true,
+        output_format: 'mp4',
       });
       // Billing dimensions are derived solely at the Web boundary; the CLI sends
       // only the payload (with input defaults filled above), no requestDimensions.
       assert.equal(Object.hasOwn(body, 'requestDimensions'), false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('removes retired generation endpoints from discovery and rejects create/estimate before network access', async () => {
+    const retired = [
+      'voice-design', 'voice-clone', 'video-infinitetalk',
+      'video-kling-v2-6-pro-motion-control',
+      'video-kling-v3-0-pro-text', 'video-kling-v3-0-pro-image',
+      'video-kling-v3-0-std-text', 'video-kling-v3-0-std-image',
+      'video-seedance-2-text', 'video-seedance-2-image',
+      'video-seedance-2-fast-text', 'video-seedance-2-fast-image',
+      'video-seedance-2-mini-text', 'video-seedance-2-mini-image',
+    ];
+    const report = buildHostedRequestSchemaReport({ domain: 'media' });
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      throw new Error('Retired generation must not reach the network');
+    };
+    try {
+      for (const endpoint of retired) {
+        assert.equal(report.endpointKeys?.includes(endpoint), false, endpoint);
+        assert.throws(
+          () => buildHostedRequestSchemaReport({ domain: 'media', endpointKey: endpoint }),
+          /Unknown media endpoint/u,
+        );
+        for (const verb of ['create', 'estimate']) {
+          await assert.rejects(
+            runHostedDomainCommand('media', [verb, endpoint]),
+            /Unknown (?:create target|media estimate endpoint)/u,
+          );
+        }
+      }
+      assert.equal(fetchCalls, 0);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -7728,9 +7730,11 @@ describe('hosted domain commands', () => {
       'video-seedance-2-5-reference',
     ];
     const report = buildHostedRequestSchemaReport({ domain: 'media' });
-    for (const endpointKey of endpointKeys) {
-      assert.ok(report.endpointKeys?.includes(endpointKey));
-    }
+    assert.deepEqual(
+      report.endpointKeys?.filter(key => key.startsWith('video-')).sort(),
+      [...endpointKeys].sort(),
+    );
+    assert.equal(report.endpointKeys?.some(key => key.startsWith('voice-')), false);
 
     const selected = buildHostedRequestSchemaReport({
       domain: 'media',
@@ -7985,7 +7989,7 @@ describe('hosted domain commands', () => {
       // Agent supplies only the prompt — no resolution/duration.
       const result = await runHostedDomainCommand('media', [
         'create',
-        'video-seedance-2-text',
+        'video-seedance-2-5-text',
         '--prompt',
         'a blue sticky note slides across a white desk',
       ]);
@@ -7997,7 +8001,9 @@ describe('hosted domain commands', () => {
         prompt: 'a blue sticky note slides across a white desk',
         resolution: '720p',
         duration: 5,
+        aspect_ratio: 'adaptive',
         generate_audio: true,
+        output_format: 'mp4',
       });
       // ...and billing dimensions are derived solely at the Web boundary, so the
       // CLI body carries no requestDimensions.
@@ -8035,7 +8041,7 @@ describe('hosted domain commands', () => {
       assert.equal(
         await runHostedDomainCommand('media', [
           'create',
-          'video-seedance-2-text',
+          'video-seedance-2-5-text',
           '--prompt',
           'silent clip',
           '--generate-audio',
@@ -8049,7 +8055,7 @@ describe('hosted domain commands', () => {
       assert.equal(
         await runHostedDomainCommand('media', [
           'create',
-          'video-seedance-2-text',
+          'video-seedance-2-5-text',
           '--prompt',
           'audible clip',
           '--generate-audio',
@@ -8063,7 +8069,7 @@ describe('hosted domain commands', () => {
         () =>
           runHostedDomainCommand('media', [
             'create',
-            'video-seedance-2-text',
+            'video-seedance-2-5-text',
             '--prompt',
             'clip',
             '--generate-audio',
@@ -8098,7 +8104,7 @@ describe('hosted domain commands', () => {
           () =>
             runHostedDomainCommand('media', [
               'create',
-              'video-seedance-2-text',
+              'video-seedance-2-5-text',
               '--prompt',
               'a blue sticky note slides across a white desk',
               flag,
@@ -8135,13 +8141,13 @@ describe('hosted domain commands', () => {
         () =>
           runHostedDomainCommand('media', [
             'create',
-            'video-seedance-2-text',
+            'video-seedance-2-5-text',
             '--prompt',
             'a cinematic product reveal',
             '--resolution',
             '999p',
           ]),
-        /video-seedance-2-text resolution must be one of 480p, 720p, 1080p; received "999p"\./u,
+        /video-seedance-2-5-text resolution must be one of 480p, 720p; received "999p"\./u,
       );
       assert.equal(fetchCalls, 0);
     } finally {
@@ -8165,13 +8171,13 @@ describe('hosted domain commands', () => {
         () =>
           runHostedDomainCommand('media', [
             'create',
-            'video-seedance-2-text',
+            'video-seedance-2-5-text',
             '--prompt',
             'a cinematic product reveal',
             '--duration',
             '99',
           ]),
-        /video-seedance-2-text duration must be an integer from 4 to 15; received 99\./u,
+        /video-seedance-2-5-text duration must be an integer from 4 to 30 or one of -1; received 99\./u,
       );
       assert.equal(fetchCalls, 0);
     } finally {
@@ -8180,7 +8186,7 @@ describe('hosted domain commands', () => {
   });
 
   it('accepts a mixed-case seedance resolution (flags) by canonicalizing before the enum check (#475)', async () => {
-    // "720P" is not literally in the {480p,720p,1080p} enum but the manifest
+    // "720P" is not literally in the {480p,720p} enum but the manifest
     // canonicalize hint lowercases it, mirroring the Web boundary, so it must pass.
     await setLocalSession({
       accountId: 'account_1',
@@ -8205,7 +8211,7 @@ describe('hosted domain commands', () => {
     try {
       const result = await runHostedDomainCommand('media', [
         'create',
-        'video-seedance-2-text',
+        'video-seedance-2-5-text',
         '--prompt',
         'a cinematic product reveal',
         '--resolution',
@@ -8216,68 +8222,6 @@ describe('hosted domain commands', () => {
       // the outbound body); local validation only canonicalizes for the check.
       const body = postedBody as Record<string, unknown>;
       assert.equal((body.input as Record<string, unknown>).resolution, '720P');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('fast-fails an out-of-enum voice language and accepts the exact-cased one (flags) (#475)', async () => {
-    // voice `language` is NOT canonicalized (no hint) — it matches the provider's
-    // exact Title-cased enum, so "english" fails while "English" passes. This is the
-    // canonicalization-faithfulness guarantee in the other direction.
-    await setLocalSession({
-      accountId: 'account_1',
-      accountName: 'Account',
-      apiBaseUrl: 'https://postplus.test',
-      cliSessionToken: 'cli-session-token',
-      sessionExpiresAt: null,
-      userEmail: 'agent@example.com',
-      userId: 'user_1',
-    });
-
-    const originalFetch = globalThis.fetch;
-    let fetchCalls = 0;
-    let postedBody: unknown = null;
-    globalThis.fetch = async (input, init) => {
-      fetchCalls += 1;
-      postedBody = JSON.parse(String(init?.body));
-      return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    };
-
-    try {
-      await assert.rejects(
-        () =>
-          runHostedDomainCommand('media', [
-            'create',
-            'voice-design',
-            '--text',
-            'hello there',
-            '--voice-description',
-            'a warm narrator',
-            '--language',
-            'english',
-          ]),
-        /voice-design language must be one of .*English.*; received "english"\./u,
-      );
-      assert.equal(fetchCalls, 0);
-
-      const result = await runHostedDomainCommand('media', [
-        'create',
-        'voice-design',
-        '--text',
-        'hello there',
-        '--voice-description',
-        'a warm narrator',
-        '--language',
-        'English',
-      ]);
-      assert.equal(result, 0);
-      assert.equal(fetchCalls, 1);
-      const body = postedBody as Record<string, unknown>;
-      assert.equal((body.input as Record<string, unknown>).language, 'English');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -8728,10 +8672,8 @@ globalThis.fetch=async(url,init)=>{
 };`;
       const invocation = [
         '--import',
-        'tsx',
-        '--import',
         `data:text/javascript,${encodeURIComponent(stub)}`,
-        'src/index.ts',
+        'build/index.js',
       ];
       const env = {
         ...process.env,
@@ -9736,10 +9678,8 @@ globalThis.fetch=async(url,init)=>{
     await assert.rejects(
       execFileAsync(process.execPath, [
         '--import',
-        'tsx',
-        '--import',
         `data:text/javascript,${encodeURIComponent(stub)}`,
-        'src/index.ts',
+        'build/index.js',
         'media',
         'poll',
         '--handle',
@@ -9774,10 +9714,8 @@ globalThis.fetch=async(url,init)=>{
     await assert.rejects(
       execFileAsync(process.execPath, [
         '--import',
-        'tsx',
-        '--import',
         `data:text/javascript,${encodeURIComponent(stub)}`,
-        'src/index.ts',
+        'build/index.js',
         'media',
         'poll',
         '--handle',
@@ -9876,10 +9814,8 @@ globalThis.fetch=async(url,init)=>{
       await assert.rejects(
         execFileAsync(process.execPath, [
           '--import',
-          'tsx',
-          '--import',
           `data:text/javascript,${encodeURIComponent(stub)}`,
-          'src/index.ts',
+          'build/index.js',
           'media',
           'poll',
           '--resume-from',
@@ -11788,13 +11724,13 @@ globalThis.fetch=async(url,init)=>{
         () =>
           runHostedDomainCommand('media', [
             'create',
-            'voice-clone',
-            '--text',
+            'video-seedance-2-5-reference',
+            '--prompt',
             'hello',
-            '--audio',
+            '--reference-audio',
             imagePath,
           ]),
-        /--audio expects audio.*image\/png/u,
+        /--reference-audio expects audio.*image\/png/u,
       );
       assert.equal(fetchCalls, 0);
     } finally {
@@ -12296,7 +12232,7 @@ globalThis.fetch=async(url,init)=>{
             domain: 'media',
             args: [
               'create',
-              'video-seedance-2-text',
+              'video-seedance-2-5-text',
               '--prompt',
               'unsafe action',
               '--hosted-operation-id',
@@ -13243,7 +13179,7 @@ globalThis.fetch=async(url,init)=>{
         () =>
           runHostedDomainCommand('media', [
             'create',
-            'video-seedance-2-text',
+            'video-seedance-2-5-text',
             '--prompt',
             'demo',
             '--resolution',
@@ -13879,11 +13815,11 @@ describe('hosted lib / bin request parity', () => {
       ],
     },
     {
-      name: 'media create (flags surface) video-seedance-2-text',
+      name: 'media create (flags surface) video-seedance-2-5-text',
       domain: 'media',
       baseArgs: [
         'create',
-        'video-seedance-2-text',
+        'video-seedance-2-5-text',
         '--prompt',
         'a blue sticky note slides across a white desk',
         '--resolution',
@@ -14015,7 +13951,7 @@ describe('hosted lib / bin request parity', () => {
         domain: 'media',
         args: [
           'create',
-          'video-seedance-2-text',
+          'video-seedance-2-5-text',
           '--prompt',
           'parity payload',
           '--hosted-operation-id',
@@ -14047,7 +13983,7 @@ describe('hosted lib / bin request parity', () => {
     assert.ok(Array.isArray(endpoints) && endpoints.length > 0);
     const endpointKeys = endpoints.map((endpoint) => endpoint.endpointKey);
     assert.ok(endpointKeys.includes('image-higgsfield-soul-text'));
-    assert.ok(endpointKeys.includes('video-seedance-2-mini-text'));
+    assert.ok(endpointKeys.includes('video-seedance-2-5-reference'));
 
     // BIN-path parity: with no context the catalog goes to stdout and the call
     // returns the 0 exit code, exactly as the human CLI expects.
@@ -14093,7 +14029,7 @@ describe('hosted lib / bin request parity', () => {
             domain: 'media',
             args: [
               'create',
-              'video-seedance-2-text',
+              'video-seedance-2-5-text',
               '--prompt',
               'parity error',
               '--hosted-operation-id',
@@ -14421,13 +14357,13 @@ it('diagnostic help works offline and gives usable recovery help in text and JSO
   for (const command of ['doctor', 'status']) {
     for (const args of [[command, '--help'], [command, '-h'], ['help', command]]) {
       const { stdout, stderr } = await execFileAsync(process.execPath,
-        ['--import', 'tsx', 'src/index.ts', ...args],
+        ['build/index.js', ...args],
         { env: { ...process.env, NODE_USE_ENV_PROXY: '0', NODE_OPTIONS: '', https_proxy: 'unsupported://help-must-not-connect', HTTPS_PROXY: 'unsupported://must-not-connect' } });
       assert.match(stdout, new RegExp(`postplus ${command} \\[--skill`));
       assert.equal(stderr, '');
     }
     const { stdout } = await execFileAsync(process.execPath,
-      ['--import', 'tsx', 'src/index.ts', command, '--help', '--json']);
+      ['build/index.js', command, '--help', '--json']);
     assert.equal(JSON.parse(stdout).command, `postplus ${command}`);
   }
 });
@@ -14435,7 +14371,7 @@ it('diagnostic help works offline and gives usable recovery help in text and JSO
 describe('studio commands', () => {
   it('documents bundled public Local Studio in CLI help', async () => {
     const { stdout: mainHelp } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', 'src/index.ts', 'help',
+      'build/index.js', 'help',
     ]);
     assert.match(
       mainHelp,
@@ -14443,14 +14379,14 @@ describe('studio commands', () => {
     );
 
     const { stdout: studioHelp } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', 'src/index.ts', 'help', 'studio',
+      'build/index.js', 'help', 'studio',
     ]);
     assert.match(studioHelp, /public local workspace/);
     assert.match(studioHelp, /bundled local dashboard/);
     assert.doesNotMatch(studioHelp, /POSTPLUS_STUDIO_RUNTIME_ROOT/);
 
     const { stdout: openHelp } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', 'src/index.ts', 'studio', 'open', '--help',
+      'build/index.js', 'studio', 'open', '--help',
     ]);
     assert.equal(openHelp, studioHelp);
   });
@@ -14461,7 +14397,7 @@ describe('studio commands', () => {
     );
     tempDirs.push(studioWorkdir);
     const entrypointUrl = pathToFileURL(
-      resolve(process.cwd(), 'src/index.ts'),
+      resolve(process.cwd(), 'build/index.js'),
     ).href;
     const script = [
       "process.chdir('/');",
@@ -14471,7 +14407,7 @@ describe('studio commands', () => {
     ].join('\n');
 
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', '--input-type=module', '-e', script,
+      '--input-type=module', '-e', script,
     ]);
     const parsed = JSON.parse(stdout) as {
       pid?: number;
@@ -14508,7 +14444,7 @@ describe('studio commands', () => {
 
   it('prints Studio server help from the bundled runtime entrypoint', async () => {
     const { stdout } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', 'src/studio-server.ts', '--help',
+      'build/studio-server.js', '--help',
     ]);
     assert.match(stdout, /node build\/studio-server\.js --studio-root/);
   });

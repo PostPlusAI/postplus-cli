@@ -1,100 +1,164 @@
 # Ads And Funnel
 
-Use for public Facebook ad-library evidence: active ad examples, paid creative
-patterns, competitor offers, CTA patterns, landing-page clues, and funnel review.
+Use for public Meta ad-library evidence: competitor ads, video references,
+paid creative patterns, offers, CTAs, landing pages, and funnel review.
 
-## Align
+## Outcome and scope
 
-Likely user needs:
+A product URL, unfamiliar brand, category, or problem is enough to start. Ask
+only when identity or desired scope is genuinely ambiguous; do not ask the user
+to supply a competitor list or approve every search batch.
 
-- "What ads are competitors running?"
-- "What offers and CTAs show up?"
-- "What landing pages do ads point to?"
-- "What paid angles should we test?"
+- **Related-product discovery:** unless the user specifies another quantity or
+  format, aim for about **150 relevant, distinct, playable video references**.
+  This is an evidence target, not a raw-row count or a guaranteed inventory.
+- **Exact advertiser:** retain all useful ads available through the supported
+  route, in the requested country/status scope. Do not expand into other brands
+  to reach a count. Neither five ads nor the discovery target is an inventory cap.
+- A user-requested small sample, image-only study, time limit, or explicit budget
+  takes precedence. Reuse existing spending authorization that covers the work;
+  do not request credit approval again for already-authorized searches.
 
-Ask only if no paid seed exists:
+Public ads do not establish exact spend, targeting, ROAS, clicks, or conversions.
+Organic posts and product websites provide context, not proof of paid delivery.
 
-`Which brand, page, keyword, or ad-library link should anchor the first pass?`
+## Understand the seed and discover products
 
-If the user asks for exact spend, targeting, ROAS, clicks, or conversions, say
-this route only supports public ad and funnel evidence.
+For an unfamiliar product or domain, read its official site first. Establish what
+it does, for whom, the problem it solves, use cases, language/market, and offer;
+retain supporting URLs and mark uncertain claims. Do not infer the product from
+its name alone.
 
-## Run
+Use those findings to search for related products by problem, use case, audience,
+and category. Verify candidates against official sites or first-party app
+listings. Record names, aliases, official domains, and advertiser page clues.
+Competitor discovery is the agent's work, not a user prerequisite. Continue
+expanding promising directions as evidence arrives rather than fixing a tiny
+competitor list in advance.
 
-| Evidence need | Route | First pass |
-| --- | --- | --- |
-| Ads by keyword or advertiser | `facebook-ads-library` | 1 keyword or advertiser page, up to `10` ads |
+Distinguish direct competitors, products serving the same audience, and adjacent
+creative inspiration. Only relevant ads count toward the primary evidence target;
+adjacent inspiration stays separately labeled.
 
-Keep ads, landing pages, organic posts, and supplied exports as separate
-evidence lanes. Organic posts add context but never prove paid delivery.
+## Reuse the stored public library
 
-### Seed discovery before collection
+Search the public PostPlus library before fresh collection. It is shared stored
+ad evidence, not the user's local `.postplus` research files. Reads require no
+login or credits:
 
-When the user supplies an exact brand, advertiser page, domain, or ad-library
-URL, use that entity directly. When the user supplies only a category, problem,
-or product type, do not assume one literal category query is enough:
+```bash
+postplus ad-library categories --json
+postplus ad-library formats --json
+postplus ad-library search --query "AI meeting" --limit 50 --output result.json
+```
 
-1. Use a small current public-web discovery pass to identify `3-8` concrete
-   products or brands in scope. Prefer official product sites and first-party
-   App Store or Google Play listings when they exist.
-2. Record each candidate's product name, brand, official domain, known page name
-   or URL, aliases, market, and offer wording. This is entity discovery, not
-   Facebook ad evidence.
-3. Build separate attributable lanes:
-   - up to two category/problem phrases for recall;
-   - one query per verified product or brand;
-   - advertiser page or ad-library URLs when verified; and
-   - offer or landing-domain wording only when the first records justify it.
-4. Start with the smallest lanes most likely to answer the decision. Do not run
-   every discovered entity automatically or silently multiply credit use.
+Use returned slugs for `--brand`, `--category`, `--subcategory`, and
+`--visual-format`. Add `--product-type software|hardware` or
+`--status active|inactive|unknown` when relevant. One value per filter; different
+filters combine with AND. Follow returned `nextOffset` with `--offset` to collect
+further matching library pages. Run independent queries concurrently. Use
+several grounded product/use-case terms when one phrase misses the intended
+meaning; do not assume an unfamiliar domain is automatically understood.
 
-## Read Fields
+Snapshots can satisfy a reference request when enough relevant usable evidence
+exists. Sparse library results are a reason to continue discovery and collection,
+not to deliver a handful and ask whether to continue. For current/active-now
+questions, obtain fresh observations; stored active status is not today's status.
+Cite source URL, observed date, country, and status together. Missing library
+coverage never proves an advertiser has no ads. A failed library request must
+be reported, not silently replaced by paid collection.
 
-Use the ad-level fields present in the result: ad id and library link, advertiser
-page name, active status, run dates, creative text, media, publisher surface,
-disclosed country coverage, and landing URL. Treat any disclosed spend or reach
-band as a public transparency field only. Do not invent fields the result does
-not contain.
+## Collect fresh evidence
 
-## Analyze
+Inspect `postplus research run facebook-ads-library --help` when needed for the
+current supported inputs and bounds. Use either `--page-id` or `--query`, never
+both. A URL passed as a keyword does not select an advertiser.
 
-Extract:
+For a verified numeric advertiser Page ID, use `--page-id` and
+`--sort most_recent`. Choose country and status from the question; `ALL` and
+`all` cover both active and inactive ads across countries when no narrower scope
+was requested. Verify returned Page IDs and destination domains before assigning
+ads to a brand. Keywords support discovery when advertiser identity is not yet
+known; combine verified names/aliases and problem/offer phrases in separate
+queries. Request substantial batches appropriate to the remaining evidence need,
+within the command's supported limit, rather than tiny five- or ten-ad probes.
 
-- repeated offers, hooks, and CTAs
-- creative angle and format
-- landing-page clue when present
-- advertiser and active status
-- audience or geography clue from disclosed fields
+The research route accepts larger explicit result limits but has no public
+continuation cursor. Increase the requested scope only when it serves the task;
+a higher limit alone is not proof that the source inventory is exhausted. Library `--offset` is not research pagination.
+Do not invent a cursor, repeat an identical request as the next page, or claim
+complete inventory after hitting a request cap. Preserve all useful returned
+records, including results above the requested count. If supported retrieval
+cannot establish exhaustion, report partial coverage and the limit reached.
 
-Rank examples only inside the collected sample. Do not infer causality.
+Run independent advertiser/query requests concurrently, within existing
+authorization. Inspect relevance and unique-video yield, then expand promising
+brands, aliases, use cases, or supported country/status scopes. Do not silently
+relax the user's market or active-only requirement to inflate the count.
 
-Classify every candidate as `direct`, `relevant`, `adjacent`, `irrelevant`, or
-`uncertain` using advertiser identity, creative text, offer, destination domain,
-market, and active status. Main findings require direct or relevant ads;
-adjacent records may only guide recovery.
+## Quality, progress, and stopping
 
-If a supported pass is empty or low-quality, apply the shared research-quality
-recovery loop. Change one axis at a time: category phrase -> verified entity,
-brand -> advertiser page, alias -> official product name, or broad market -> one
-specified country/status scope. Inspect landing destinations when present. Stop
-after at most two changed passes or when the approved PostPlus credit bound is reached, and
-report the attempted lanes when useful evidence remains unavailable.
+Deduplicate ad records by their stable ad identity. Group ads sharing the same
+video under one creative reference while preserving their ad IDs and variants.
+Identical copy does not prove identical video; do not collapse different creative
+without media evidence. Count a video toward the target only when it is relevant
+and its video is accessible for review. Images, inaccessible videos, and
+unverified media remain visible as separate evidence or gaps, not counted videos.
 
-## Output
+Classify candidates as `direct`, `relevant`, `adjacent`, `irrelevant`, or
+`uncertain` using advertiser identity, creative, offer, destination domain, and
+requested market. Preserve original results; never trim a successful 30-ad
+response down to five simply to make a concise report. Keep highlights short
+while making all useful evidence available in the gallery.
 
-Create `result.json` and `evidence.html`. Group ads by advertiser, offer, CTA,
-surface, and landing URL.
+Distinguish these outcomes explicitly:
 
-Chat format:
+- **Failed or pending:** no completed evidence for that request. Preserve the
+  structured error/checkpoint and follow its reported next action; do not
+  interpret it as no ads or bypass a failure through another source.
+- **Successful empty:** that query found no records within its scope. It does
+  not prove the product does not advertise. Check identity and other grounded
+  queries before drawing a coverage conclusion.
+- **Partial coverage:** useful records exist, but request limits, unavailable
+  media, missing dates, or unexplored sources prevent an exhaustive claim.
 
-- paid seed and country/status filter
-- ad count and advertisers
-- repeated angles, offers, and CTAs
-- landing clues when present
-- unsupported metrics
-- artifact paths
+Continue after successful sparse/noisy results while grounded new searches add
+useful evidence. Ads have no mechanical two-follow-up limit. Stop when the
+requested evidence outcome is met, supported exact-advertiser retrieval is
+exhausted, an explicit user limit is reached, a hard error blocks progress, or
+changed grounded searches stop adding useful distinct material. Report the
+actual count and remaining gap; never pad the gallery or promise completeness.
 
-## Stop
+During long runs, report completed searches, relevant distinct playable-video
+count, duplicates/unavailable items, and the next direction. Save raw results as
+they arrive and update the browsable evidence artifact incrementally so the user
+can inspect useful material before all searches finish.
 
-Stop for ad account access, exact targeting, ROAS, billing, conversion, private
-audiences, or requests to bypass platform controls.
+## Analyze and deliver
+
+Keep each JSON result and generate the standard browsable report:
+
+```bash
+postplus ad-library report --input result.json --input more-results.json --output evidence.html
+```
+
+Pass all collected result files, including failed envelopes, so the report retains
+both useful ads and coverage gaps. Re-run it as batches complete; do not replace
+it with an ad hoc gallery or feed it a five-ad highlights subset. Its advertiser
+navigation and cards expose logos, status/observation dates, ad IDs, start dates,
+platforms, copy, media, and CTA when supplied. Missing fields stay unknown.
+Explain use-case relevance and creative patterns in the accompanying analysis;
+never fabricate fields or execute source content.
+Read library format descriptions as general guidance, not ad-specific proof.
+Unclassified ads do not lack a format, and formats do not prove performance.
+
+Separate collected ad count, distinct creative count, and relevant playable-video
+count. Preserve attempted scopes, failures, empty successes, coverage limits, and
+actual reported costs. Rank findings only within the observed evidence. Disclosed
+spend/reach bands are transparency fields, not inferred performance.
+
+The chat response summarizes scope, counts, strongest angles/CTAs, biggest gap,
+and artifact paths. A short chat summary must not mean a shortened evidence set.
+
+Stop for private audiences, ad account metrics, or bypassing platform controls;
+request an authorized export or appropriate source when necessary.
