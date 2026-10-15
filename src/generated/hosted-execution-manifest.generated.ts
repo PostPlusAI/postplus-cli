@@ -109,86 +109,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "surface": "flags",
       "verb": "run",
       "domain": "research",
-      "capability": "public-content-collection",
-      "effect": "spend",
-      "sources": [
-        {
-          "routeKey": "facebook-group-posts",
-          "fields": [
-            {
-              "name": "urls",
-              "class": "intent",
-              "flag": "--url",
-              "type": "string",
-              "required": true,
-              "description": "Public URL; repeat for more than one.",
-              "repeatable": true,
-              "format": "url"
-            },
-            {
-              "name": "limit",
-              "class": "default",
-              "flag": "--limit",
-              "type": "number",
-              "required": false,
-              "description": "Maximum result count.",
-              "default": 50,
-              "integer": true,
-              "min": 1,
-              "max": 200
-            }
-          ]
-        },
-        {
-          "routeKey": "facebook-post-by-url",
-          "fields": [
-            {
-              "name": "urls",
-              "class": "intent",
-              "flag": "--url",
-              "type": "string",
-              "required": true,
-              "description": "Public URL; repeat for more than one.",
-              "repeatable": true,
-              "format": "url"
-            }
-          ]
-        },
-        {
-          "routeKey": "facebook-profile-posts",
-          "fields": [
-            {
-              "name": "urls",
-              "class": "intent",
-              "flag": "--url",
-              "type": "string",
-              "required": true,
-              "description": "Public URL; repeat for more than one.",
-              "repeatable": true,
-              "format": "url"
-            },
-            {
-              "name": "limit",
-              "class": "default",
-              "flag": "--limit",
-              "type": "number",
-              "required": false,
-              "description": "Maximum result count.",
-              "default": 50,
-              "integer": true,
-              "min": 1,
-              "max": 200
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "skill": "facebook-research",
-      "mode": "cli-runner",
-      "surface": "flags",
-      "verb": "run",
-      "domain": "research",
       "capability": "hosted-collection",
       "effect": "spend",
       "collections": [
@@ -340,14 +260,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "integer": true,
               "min": 1,
               "max": 200
-            },
-            {
-              "name": "query",
-              "class": "intent",
-              "flag": "--query",
-              "type": "string",
-              "required": false,
-              "description": "Optional keyword within the group."
             }
           ]
         },
@@ -479,6 +391,118 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "integer": true,
               "min": 1,
               "max": 200
+            }
+          ]
+        },
+        {
+          "routeKey": "facebook-group-posts",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 50,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
+        },
+        {
+          "routeKey": "facebook-post-by-url",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            }
+          ]
+        },
+        {
+          "routeKey": "facebook-profile-posts",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 50,
+              "integer": true,
+              "min": 1,
+              "max": 200
+            }
+          ]
+        },
+        {
+          "routeKey": "web-search",
+          "fields": [
+            {
+              "name": "query",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
+              "required": true,
+              "description": "Public search phrase."
+            },
+            {
+              "name": "pages",
+              "class": "default",
+              "flag": "--pages",
+              "type": "number",
+              "required": false,
+              "description": "Maximum search pages (about ten links per page).",
+              "default": 1,
+              "integer": true,
+              "min": 1,
+              "max": 10
+            },
+            {
+              "name": "country",
+              "class": "default",
+              "flag": "--country",
+              "type": "string",
+              "required": false,
+              "description": "Two-letter search market code.",
+              "default": "us"
+            },
+            {
+              "name": "language",
+              "class": "default",
+              "flag": "--language",
+              "type": "string",
+              "required": false,
+              "description": "Search interface language code.",
+              "default": "en"
             }
           ]
         }
@@ -4142,44 +4166,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "surface": "flags",
       "verb": "run",
       "domain": "research",
-      "capability": "public-content-collection",
-      "effect": "spend",
-      "sources": [
-        {
-          "routeKey": "youtube-videos",
-          "fields": [
-            {
-              "name": "urls",
-              "class": "intent",
-              "flag": "--url",
-              "type": "string",
-              "required": true,
-              "description": "Public URL; repeat for more than one.",
-              "repeatable": true,
-              "format": "url"
-            },
-            {
-              "name": "limit",
-              "class": "default",
-              "flag": "--limit",
-              "type": "number",
-              "required": false,
-              "description": "Maximum result count.",
-              "default": 50,
-              "integer": true,
-              "min": 1,
-              "max": 200
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "skill": "youtube-research",
-      "mode": "cli-runner",
-      "surface": "flags",
-      "verb": "run",
-      "domain": "research",
       "capability": "hosted-collection",
       "effect": "spend",
       "collections": [
@@ -4285,6 +4271,33 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "720p",
                 "1080p"
               ]
+            }
+          ]
+        },
+        {
+          "routeKey": "youtube-videos",
+          "fields": [
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": true,
+              "description": "Public URL; repeat for more than one.",
+              "repeatable": true,
+              "format": "url"
+            },
+            {
+              "name": "limit",
+              "class": "default",
+              "flag": "--limit",
+              "type": "number",
+              "required": false,
+              "description": "Maximum result count.",
+              "default": 50,
+              "integer": true,
+              "min": 1,
+              "max": 200
             }
           ]
         }
