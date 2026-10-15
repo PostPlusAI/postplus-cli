@@ -21,7 +21,7 @@
     "highlights": [
       "Choose from six video generation modes using the same video skill.",
       "Use existing audio alongside image and video references where the selected mode supports it.",
-      "Standalone voice design and voice cloning are no longer available."
+      "Continue tracking and downloading your existing generation results."
     ]
   },
   "source": "PostPlusAI/postplus-skills",
