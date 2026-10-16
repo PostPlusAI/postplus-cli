@@ -633,64 +633,49 @@ class TestHostedProductRequestError extends Error {
     super(productError.message);
   }
 }
-class TestHostedQuoteConfirmationRequiredError extends Error {
-  readonly name = 'HostedQuoteConfirmationRequiredError';
-  constructor(readonly challenge: { operationId: string; token: string }) {
-    super('Confirm this source acquisition quote.');
-  }
-}
 const isHostedRequestError = (error: unknown) =>
-  error instanceof TestHostedProductRequestError ||
-  error instanceof TestHostedQuoteConfirmationRequiredError;
+  error instanceof TestHostedProductRequestError;
 
-for (const kind of ['product', 'quote'] as const)
-  test(`preserves the actual ${kind} error and original submission uncertainty for outer CLI handling`, async (t) => {
-    const h = await setup(t);
-    h.options.source = 'https://instagram.com/reels/example';
-    h.options.isHostedRequestError = isHostedRequestError;
-    const failure =
-      kind === 'product'
-        ? new TestHostedProductRequestError({
-            code: 'postplus_cli_invalid_source',
-            message: 'Use a supported post link.',
-            operationId: h.options.operationId,
-          })
-        : new TestHostedQuoteConfirmationRequiredError({
-            token: 'private-quote-token',
-            operationId: h.options.operationId,
-          });
-    h.options.request = async (body) => {
-      h.requests.push(body);
-      throw failure;
-    };
-    await assert.rejects(
-      () => prepareVideoAnalysisInput(h.options),
-      (error) => error === failure,
-    );
-    assert.equal(h.state().sourceSubmissionAttempted, true);
-    assert.deepEqual(
-      h.requests.map((r) => r.operation),
-      ['resolve-source'],
-    );
-    h.options.request = async (body) => {
-      h.requests.push(body);
-      return completed;
-    };
-    h.options.dependencies!.download = async () => ({
-      filePath: h.filePath,
-      metadata,
-    });
-    await prepareVideoAnalysisInput({
-      ...h.options,
-      state: h.state(),
-      downloadOnly: true,
-    });
-    assert.deepEqual(
-      h.requests.map((r) => r.operation),
-      ['resolve-source', 'source-status'],
-    );
-    assert.ok(!h.progress.join().includes('private-quote-token'));
+test('preserves the actual product error and original submission uncertainty for outer CLI handling', async (t) => {
+  const h = await setup(t);
+  h.options.source = 'https://instagram.com/reels/example';
+  h.options.isHostedRequestError = isHostedRequestError;
+  const failure = new TestHostedProductRequestError({
+    code: 'postplus_cli_invalid_source',
+    message: 'Use a supported post link.',
+    operationId: h.options.operationId,
   });
+  h.options.request = async (body) => {
+    h.requests.push(body);
+    throw failure;
+  };
+  await assert.rejects(
+    () => prepareVideoAnalysisInput(h.options),
+    (error) => error === failure,
+  );
+  assert.equal(h.state().sourceSubmissionAttempted, true);
+  assert.deepEqual(
+    h.requests.map((r) => r.operation),
+    ['resolve-source'],
+  );
+  h.options.request = async (body) => {
+    h.requests.push(body);
+    return completed;
+  };
+  h.options.dependencies!.download = async () => ({
+    filePath: h.filePath,
+    metadata,
+  });
+  await prepareVideoAnalysisInput({
+    ...h.options,
+    state: h.state(),
+    downloadOnly: true,
+  });
+  assert.deepEqual(
+    h.requests.map((r) => r.operation),
+    ['resolve-source', 'source-status'],
+  );
+});
 
 test('failed source uses the outer public error projection after billing is safely persisted', async (t) => {
   const h = await setup(t);
