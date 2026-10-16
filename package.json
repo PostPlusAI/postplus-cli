@@ -26,6 +26,8 @@
     "build/hosted-lib.d.ts",
     "build/generated/hosted-execution-manifest.generated.js",
     "build/generated/hosted-field-validation-core.generated.js",
+    "build/generated/hosted-image-source-core.js",
+    "build/generated/hosted-image-download-core.js",
     "build/hosted-field-validation.js",
     "build/hosted-manifest-index.js",
     "build/hosted-manifest-index.d.ts",
