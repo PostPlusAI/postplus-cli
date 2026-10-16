@@ -32,7 +32,6 @@ export type MediaRunCheckpoint = {
   };
   videoTransfer?: VideoTransferState;
   analysisSubmissionAttempted?: true;
-  analysisQuoteRequired?: true;
 };
 
 export type PreparedMediaCheckpoint = {
@@ -205,7 +204,6 @@ export async function readMediaRunCheckpoint(
           'videoRequest',
           'videoTransfer',
           'analysisSubmissionAttempted',
-          'analysisQuoteRequired',
         ].includes(key),
     )
   )
@@ -228,13 +226,6 @@ export async function readMediaRunCheckpoint(
     data.analysisSubmissionAttempted !== true
   )
     throw new Error('Invalid video submission checkpoint.');
-  if (
-    data.analysisQuoteRequired !== undefined &&
-    (data.analysisQuoteRequired !== true ||
-      data.analysisSubmissionAttempted !== true ||
-      !data.handle)
-  )
-    throw new Error('Invalid video quote checkpoint.');
   const owner = await currentMediaCheckpointOwner();
   if (
     owner.accountId !== data.accountId ||

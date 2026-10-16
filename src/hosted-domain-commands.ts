@@ -282,7 +282,6 @@ async function runMediaVerbFlags(args: {
     'hosted-operation-id',
     'json',
     'output',
-    'quote-confirmation-token',
     'skill',
     'wait',
     'wait-seconds',
@@ -351,7 +350,6 @@ async function runMediaVerbFlags(args: {
       flags.values.get('hosted-operation-id') ??
       `postplus-cli:media:${resolved.capability}:request:${randomUUID()}`,
     outputPath,
-    quoteConfirmationToken: flags.values.get('quote-confirmation-token'),
     skillName: flags.values.get('skill') ?? resolved.skill,
     context,
     wait: resolveHostedSubmitWaitOption(flags),
@@ -376,7 +374,6 @@ async function runMediaVerbRequestJson(args: {
     'hosted-operation-id',
     'json',
     'output',
-    'quote-confirmation-token',
     'request',
     'skill',
     'wait',
@@ -446,7 +443,6 @@ async function runMediaVerbRequestJson(args: {
       flags.values.get('hosted-operation-id') ??
       `postplus-cli:media:${resolved.capability}:request:${randomUUID()}`,
     outputPath,
-    quoteConfirmationToken: flags.values.get('quote-confirmation-token'),
     skillName: flags.values.get('skill') ?? resolved.skill,
     context,
     wait: resolveHostedSubmitWaitOption(flags),
@@ -493,7 +489,6 @@ async function runVideoAnalysisVerb(args: {
     'hosted-operation-id',
     'json',
     'output',
-    'quote-confirmation-token',
     'prompt',
     'skill',
     'wait-seconds',
@@ -558,8 +553,6 @@ async function runVideoAnalysisVerb(args: {
     operationId:
       flags.values.get('hosted-operation-id') ??
       `postplus-cli:media:video-analysis:analyze:${randomUUID()}`,
-    quoteConfirmationToken:
-      flags.values.get('quote-confirmation-token') ?? undefined,
   };
 
   return executeVideoAnalysis({
@@ -622,7 +615,7 @@ export async function runMediaFileCommand(
  * In-process capability envelope POST (hosted-lib path). A trusted host runtime
  * (eve-agent) posts a raw `/hosted/capability` body through the SAME transport
  * core the bin verbs use (`postHostedJson`: canonical headers, structured
- * HostedProductRequestError, quote-confirmation error thrown verbatim). This
+ * HostedProductRequestError thrown verbatim). This
  * entry is for a host that already holds session auth and builds the envelope.
  * Requires the injected context auth; there is intentionally no disk-config
  * fallback on this entry.
@@ -650,7 +643,6 @@ async function runMediaFileUpload(
     'json',
     'mime',
     'output',
-    'quote-confirmation-token',
     'skill',
   ]);
   for (const key of [...flags.values.keys(), ...flags.booleans]) {
@@ -683,8 +675,6 @@ async function runMediaFileUpload(
     operationId:
       hostedOperationId ??
       `postplus-cli:media-file:create-upload-url:${randomUUID()}`,
-    quoteConfirmationToken:
-      flags.values.get('quote-confirmation-token') ?? undefined,
   };
 
   return dispatchHostedCommand(
@@ -1085,7 +1075,6 @@ async function submitMediaGenerationRequest(params: {
   json: boolean;
   operationId: string;
   outputPath: string | null;
-  quoteConfirmationToken: string | undefined;
   skillName: string;
   context: HostedRequestContext | undefined;
   wait: { pollIntervalMs: number; waitBudgetMs: number } | null;
@@ -1099,7 +1088,6 @@ async function submitMediaGenerationRequest(params: {
     input: params.input,
     operation: 'request',
     operationId: params.operationId,
-    quoteConfirmationToken: params.quoteConfirmationToken ?? undefined,
   };
   const checkpoint = await prepareMediaRunCheckpoint(
     'media-generation',
@@ -1179,7 +1167,7 @@ async function submitMediaGenerationRequest(params: {
 // billing-idempotent: the Web boundary finds the run by handle and settlement
 // reuses the submit's operationId, so polling never re-reserves or re-charges.
 // The body carries only the status quadruple; submit-only fields (input,
-// requestDimensions, quoteConfirmationToken) are never sent. Mirrors the
+// requestDimensions) are never sent. Mirrors the
 // internal handle-based half of the research resume branch.
 //
 // Bounded wait: video/audio renders take minutes, and an agent caller has no
@@ -1582,7 +1570,7 @@ function findMediaGenerationEndpointTarget(
 // ledger: it builds the SAME canonical input the real submit builds (shared
 // buildMediaVerbInput / resolveRequestBody + assertModelledFieldValuesInRange),
 // then posts `{capability, endpointKey, input}` to the estimate boundary. The
-// dry-run flags --hosted-operation-id / --quote-confirmation-token are rejected —
+// dry-run flags --hosted-operation-id are rejected —
 // they belong only to a spend submit.
 async function runMediaEstimate(
   args: string[],
@@ -1671,7 +1659,7 @@ async function runMediaEstimate(
 
 // Flags-surface input for estimate: identical flag→field mapping to the submit
 // path (runMediaVerbFlags), reusing the shared buildMediaVerbInput. Rejects the
-// spend-only control flags (operation id / quote-confirmation token).
+// spend-only control flags (operation id).
 function buildEstimateFlagsInput(
   endpoint: ManifestEndpoint,
   endpointKey: string,
@@ -1954,7 +1942,6 @@ async function runResearchRun(
     'json',
     'output',
     'poll-interval-seconds',
-    'quote-confirmation-token',
     'skill',
     'wait',
     'wait-seconds',
@@ -1980,7 +1967,6 @@ async function runResearchRun(
   const operationId =
     flags.values.get('hosted-operation-id') ??
     `postplus-cli:research:run:${routeKey}:${randomUUID()}`;
-  const quoteConfirmationToken = flags.values.get('quote-confirmation-token');
   const wait = resolveHostedSubmitWaitOption(flags);
   let checkpointWritten = false;
 
@@ -1992,7 +1978,6 @@ async function runResearchRun(
             routeKey,
             input,
             operationId,
-            quoteConfirmationToken: quoteConfirmationToken ?? undefined,
           },
           pathName: '/api/postplus-cli/hosted/research',
           skillName,
@@ -2408,7 +2393,7 @@ function printMediaEndpointHelp(
                     takes precedence; omit this hint when duration is unknown.
   The command polls the same durable run until completion or timeout by default;
   --wait remains accepted for scripts written against the earlier preview.
-  Runner-managed (minted by the CLI; never in the body): operationId, quoteConfirmationToken
+  Runner-managed (minted by the CLI; never in the body): operationId
 
   Examples:
     postplus ${domain} ${verb} ${targetKey} --video ./reference.mp4 --json

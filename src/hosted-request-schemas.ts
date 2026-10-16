@@ -358,10 +358,6 @@ function buildMediaSchemaReport(
             input: JSON_OBJECT_SCHEMA,
             operation: { const: 'request' },
             operationId: OPERATION_ID_SCHEMA,
-            quoteConfirmationToken: {
-              minLength: 1,
-              type: 'string',
-            },
           },
           required: ['capability', 'operation', 'endpointKey', 'input'],
           type: 'object',
@@ -389,10 +385,6 @@ function buildMediaSchemaReport(
               },
               required: ['prompt', 'video'],
               type: 'object',
-            },
-            quoteConfirmationToken: {
-              minLength: 1,
-              type: 'string',
             },
           },
           required: ['capability', 'operation', 'modelKey', 'input'],
