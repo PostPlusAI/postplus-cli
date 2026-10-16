@@ -195,6 +195,7 @@ export async function resolveImageSequenceSource(
     headers?: Record<string, string>,
   ) => Promise<Response>,
   signal: AbortSignal,
+  directSourceKind: 'image' | 'video' = 'video',
 ) {
   const url = new URL(source);
   if (url.protocol !== 'https:' || url.username || url.password || url.port)
@@ -205,9 +206,25 @@ export async function resolveImageSequenceSource(
   const tiktok =
     /^(?:www\.)?tiktok\.com$/u.test(url.hostname) &&
     /^\/@[\w.-]+\/photo\/(\d+)\/?$/u.exec(url.pathname);
-  // The command delegates remote video acquisition to its shared video transfer.
-  if (!instagram && !tiktok)
+  // CLI media preparation delegates generic URLs to video acquisition. An
+  // explicitly image-only caller uses the same bounded signature validator as
+  // carousel images; URL suffixes and Content-Type are not proof of image bytes.
+  if (!instagram && !tiktok) {
+    if (
+      directSourceKind === 'image' &&
+      !/^(?:www\.)?(?:instagram|tiktok)\.com$/u.test(url.hostname)
+    )
+      return {
+        kind: 'ordered-images' as const,
+        sourceIdentifier: 'direct-image',
+        sequence: {
+          completenessBasis: 'declared-count' as const,
+          declaredCount: 1,
+          images: [{ index: 1, url: source, width: null, height: null }],
+        },
+      };
     return { kind: 'video-input' as const, useOriginalSource: true };
+  }
 
   let sequence: ImageSequence;
   let sourceIdentifier: string;
