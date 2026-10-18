@@ -12,9 +12,9 @@ const exec = promisify(execFile);
 // program without reloading the TypeScript toolchain on every invocation.
 const cli = resolve('build/index.js');
 
-const paths: string[][] = [[], ...['doctor', 'status', 'list', 'version', 'install', 'update', 'uninstall', 'auth', 'skills', 'balance', 'runs', 'studio', 'research', 'media', 'media-file'].map(x => [x]),
+const paths: string[][] = [[], ...['doctor', 'status', 'list', 'version', 'install', 'update', 'uninstall', 'auth', 'skills', 'quote', 'balance', 'runs', 'studio', 'research', 'media', 'media-file'].map(x => [x]),
   ...['login', 'refresh', 'revoke', 'status', 'validate', 'logout'].map(x => ['auth', x]),
-  ['skills', 'verify'], ['runs', 'list'], ['runs', 'show'],
+  ['skills', 'verify'], ['quote', 'confirm'], ['runs', 'list'], ['runs', 'show'],
   ...['init', 'open', 'status'].map(x => ['studio', x]),
   ...['research', 'media'].map(x => [x, 'schema']),
   ['research', 'run'], ['media', 'estimate'], ['media', 'poll'], ['media', 'prepare'],

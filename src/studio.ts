@@ -181,6 +181,7 @@ async function initializeStudio(workdir: string) {
     '.postplus/temp',
     '.postplus/runs',
     '.postplus/provider-responses',
+    '.postplus/quote-confirmations',
     '.postplus/logs',
   ]) {
     await mkdir(join(studioRoot, dir), { recursive: true });

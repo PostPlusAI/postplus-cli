@@ -29,6 +29,9 @@ export type PostPlusLocalConfig = {
   accountSlug?: string | null;
   accountType?: 'personal' | 'team' | null;
   cliSessionToken?: string;
+  largeCreditConfirmation?: {
+    acknowledgedTierMillicreditsByAccountId?: Record<string, number>;
+  };
   managedSkills?: {
     releaseId: string;
     skillNames: string[];

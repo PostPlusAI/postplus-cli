@@ -63,20 +63,20 @@ test('unrelated config change is preserved while a valid refresh succeeds', asyn
   const gate=holdRefresh();
   const refresh=refreshRemoteAuthSession();
   await gate.started;
-  await updateLocalConfig((current) => ({...current,managedSkills:{releaseId:'test',skillNames:['test-skill']}}));
+  await updateLocalConfig((current) => ({...current,largeCreditConfirmation:{acknowledgedTierMillicreditsByAccountId:{account:123}}}));
   gate.release();
   await refresh;
   const result=await readLocalConfig();
   assert.equal(result?.cliSessionToken,'refreshed-session');
-  assert.equal(result?.managedSkills?.skillNames[0],'test-skill');
+  assert.equal(result?.largeCreditConfirmation?.acknowledgedTierMillicreditsByAccountId?.account,123);
 });
 
 test('independent processes preserve every concurrent read-modify-write field', async () => {
   await Promise.all(Array.from({length:6},(_,index) => promisify(execFile)(process.execPath,['--import','tsx','--input-type=module','-e',`
     import {updateLocalConfig} from './src/local-state.ts';
-    await updateLocalConfig(current => ({...current,managedSkills:{releaseId:'test',skillNames:[...(current?.managedSkills?.skillNames ?? []),String(${index})]}}));
+    await updateLocalConfig(current => ({...current,largeCreditConfirmation:{acknowledgedTierMillicreditsByAccountId:{...current?.largeCreditConfirmation?.acknowledgedTierMillicreditsByAccountId, [${index}]:${index}}}}));
   `],{env:{...process.env,POSTPLUS_CONFIG_DIR:root}})));
-  assert.equal(((await readLocalConfig())?.managedSkills?.skillNames ?? []).length,6);
+  assert.equal(Object.keys((await readLocalConfig())?.largeCreditConfirmation?.acknowledgedTierMillicreditsByAccountId ?? {}).length,6);
 });
 
 test('a token resolved before logout cannot start a refresh against the cleared state', async () => {
@@ -113,9 +113,9 @@ test('a real dead config writer is reclaimed by competing writers without losing
   const oldOwner = (await readdir(join(root,'config.lock')))[0]!;
   await Promise.all(Array.from({length:6},(_,index) => promisify(execFile)(process.execPath,['--import','tsx','--input-type=module','-e',`
     import {updateLocalConfig} from './src/local-state.ts';
-    await updateLocalConfig(current => ({...current,managedSkills:{releaseId:'test',skillNames:[...(current?.managedSkills?.skillNames ?? []),String(${index})]}}));
+    await updateLocalConfig(current => ({...current,largeCreditConfirmation:{acknowledgedTierMillicreditsByAccountId:{...current?.largeCreditConfirmation?.acknowledgedTierMillicreditsByAccountId,[${index}]:${index}}}}));
   `],{env:{...process.env,POSTPLUS_CONFIG_DIR:root}})));
-  assert.equal(((await readLocalConfig())?.managedSkills?.skillNames ?? []).length,6);
+  assert.equal(Object.keys((await readLocalConfig())?.largeCreditConfirmation?.acknowledgedTierMillicreditsByAccountId ?? {}).length,6);
   assert.ok(oldOwner.startsWith('owner-'));
   await assert.rejects(readdir(join(root,'config.lock')), {code:'ENOENT'});
 });

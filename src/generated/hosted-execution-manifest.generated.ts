@@ -89,6 +89,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": null,
               "type": "string",
               "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
             }
           ]
         }
@@ -659,6 +666,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": null,
               "type": "string",
               "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
             }
           ]
         },
@@ -734,6 +748,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": null,
               "type": "string",
               "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
             }
           ]
         },
@@ -791,6 +812,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
               "class": "runner-managed",
               "flag": null,
               "type": "string",
@@ -865,6 +893,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": null,
               "type": "string",
               "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
             }
           ]
         },
@@ -919,6 +954,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
               "class": "runner-managed",
               "flag": null,
               "type": "string",
@@ -981,6 +1023,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": null,
               "type": "string",
               "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
             }
           ]
         },
@@ -1035,6 +1084,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
               "class": "runner-managed",
               "flag": null,
               "type": "string",
@@ -1104,6 +1160,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": null,
               "type": "string",
               "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
             }
           ]
         },
@@ -1165,6 +1228,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
               "class": "runner-managed",
               "flag": null,
               "type": "string",
@@ -1234,6 +1304,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": null,
               "type": "string",
               "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
             }
           ]
         },
@@ -1270,6 +1347,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
               "class": "runner-managed",
               "flag": null,
               "type": "string",
@@ -1323,6 +1407,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": null,
               "type": "string",
               "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
             }
           ]
         },
@@ -1368,6 +1459,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
               "class": "runner-managed",
               "flag": null,
               "type": "string",
@@ -1426,6 +1524,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
               "class": "runner-managed",
               "flag": null,
               "type": "string",
@@ -1490,6 +1595,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
               "class": "runner-managed",
               "flag": null,
               "type": "string",
@@ -2291,6 +2403,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": false
             },
             {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
               "name": "requestDimensions",
               "class": "runner-managed",
               "flag": null,
@@ -2378,6 +2497,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
               "class": "runner-managed",
               "flag": null,
               "type": "string",
@@ -2477,6 +2603,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": false
             },
             {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
               "name": "requestDimensions",
               "class": "runner-managed",
               "flag": null,
@@ -2558,6 +2691,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": false
             },
             {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
               "name": "requestDimensions",
               "class": "runner-managed",
               "flag": null,
@@ -2628,6 +2768,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
               "class": "runner-managed",
               "flag": null,
               "type": "string",
@@ -2757,6 +2904,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "required": false
             },
             {
+              "name": "quoteConfirmationToken",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
               "name": "requestDimensions",
               "class": "runner-managed",
               "flag": null,
@@ -2844,6 +2998,13 @@ export const HOSTED_EXECUTION_MANIFESTS = {
             },
             {
               "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "quoteConfirmationToken",
               "class": "runner-managed",
               "flag": null,
               "type": "string",

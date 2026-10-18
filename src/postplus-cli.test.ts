@@ -58,6 +58,7 @@ import {
   runBalanceCommand,
   runRunsCommand,
 } from './hosted-account-commands.js';
+import { HostedQuoteConfirmationRequiredError } from './hosted-command-runtime.js';
 import {
   runHostedDomainCommand,
   runMediaFileCommand,
@@ -74,6 +75,13 @@ import {
   writeManagedSkillBaseline,
   readManagedSkillBaseline,
 } from './local-state.js';
+import {
+  QuoteAutoConfirmCeilingExceededError,
+  QuoteConfirmationNonInteractiveError,
+  buildLargeCreditConfirmationPrompt,
+  readLargeCreditQuoteConfirmationChallenge,
+  resolveLargeCreditQuoteConfirmation,
+} from './quote-confirmation.js';
 import {
   POSTPLUS_SKILLS_AGENT_TARGETS,
   POSTPLUS_SKILLS_CATALOG_URL_ENV,
@@ -239,6 +247,31 @@ function createWhoamiResponse(): Response {
       headers: { 'content-type': 'application/json' },
     },
   );
+}
+
+function buildLargeCreditChallenge(input: {
+  requiredTierMillicredits: number;
+}) {
+  return {
+    accountId: 'account-1',
+    action: 'generate',
+    billingUnit: 'credit',
+    drivers: [
+      { key: 'duration', label: 'Duration', value: 10 },
+      { key: 'resolution', label: 'Resolution', value: '1080p' },
+    ],
+    estimatedCredits: 288,
+    estimatedMillicredits: 288_000,
+    estimatedOnly: true,
+    featureLabel: 'Video generation',
+    operationId: 'operation-1',
+    requiredTierCredits: input.requiredTierMillicredits / 1_000,
+    requiredTierMillicredits: input.requiredTierMillicredits,
+    reservedCredits: 432,
+    reservedMillicredits: 432_000,
+    serviceLabel: 'Media generation service',
+    token: `token-${input.requiredTierMillicredits}`,
+  };
 }
 
 function createMediaReadinessResponse(): Response {
@@ -4138,6 +4171,235 @@ describe('skill management commands', () => {
       'utf8',
     );
   }
+
+  it('confirms large credit quotes through CLI-owned local state', async () => {
+    let promptCount = 0;
+
+    const first = await resolveLargeCreditQuoteConfirmation(
+      buildLargeCreditChallenge({ requiredTierMillicredits: 100_000 }),
+      {
+        confirm: async () => {
+          promptCount += 1;
+        },
+        isTty: () => true,
+      },
+    );
+
+    assert.deepEqual(first, { schemaVersion: 1, token: 'token-100000' });
+    assert.equal(promptCount, 1);
+
+    const repeated = await resolveLargeCreditQuoteConfirmation(
+      buildLargeCreditChallenge({ requiredTierMillicredits: 100_000 }),
+      {
+        confirm: async () => {
+          promptCount += 1;
+        },
+        isTty: () => true,
+      },
+    );
+
+    assert.deepEqual(repeated, { schemaVersion: 1, token: 'token-100000' });
+    assert.equal(promptCount, 1);
+
+    const higher = await resolveLargeCreditQuoteConfirmation(
+      buildLargeCreditChallenge({ requiredTierMillicredits: 300_000 }),
+      {
+        confirm: async () => {
+          promptCount += 1;
+        },
+        isTty: () => true,
+      },
+    );
+
+    assert.deepEqual(higher, { schemaVersion: 1, token: 'token-300000' });
+    assert.equal(promptCount, 2);
+
+    const config = await readLocalConfig();
+    assert.equal(
+      config?.largeCreditConfirmation
+        ?.acknowledgedTierMillicreditsByAccountId?.['account-1'],
+      300_000,
+    );
+  });
+
+  it('auto-confirms under the ceiling without prompting and caches the tier', async () => {
+    let promptCount = 0;
+    const notices: string[] = [];
+
+    const report = await resolveLargeCreditQuoteConfirmation(
+      buildLargeCreditChallenge({ requiredTierMillicredits: 100_000 }),
+      {
+        confirm: async () => {
+          promptCount += 1;
+        },
+        ceilingMillicredits: 300_000,
+        isTty: () => false,
+        now: () => new Date('2026-06-02T00:00:00.000Z'),
+        logNotice: (line) => {
+          notices.push(line);
+        },
+      },
+    );
+
+    assert.deepEqual(report, { schemaVersion: 1, token: 'token-100000' });
+    assert.equal(promptCount, 0);
+    assert.equal(notices.length, 1);
+
+    const notice = JSON.parse(notices[0]);
+    assert.equal(notice.event, 'quote_auto_confirm');
+    assert.equal(notice.costCredits, 288);
+    assert.equal(notice.ceilingCredits, 300);
+
+    const config = await readLocalConfig();
+    assert.equal(
+      config?.largeCreditConfirmation
+        ?.acknowledgedTierMillicreditsByAccountId?.['account-1'],
+      100_000,
+    );
+  });
+
+  it('throws a distinct error when the cost exceeds the auto-confirm ceiling', async () => {
+    let promptCount = 0;
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 300_000,
+    });
+
+    await assert.rejects(
+      resolveLargeCreditQuoteConfirmation(challenge, {
+        confirm: async () => {
+          promptCount += 1;
+        },
+        ceilingMillicredits: 100_000,
+        isTty: () => false,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof QuoteAutoConfirmCeilingExceededError);
+        assert.equal(
+          error.code,
+          'postplus_cli_quote_auto_confirm_ceiling_exceeded',
+        );
+        assert.equal(error.costCredits, 288);
+        assert.equal(error.ceilingCredits, 100);
+        assert.deepEqual(error.challenge, challenge);
+        return true;
+      },
+    );
+
+    assert.equal(promptCount, 0);
+
+    const config = await readLocalConfig();
+    assert.equal(
+      config?.largeCreditConfirmation
+        ?.acknowledgedTierMillicreditsByAccountId?.['account-1'],
+      undefined,
+    );
+  });
+
+  it('fails fast without hanging when no ceiling is set and stdin is not a TTY', async () => {
+    let promptCount = 0;
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 100_000,
+    });
+
+    await assert.rejects(
+      resolveLargeCreditQuoteConfirmation(challenge, {
+        confirm: async () => {
+          promptCount += 1;
+        },
+        isTty: () => false,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof QuoteConfirmationNonInteractiveError);
+        assert.match(error.message, /--auto-confirm-under/u);
+        assert.deepEqual(error.challenge, challenge);
+        return true;
+      },
+    );
+
+    assert.equal(promptCount, 0);
+  });
+
+  it('still prompts interactively when a TTY is present and no ceiling is set', async () => {
+    let promptCount = 0;
+
+    const report = await resolveLargeCreditQuoteConfirmation(
+      buildLargeCreditChallenge({ requiredTierMillicredits: 100_000 }),
+      {
+        confirm: async () => {
+          promptCount += 1;
+        },
+        isTty: () => true,
+      },
+    );
+
+    assert.deepEqual(report, { schemaVersion: 1, token: 'token-100000' });
+    assert.equal(promptCount, 1);
+  });
+
+  it('formats large credit quote confirmation prompts with public labels', () => {
+    const prompt = buildLargeCreditConfirmationPrompt(
+      buildLargeCreditChallenge({ requiredTierMillicredits: 300_000 }),
+    );
+
+    assert.match(prompt, /PostPlus large credit warning/);
+    assert.match(prompt, /300-credit warning tier/);
+    assert.match(prompt, /Estimated charge: 288 credits/);
+    assert.match(prompt, /Reserved before execution: 432 credits/);
+    assert.match(prompt, /Capability: Video generation \/ generate/);
+    assert.match(prompt, /Service: Media generation service/);
+    assert.match(prompt, /Duration: 10/);
+    assert.match(prompt, /Resolution: 1080p/);
+  });
+
+  it('reads large credit quote confirmation challenges from product errors', () => {
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 100_000,
+    });
+
+    assert.deepEqual(
+      readLargeCreditQuoteConfirmationChallenge({
+        productErrorCode: 'postplus_cli_quote_confirmation_required',
+        quoteConfirmation: challenge,
+      }),
+      challenge,
+    );
+  });
+
+  it('exposes quote confirm as the skill delegation command', async () => {
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 100_000,
+    });
+
+    await writeLocalConfig({
+      largeCreditConfirmation: {
+        acknowledgedTierMillicreditsByAccountId: {
+          'account-1': 100_000,
+        },
+      },
+    });
+    const challengeFile = resolve(
+      process.env.POSTPLUS_CONFIG_DIR ?? tmpdir(),
+      'challenge.json',
+    );
+    await writeFile(challengeFile, JSON.stringify(challenge), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      'build/index.js',
+      'quote',
+      'confirm',
+      '--json',
+      '--challenge-file',
+      challengeFile,
+    ]);
+
+    assert.deepEqual(JSON.parse(stdout), {
+      schemaVersion: 1,
+      token: 'token-100000',
+    });
+  });
 
   it('builds update commands for released PostPlus skills only', () => {
     assert.deepEqual(POSTPLUS_SKILLS_AGENT_TARGETS, [
@@ -12582,7 +12844,380 @@ globalThis.fetch=async(url,init)=>{
     }
   }
 
+  for (const pauseAt of ['submit', 'poll'] as const) {
+    it(`public hosted-lib stops at async video quote on ${pauseAt} and confirms the same operation`, async () => {
+      const originalFetch = globalThis.fetch;
+      const challenge = buildLargeCreditChallenge({
+        requiredTierMillicredits: 100_000,
+      });
+      const paused = {
+        operationId: 'operation-1',
+        output: {
+          data: {
+            id: 'async-quote-run',
+            status: 'processing',
+            error: {
+              code: 'postplus_cli_quote_confirmation_required',
+              quoteConfirmation: challenge,
+            },
+          },
+        },
+      };
+      const bodies: Record<string, unknown>[] = [];
+      let confirmed = false;
+      globalThis.fetch = async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        bodies.push(body);
+        if (body.operation === 'analyze') {
+          assert.equal(body.operationId, 'operation-1');
+          assert.equal(body.input.video, 'https://example.com/video.mp4');
+          if (body.quoteConfirmationToken) {
+            assert.equal(body.quoteConfirmationToken, 'confirmed-token');
+            confirmed = true;
+            return Response.json({
+              output: {
+                data: {
+                  id: 'async-quote-run',
+                  status: 'completed',
+                  markdown: 'Confirmed.',
+                },
+              },
+            });
+          }
+          if (pauseAt === 'poll')
+            return Response.json({
+              output: { data: { id: 'async-quote-run', status: 'accepted' } },
+            });
+        }
+        assert.equal(confirmed, false);
+        return Response.json(paused);
+      };
+      const args = [
+        'analyze',
+        'video-analysis',
+        '--video',
+        'https://example.com/video.mp4',
+        '--hosted-operation-id',
+        'operation-1',
+      ];
+      const auth = {
+        apiBaseUrl: 'https://postplus.test',
+        cliSessionToken: 'cli-session-token',
+      };
+      try {
+        await assert.rejects(
+          runHostedRequest({ domain: 'media', args, auth }),
+          (error: unknown) => {
+            assert.ok(error instanceof HostedQuoteConfirmationRequiredError);
+            assert.deepEqual(
+              error.challenge,
+              readLargeCreditQuoteConfirmationChallenge(challenge),
+            );
+            assert.equal(
+              (error as Error & { handle: string }).handle,
+              'async-quote-run',
+            );
+            return true;
+          },
+        );
+        assert.deepEqual(
+          bodies.map((b) => b.operation),
+          pauseAt === 'submit' ? ['analyze'] : ['analyze', 'status'],
+        );
+        await runHostedRequest({
+          domain: 'media',
+          args: [...args, '--quote-confirmation-token', 'confirmed-token'],
+          auth,
+        });
+        assert.equal(confirmed, true);
+        assert.equal(bodies.filter((b) => b.operation === 'analyze').length, 2);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
 
+  it('async video quote retains the checkpoint and upload through failed and successful confirmation', async () => {
+    const fixture = await tinyVideoFixture();
+    const outputPath = resolve(fixture.filePath, '..', 'async-quote.md');
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 100_000,
+    });
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const originalFetch = globalThis.fetch;
+    const operations: string[] = [];
+    let confirms = 0;
+    let upgradeSeen = false;
+    const paused = {
+      operationId: 'operation-1',
+      output: {
+        data: {
+          id: 'async-quote-run',
+          status: 'processing',
+          error: {
+            code: 'postplus_cli_quote_confirmation_required',
+            quoteConfirmation: challenge,
+          },
+        },
+      },
+    };
+    globalThis.fetch = withGoogleVideoUpload(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      operations.push(body.operation);
+      if (body.operation === 'status') return Response.json(paused);
+      assert.equal(body.operationId, 'operation-1');
+      if (!body.quoteConfirmationToken)
+        return Response.json({
+          output: { data: { id: 'async-quote-run', status: 'accepted' } },
+        });
+      confirms++;
+      if (body.quoteConfirmationToken === 'bad-token')
+        return Response.json({ quoteConfirmation: challenge }, { status: 402 });
+      if (!upgradeSeen) {
+        upgradeSeen = true;
+        return Response.json({
+          code: 'postplus_client_upgrade_required',
+          compatibility: { upgrade: { cli: { required: true } } },
+        }, { status: 426 });
+      }
+      return Response.json({
+        output: {
+          data: {
+            id: 'async-quote-run',
+            status: 'completed',
+            markdown: 'Confirmed report.',
+          },
+        },
+      });
+    }, fixture);
+    const args = [
+      'analyze',
+      'video-analysis',
+      '--video',
+      fixture.filePath,
+      '--output',
+      outputPath,
+      '--hosted-operation-id',
+      'operation-1',
+    ];
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('media', args),
+        /Quote confirmation challenge/u,
+      );
+      const directory = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'media-runs');
+      const checkpointPath = resolve(directory, (await readdir(directory))[0]!);
+      const pausedCheckpoint = JSON.parse(
+        await readFile(checkpointPath, 'utf8'),
+      );
+      assert.equal(pausedCheckpoint.analysisSubmissionAttempted, true);
+      assert.equal(pausedCheckpoint.analysisQuoteRequired, true);
+      assert.equal(pausedCheckpoint.handle, 'async-quote-run');
+      assert.equal(pausedCheckpoint.videoTransfer.phase, 'uploaded');
+      assert.deepEqual(operations, ['analyze', 'status']);
+      await assert.rejects(
+        runHostedDomainCommand('media', [
+          ...args,
+          '--quote-confirmation-token',
+          'bad-token',
+        ]),
+        /Quote confirmation challenge/u,
+      );
+      assert.deepEqual(
+        JSON.parse(await readFile(checkpointPath, 'utf8')),
+        pausedCheckpoint,
+      );
+      let recoveryArgs: string[] | undefined;
+      await assert.rejects(
+        runHostedDomainCommand('media', [...args, '--quote-confirmation-token', 'confirmed-token']),
+        (error: unknown) => {
+          assert.ok(error instanceof PostPlusClientUpgradeRequiredError);
+          recoveryArgs = error.recoveryArgs;
+          assert.deepEqual(recoveryArgs, ['media', ...args, '--quote-confirmation-token', 'confirmed-token']);
+          return true;
+        },
+      );
+      assert.equal(await runHostedDomainCommand('media', recoveryArgs!.slice(1)), 0);
+      const completed = JSON.parse(await readFile(checkpointPath, 'utf8'));
+      assert.equal(completed.analysisSubmissionAttempted, true);
+      assert.equal(completed.handle, 'async-quote-run');
+      assert.equal(completed.analysisQuoteRequired, undefined);
+      assert.equal(confirms, 3);
+      assert.deepEqual(operations, ['analyze', 'status', 'analyze', 'analyze', 'analyze']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('video quote rejection preserves upload and allows one confirmed submission of the same operation', async () => {
+    const fixture = await tinyVideoFixture();
+    const outputPath = resolve(fixture.filePath, '..', 'quote-report.md');
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 100_000,
+    });
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const originalFetch = globalThis.fetch;
+    let analyzes = 0;
+    globalThis.fetch = withGoogleVideoUpload(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      assert.equal(
+        body.operation,
+        'analyze',
+        'a confirmed pre-admission rejection must submit, not poll a nonexistent run',
+      );
+      assert.equal(body.operationId, 'operation-1');
+      analyzes++;
+      if (analyzes === 1)
+        return Response.json(
+          {
+            error: 'Confirmation required.',
+            productErrorCode: 'postplus_cli_quote_confirmation_required',
+            quoteConfirmation: challenge,
+          },
+          { status: 402 },
+        );
+      assert.equal(body.quoteConfirmationToken, 'confirmed-token');
+      return Response.json({
+        output: {
+          data: {
+            id: 'quote-run',
+            status: 'completed',
+            markdown: 'Confirmed report.\n',
+          },
+        },
+      });
+    }, fixture);
+    const args = [
+      'analyze',
+      'video-analysis',
+      '--video',
+      fixture.filePath,
+      '--output',
+      outputPath,
+      '--hosted-operation-id',
+      'operation-1',
+    ];
+    try {
+      await assert.rejects(
+        runHostedDomainCommand('media', args),
+        /Quote confirmation challenge:/u,
+      );
+      const directory = resolve(process.env.POSTPLUS_CONFIG_DIR!, 'media-runs');
+      const checkpointPath = resolve(directory, (await readdir(directory))[0]!);
+      const rejected = JSON.parse(await readFile(checkpointPath, 'utf8'));
+      assert.equal(rejected.analysisSubmissionAttempted, undefined);
+      assert.equal(rejected.videoTransfer.phase, 'uploaded');
+      assert.equal(
+        await runHostedDomainCommand('media', [
+          ...args,
+          '--quote-confirmation-token',
+          'confirmed-token',
+        ]),
+        0,
+      );
+      assert.equal(
+        analyzes,
+        2,
+        'one rejected pre-admission POST and one accepted POST',
+      );
+      assert.equal(await readFile(outputPath, 'utf8'), 'Confirmed report.\n');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('writes quote confirmation challenges beside hosted command outputs', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-cli-hosted-'));
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'result.json');
+    const challenge = buildLargeCreditChallenge({
+      requiredTierMillicredits: 100_000,
+    });
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          error:
+            'This request may reserve 100 credits and requires confirmation.',
+          productErrorCode: 'postplus_cli_quote_confirmation_required',
+          quoteConfirmation: challenge,
+        }),
+        {
+          status: 402,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedDomainCommand('media', [
+            'create',
+            'video-seedance-2-5-text',
+            '--prompt',
+            'demo',
+            '--resolution',
+            '720p',
+            '--duration',
+            '5',
+            '--output',
+            outputPath,
+          ]),
+        (error) => {
+          assert.match(
+            String((error as Error).message),
+            /Quote confirmation challenge:/u,
+          );
+          assert.match(
+            String((error as Error).message),
+            /--quote-confirmation-token <token>/u,
+          );
+          // The rerun guidance must pin the challenged operation id: the token is
+          // server-signed against it, and the operationId flag otherwise defaults
+          // to a fresh randomUUID() that would no longer match the token.
+          assert.match(
+            String((error as Error).message),
+            /--hosted-operation-id operation-1 --quote-confirmation-token <token>/u,
+          );
+          return true;
+        },
+      );
+      assert.deepEqual(
+        JSON.parse(
+          await readFile(`${outputPath}.quote-confirmation.json`, 'utf8'),
+        ),
+        challenge,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe('account read-only commands', () => {
