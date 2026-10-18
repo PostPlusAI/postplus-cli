@@ -4,7 +4,7 @@ import { chmod, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { downloadArtifact, fetchRelease, selectNodeArtifact, validateRelease } from './distribution.mjs';
+import { downloadArtifact, fetchRelease, selectNodeArtifact, validateRelease, runtimeFailure } from './distribution.mjs';
 const bytes = Buffer.from('verified release artifact');
 const artifact = { url: 'https://releases.example.test/cli.tar.gz', directory: 'postplus-cli', sha256: createHash('sha256').update(bytes).digest('hex') };
 const release = { schemaVersion: 1, releaseId: '2026-09-29.1', cliVersion: '0.2.13', skillsReleaseId: 'skills-test', cli: artifact, node: { version: '24.21.0', artifacts: { 'darwin-arm64': artifact } } };
@@ -134,4 +134,14 @@ test('artifact write permission failures identify the write stage and preserve E
       return true;
     });
   } finally { await chmod(directory, 0o700); }
+});
+
+
+test('bootstrap failures do not require an already installed postplus command and preserve specific advice', () => {
+  const context = { component: 'node', operation: 'install', stage: 'artifact-checksum' };
+  const failure = runtimeFailure(new Error('checksum mismatch'), context);
+  assert.match(failure.action, /retry the same installation or update command/);
+  assert.doesNotMatch(failure.action, /run postplus update/);
+  assert.equal(runtimeFailure(Object.assign(new Error('certificate failure'), { action: 'Keep certificate verification enabled.' }), context).action,
+    'Keep certificate verification enabled.');
 });

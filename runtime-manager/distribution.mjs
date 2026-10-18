@@ -51,7 +51,7 @@ export function runtimeFailure(cause, context) {
   Object.assign(error, {
     code: typeof cause?.code === 'string' ? cause.code : 'postplus_runtime_operation_failed',
     service: cause?.service ?? cause?.details?.service ?? 'managed-runtime', retryable: cause?.retryable ?? cause?.details?.retryable ?? false,
-    action: cause?.action ?? cause?.details?.action ?? 'Resolve the reported runtime operation failure, then run postplus update.',
+    action: cause?.action ?? cause?.details?.action ?? 'Resolve the reported runtime operation failure, then retry the same installation or update command.',
     currentVersion: 'unknown', targetVersion: context.version ?? 'unknown',
     ...context,
   });
