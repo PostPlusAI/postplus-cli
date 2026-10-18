@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
+  CommandExecutionError,
   CommandInterruptedError,
   CommandTimeoutError,
   runCommand,
@@ -56,11 +57,10 @@ test('captured runner drains stderr and includes the failing exit code', async (
       '-e',
       `process.stderr.write('x'.repeat(128 * 1024) + '${tail}', () => process.exit(7))`,
     ]),
-    (error: Error) =>
-      error.message.startsWith('Command failed (7):') &&
-      error.message.endsWith(tail) &&
-      error.message.includes('[stderr truncated; last 65536 bytes]') &&
-      error.message.length < 66_000,
+    (error: unknown) => error instanceof CommandExecutionError &&
+      error.exitCode === 7 && error.stderr.endsWith(tail) &&
+      error.stderr.includes('[stderr truncated; last 65536 bytes]') &&
+      error.stderr.length < 66_000,
   );
 });
 
@@ -265,6 +265,29 @@ test('capture preserves timeout type and partial output', async () => {
   await assert.rejects(runInteractiveCommand(process.execPath, ['-e', "console.error('partial diagnostic');setInterval(()=>{},1000)"], {stdout:'capture',timeoutMs:300}), (error: unknown) => {
     assert.ok(error instanceof CommandTimeoutError);
     assert.match((error as CommandTimeoutError & {stderr:string}).stderr,/partial diagnostic/);
+    return true;
+  });
+});
+
+test('noninteractive failures retain bounded JSON stdout and typed command facts', async () => {
+  const payload = { ok: false, error: { service: 'network', retryable: false, code: 'runtime_failed', message: 'download failed', stage: 'artifact-request',
+    component: 'node', version: '24.21.0', operation: 'download-artifact', platform: 'darwin-arm64',
+    originalUrl: 'https://example.test/node?token=private', failureUrl: 'https://user:password@cdn.test/node?sig=private',
+    elapsedMs: 13, timeoutMs: 300000, httpStatus: 503,
+    action: 'Resolve the network error.', cause: [{name:'Error',code:'ENOTFOUND',message:'failed /Users/private-owner/file token=private'}] } };
+  await assert.rejects(runCommand(process.execPath, ['-e', `console.log(${JSON.stringify(JSON.stringify(payload))});process.exitCode=19`]), (error: unknown) => {
+    assert.ok(error instanceof CommandExecutionError);
+    assert.equal(error.exitCode, 19);
+    assert.equal(error.failure?.component, 'node');
+    assert.equal(error.failure?.httpStatus, 503);
+    assert.equal(error.failure?.failureUrl, 'https://cdn.test/node?[redacted]');
+    assert.doesNotMatch(JSON.stringify(error.failure), /password|private-owner|token=private|sig=private/);
+    return true;
+  });
+  await assert.rejects(runCommand(process.execPath, ['-e', "process.stdout.write('x'.repeat(100000));process.exitCode=17"]), (error: unknown) => {
+    assert.ok(error instanceof CommandExecutionError);
+    assert.ok(error.stdout.length < 66000);
+    assert.match(error.stdout, /output truncated/);
     return true;
   });
 });

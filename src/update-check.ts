@@ -1,6 +1,6 @@
 import { fetchManagedRelease, resolveManagedInvocation, updateManagedInstallation } from './managed-runtime.js';
 import { fileURLToPath } from 'node:url';
-import { PostPlusFailure, stopAutomaticRecovery, toFailureFact, type FailureFact } from './failure-contract.js';
+import { PostPlusFailure, formatFailure, readFailureOutput, sanitizeFailureText, stopAutomaticRecovery, toFailureFact, type FailureFact } from './failure-contract.js';
 import { diagnosticFetch } from './network-diagnostics.js';
 import { createHash } from 'node:crypto';
 import {
@@ -175,14 +175,8 @@ export async function runPostPlusClientUpgradeRecovery(
     });
   } catch (error) {
     if (!(error instanceof CommandExecutionError)) throw error;
-    let fact: FailureFact;
-    try {
-      const envelope = JSON.parse(error.stdout);
-      fact = envelope.error;
-      if (envelope.ok !== false || !fact ||
-          !['code', 'stage', 'service', 'message', 'action'].every((key) => typeof fact[key as keyof FailureFact] === 'string') ||
-          typeof fact.retryable !== 'boolean' || !Array.isArray(fact.cause)) throw new Error('Invalid failure envelope.');
-    } catch {
+    const fact = readFailureOutput(error.stdout);
+    if (!fact) {
       throw new PostPlusFailure('PostPlus update returned an invalid failure response.', {
         code: 'postplus_update_response_invalid', stage: 'compatibility-recovery', service: 'cli', retryable: false,
         action: 'Stop automatic recovery and report this response error; do not run another update or resubmit the task.',
@@ -345,7 +339,7 @@ export async function generateUpdateStatusReport(
     });
   } catch (error) {
     const warning =
-      error instanceof Error ? error.message : 'Update check failed.';
+      error instanceof Error ? sanitizeFailureText(error.message) : 'Update check failed.';
 
     if (matchingCache) {
       return {
@@ -645,6 +639,7 @@ export function formatUpdateStatusReport(report: UpdateStatusReport): string {
 
   if (report.warning) {
     lines.push(`  Warning: ${report.warning}`);
+    if (report.failure?.component) lines.push(formatFailure(report.failure));
   }
 
   return lines.join('\n');
@@ -692,11 +687,12 @@ async function fetchLatestCliVersion(
       ['view', '--global', `${NPM_PACKAGE_NAME}@latest`, 'version', '--json'],
       { env: environment, timeoutMs: 15_000 },
     ));
-  } catch {
-    // npm stderr can contain private registry URLs or credentials.
-    throw new Error(
-      'Failed to check latest PostPlus CLI version with npm. No installation was changed.',
-    );
+  } catch (cause) {
+    throw new PostPlusFailure('Failed to check latest PostPlus CLI version with npm. No installation was changed.', {
+      code: 'postplus_cli_failed', stage: 'update-check', service: 'npm',
+      component: 'cli', operation: 'npm-version-query', platform: `${process.platform}-${process.arch}`,
+      retryable: false, action: 'Resolve the npm query error, then run postplus update.',
+    }, { cause });
   }
   let payload: unknown;
   try {
@@ -741,10 +737,12 @@ async function readNpmRegistryIdentity(
     }
     // Never persist registry credentials or private URLs in the status cache.
     return createHash('sha256').update(registry).digest('hex');
-  } catch {
-    throw new Error(
-      'Failed to determine the npm registry for PostPlus update checks.',
-    );
+  } catch (cause) {
+    throw new PostPlusFailure('Failed to determine the npm registry for PostPlus update checks.', {
+      code: 'postplus_cli_failed', stage: 'update-check', service: 'npm',
+      component: 'cli', operation: 'npm-registry-query', platform: `${process.platform}-${process.arch}`,
+      retryable: false, action: 'Resolve the npm configuration error, then run postplus update.',
+    }, { cause });
   }
 }
 

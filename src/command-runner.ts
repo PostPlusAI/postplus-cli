@@ -1,4 +1,5 @@
 import crossSpawn from 'cross-spawn';
+import { readFailureOutput, type FailureFact } from './failure-contract.js';
 import {
   type ChildProcess,
   type SpawnOptions,
@@ -27,9 +28,11 @@ export type CommandResult = {
 
 export class CommandExecutionError extends Error {
   readonly code = 'postplus_command_failed';
+  readonly failure?: FailureFact;
   constructor(readonly command: string, readonly exitCode: number, readonly stdout: string, readonly stderr: string) {
     super(`Command ${command} failed with exit code ${exitCode}.`, { cause: new Error(stderr || stdout || `Exit code ${exitCode}.`) });
     this.name = 'CommandExecutionError';
+    this.failure = readFailureOutput(stdout);
   }
 }
 
@@ -133,7 +136,7 @@ export async function runCommand(
 ): Promise<CommandResult> {
   const tempDir = await mkdtemp(join(tmpdir(), 'postplus-cli-command-'));
   const stdoutPath = join(tempDir, 'stdout.txt');
-  const stdoutFile = await open(stdoutPath, 'w');
+  const stdoutFile = await open(stdoutPath, 'w+');
 
   try {
     const processGroup = process.platform !== 'win32';
@@ -156,7 +159,13 @@ export async function runCommand(
     const code = await waitForCommand(child, command, options.timeoutMs ?? 60_000, processGroup);
     const stderrText = `${truncated ? '[stderr truncated; last 65536 bytes]\n' : ''}${stderr.toString('utf8')}`;
     if (code !== 0) {
-      throw new Error(`Command failed (${code}): ${command} ${args.join(' ')}${stderrText ? `\n${stderrText}` : ''}`);
+      // Read only the bounded tail on failure; successful stdout can contain
+      // large command data and retains its existing file-backed behavior.
+      const size = (await stdoutFile.stat()).size;
+      const bytes = Buffer.alloc(Math.min(size, 65_536));
+      await stdoutFile.read(bytes, 0, bytes.length, Math.max(0, size - bytes.length));
+      throw new CommandExecutionError(command, code,
+        `${size > bytes.length ? '[output truncated; last 65536 bytes]\n' : ''}${bytes.toString('utf8')}`, stderrText);
     }
     const result = { stderr: stderrText };
 

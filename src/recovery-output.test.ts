@@ -8,7 +8,7 @@ import test from 'node:test';
 
 // Exercise real inherited file descriptors in a child process: intercepting
 // process.stdout.write cannot catch an installer's inherited stdout.
-async function recover(options: { updateExit?: number; restart?: boolean; malformed?: boolean; human?: boolean; newSession?: boolean; notes?: boolean } = {}) {
+async function recover(options: { updateExit?: number; restart?: boolean; malformed?: boolean; human?: boolean; newSession?: boolean; notes?: boolean; runtime?: boolean } = {}) {
   const source = `
     import { runPostPlusClientUpgradeRecovery } from './src/update-check.ts';
     import { runInteractiveCommand } from './src/command-runner.ts';
@@ -25,7 +25,7 @@ async function recover(options: { updateExit?: number; restart?: boolean; malfor
       runInteractiveCommand: async (command, args, options) => {
         args = args.slice(3);
         const script = args[0] === 'update'
-          ? ${JSON.stringify(`console.log(${JSON.stringify(options.malformed ? 'broken JSON' : JSON.stringify((options.updateExit ?? 0) === 0 ? {ok:true, ...(options.notes ? {releaseNotes:{title:'Marketing Channels', summary:'Plan and publish from one channel workspace.'}} : {}), session:{newSessionRequired:options.newSession === true,action:options.newSession ? 'Start a new agent session before using updated skills.' : null}} : {ok:false,error:{code:options.human?'postplus_requires_human':'postplus_cli_update_failed',stage:'npm-install',service:'npm',correlationId:'fixture-id',retryable:false,message:'Update stopped.',action:'Review the installation.',cause:[{name:'Error',code:'EACCES',message:'npm permission denied'}]}}))}); console.error('installer stderr'); process.exitCode = ${options.updateExit ?? 0};`)}
+          ? ${JSON.stringify(`console.log(${JSON.stringify(options.malformed ? 'broken JSON' : JSON.stringify((options.updateExit ?? 0) === 0 ? {ok:true, ...(options.notes ? {releaseNotes:{title:'Marketing Channels', summary:'Plan and publish from one channel workspace.'}} : {}), session:{newSessionRequired:options.newSession === true,action:options.newSession ? 'Start a new agent session before using updated skills.' : null}} : {ok:false,error:{code:options.human?'postplus_requires_human':'postplus_cli_update_failed',stage:'npm-install',service:'npm',correlationId:'fixture-id',retryable:false,message:'Update stopped.',action:'Review the installation.',...(options.runtime ? {component:'node',operation:'update',version:'24.21.0',currentVersion:'24.18.1',targetVersion:'24.21.0',failureStage:'artifact-request',platform:'darwin-arm64',originalUrl:'https://user:password@nodejs.org/dist/node.tar.gz?token=private',failureUrl:'https://cdn.test/node.tar.gz?signature=private',elapsedMs:125,timeoutMs:300000,httpStatus:503} : {}),cause:[{name:'Error',code:'EACCES',message:'npm permission denied'}]}}))}); console.error('installer stderr'); process.exitCode = ${options.updateExit ?? 0};`)}
           : 'process.stdout.write(JSON.stringify({ok:true,args:process.argv.slice(1)}));';
         return runInteractiveCommand(process.execPath, ['-e', script, '--', ...args], options);
       }
@@ -171,4 +171,24 @@ test('automatic update summary reaches the Agent on stderr without mixing into b
   assert.equal(JSON.parse(result.stdout).ok, true);
   assert.match(result.stderr, /^PostPlus updated: Marketing Channels\nPlan and publish from one channel workspace\.\n/);
   assert.match(result.stderr, /After a successful update, briefly explain the official release notes/);
+});
+
+
+test('automatic recovery preserves sanitized runtime diagnostics in one final JSON envelope', async () => {
+  const result = await recover({ updateExit: 23, runtime: true });
+  assert.equal(result.code, 1);
+  const fact = JSON.parse(result.stdout).error;
+  assert.equal(fact.component, 'node');
+  assert.equal(fact.operation, 'update');
+  assert.equal(fact.failureStage, 'artifact-request');
+  assert.equal(fact.currentVersion, '24.18.1');
+  assert.equal(fact.targetVersion, '24.21.0');
+  assert.equal(fact.httpStatus, 503);
+  assert.equal(fact.elapsedMs, 125);
+  assert.equal(fact.timeoutMs, 300000);
+  assert.equal(fact.originalUrl, 'https://nodejs.org/dist/node.tar.gz?[redacted]');
+  assert.equal(fact.failureUrl, 'https://cdn.test/node.tar.gz?[redacted]');
+  assert.equal(fact.recovery.exhausted, true);
+  assert.doesNotMatch(result.stdout + result.stderr, /user:password|token=private|signature=private/);
+  assert.equal(result.stderr, '');
 });

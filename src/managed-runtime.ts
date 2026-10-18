@@ -13,8 +13,8 @@ async function runtimeModule(name: string): Promise<any> {
   return import(new URL(`../runtime-manager/${name}.mjs`, import.meta.url).href);
 }
 
-export async function fetchManagedRelease(fetchFn: typeof fetch = diagnosticFetch): Promise<ManagedRelease> {
-  return (await runtimeModule('distribution')).fetchRelease(fetchFn);
+export async function fetchManagedRelease(fetchFn: typeof fetch = diagnosticFetch, operation = 'update-check'): Promise<ManagedRelease> {
+  return (await runtimeModule('distribution')).fetchRelease(fetchFn, undefined, { operation });
 }
 
 export async function resolveManagedInvocation(environment: NodeJS.ProcessEnv): Promise<{ executable: string; args: string[] }> {
@@ -40,12 +40,12 @@ export async function updateManagedInstallation(options: {
     throw new Error('The running CLI does not belong to this PostPlus installation. No installation was changed.');
   }
   const fetchFn = options.fetchFn ?? diagnosticFetch;
-  const release = await fetchManagedRelease(fetchFn);
+  const release = await fetchManagedRelease(fetchFn, 'update');
   const env: NodeJS.ProcessEnv = { ...options.environment, POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION: release.cliVersion };
   delete env.NODE_OPTIONS;
   delete env.NODE_PATH;
   const { installRelease } = await runtimeModule('installation');
-  return installRelease({ root, release, fetchFn,
+  return installRelease({ root, release, fetchFn, operation: 'update',
     run: async (executable: string, args: string[]) => (await runCommand(executable, args, { env, timeoutMs: 300_000 })).stdout,
     afterActivate: async (installed: Installed) => ({ latestVersion: release.cliVersion,
       exitCode: await (options.runInteractiveCommand ?? runInteractiveCommand)(join(installed.root, installed.installation.node),
