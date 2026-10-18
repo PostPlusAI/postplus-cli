@@ -47,5 +47,5 @@ download() {
 }
 platform=$(uname -s | tr '[:upper:]' '[:lower:]')
 arch=$(uname -m)
-download https://postplus.io/install.sh "$temp/install.sh" installer latest
+download https://postplus.io/install.sh "$temp/install.sh" installer unknown
 /bin/sh "$temp/install.sh" "$@"

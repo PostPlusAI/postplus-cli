@@ -54,7 +54,7 @@ function Download-Component($url, $file, $name, $version) {
   }
 }
   $arch = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
-  Download-Component https://postplus.io/install.ps1 $installer installer latest
+  Download-Component https://postplus.io/install.ps1 $installer installer unknown
   $arguments = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $installer)
   if ($CurrentDirectory) { $arguments += '-CurrentDirectory' }
   if ($ProgramOnly) { $arguments += '-ProgramOnly' }

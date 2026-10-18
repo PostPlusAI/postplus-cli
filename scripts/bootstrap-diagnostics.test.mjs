@@ -89,7 +89,7 @@ for (const entry of [false, true]) {
       assert.match(result.stderr, /current_version=unknown proxy_configured=false/);
       assert.match(result.stderr, /operation=install/);
       assert.match(result.stderr, new RegExp(`component=${entry ? 'installer' : 'node'} stage=download platform=linux arch=${entry ? 'x86_64' : 'x64'}`));
-      assert.match(result.stderr, new RegExp(`target_version=${entry ? 'latest' : '24.21.0'}`));
+      assert.match(result.stderr, new RegExp(`target_version=${entry ? 'unknown' : '24.21.0'}`));
       assert.match(result.stderr, new RegExp(`error_code=${code} http_status=${status === '000' ? 'unknown' : status} elapsed_seconds=140.250`));
       assert.match(result.stderr, /connect_timeout_seconds=20 total_timeout_seconds=300/);
       assert.match(result.stderr, /effective_url=https:\/\/cdn.invalid\/archive/);
@@ -178,7 +178,7 @@ for (const entry of [false, true]) {
         CURL_ERROR: `${message}: https://user:password@private.invalid?token=hidden Authorization: Bearer secret C:\\Users\\private` });
       assert.equal(result.status, 1, result.stdout + result.stderr);
       assert.match(result.stderr, new RegExp(`component=${entry ? 'installer' : 'node'} stage=download platform=win32`));
-      assert.match(result.stderr, new RegExp(`target_version=${entry ? 'latest' : '24.21.0'} current_version=unknown proxy_configured=false error_code=${code} http_status=${status === '000' ? 'unknown' : status} elapsed_seconds=140.250`));
+      assert.match(result.stderr, new RegExp(`target_version=${entry ? 'unknown' : '24.21.0'} current_version=unknown proxy_configured=false error_code=${code} http_status=${status === '000' ? 'unknown' : status} elapsed_seconds=140.250`));
       assert.match(result.stderr, /effective_url=https:\/\/cdn.invalid\/archive/);
       assert.ok(result.stderr.includes(`error_summary=${message}`));
       assert.match(result.stderr, /connect_timeout_seconds=20 total_timeout_seconds=300/);
