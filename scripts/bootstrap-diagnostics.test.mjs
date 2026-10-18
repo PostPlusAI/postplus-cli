@@ -150,6 +150,9 @@ test('Windows generated and entry scripts retain explicit bounded download diagn
 async function runWindows(f, entry, overrides) {
   const wrapper = join(f.root, 'windows-fixture.ps1');
   await writeFile(wrapper, `
+# Load utility commands before installing mocks; autoload must not replace the
+# Get-FileHash fixture while the generated script parses its release JSON.
+Import-Module Microsoft.PowerShell.Utility
 function global:curl.exe {
   $file = $args[[Array]::IndexOf($args, '-o') + 1]
   [IO.File]::WriteAllText($file, 'not an archive')
