@@ -40,7 +40,10 @@ export async function setup({ release, root = defaultInstallRoot(), command = 'i
           code: 'postplus_skills_setup_incomplete', stage: 'skills-installation', service: 'local', retryable: false,
           component: 'skills', operation: command, version: release.skillsReleaseId, targetVersion: release.skillsReleaseId,
           platform: `${process.platform}-${process.arch}`,
-          action: `Use the installed PostPlus command to finish ${command}; the program update was preserved.`,
+          action: cause?.failure?.action
+            ? `${cause.failure.action} The program update was preserved.`
+            : `Use the installed PostPlus command to finish ${command}; the program update was preserved.`,
+          ...(cause?.failure?.recovery ? { recovery: cause.failure.recovery } : {}),
         }, { cause });
       }
       const pathRegistration = await registerCommandPath(installed.root);

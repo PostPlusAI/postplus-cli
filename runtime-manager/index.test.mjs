@@ -59,7 +59,9 @@ test('skill setup wrapper forwards structured child diagnostics while preserving
   const node = await archive('node', { [process.platform === 'win32' ? 'node.exe' : 'bin/node']: null });
   const child = { ok: false, error: { code: 'postplus_cloud_transport_failed', stage: 'artifact-request', service: 'external-http',
     component: 'skills', operation: 'update', version: 'skills-fixture', platform: `${process.platform}-${process.arch}`,
-    currentVersion: 'skills-old', targetVersion: 'skills-fixture', retryable: true, action: 'Resolve the network failure.', message: 'Skill download failed.',
+    currentVersion: 'skills-old', targetVersion: 'skills-fixture', retryable: false,
+    recovery: { attempted: true, exhausted: true, nextActionAfterUserResolution: 'Continue the original task after resolving the network failure.' },
+    action: 'Stop automatic recovery. Resolve the network failure.', message: 'Skill download failed.',
     originalUrl: 'https://user:password@skills.test/catalog?token=private', failureUrl: 'https://cdn.test/catalog?sig=private',
     httpStatus: 503, elapsedMs: 31, timeoutMs: 300000,
     cause: [{ name: 'Error', code: 'ENOTFOUND', message: 'lookup failed /Users/private-owner/cache token=private' }] } };
@@ -77,6 +79,10 @@ test('skill setup wrapper forwards structured child diagnostics while preserving
     assert.equal(fact.code, 'postplus_skills_setup_incomplete');
     assert.equal(fact.stage, 'skills-installation');
     assert.equal(fact.failureStage, 'artifact-request');
+    assert.match(fact.action, /Stop automatic recovery\. Resolve the network failure\./);
+    assert.equal(fact.recovery.exhausted, true);
+    assert.equal(fact.recovery.nextActionAfterUserResolution, child.error.recovery.nextActionAfterUserResolution);
+    assert.match(formatFailure(fact), /Stop automatic recovery\. Resolve the network failure\./);
     assert.equal(fact.httpStatus, 503);
     assert.equal(fact.elapsedMs, 31);
     assert.equal(fact.timeoutMs, 300000);
@@ -94,6 +100,8 @@ test('skill setup wrapper forwards structured child diagnostics while preserving
     assert.equal(envelope.error.component, 'skills');
     assert.equal(envelope.error.version, 'skills-fixture');
     assert.equal(envelope.error.operation, 'update');
+    assert.match(envelope.error.action, /Resolve the network failure/);
+    assert.equal(envelope.error.recovery.exhausted, true);
     assert.equal(output.length, 1);
     return true;
   });
