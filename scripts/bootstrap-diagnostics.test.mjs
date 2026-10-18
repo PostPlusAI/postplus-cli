@@ -165,7 +165,8 @@ function global:Get-FileHash {
   if ($env:HASH_ERROR) { throw 'private path C:\\Users\\private Authorization: Bearer secret' }
   return @{ Hash = $env:HASH_VALUE }
 }
-. $env:BOOTSTRAP_SCRIPT -ProgramOnly
+& $env:BOOTSTRAP_SCRIPT -ProgramOnly
+exit $LASTEXITCODE
 `);
   return spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', wrapper], {
     env: { ...process.env, POSTPLUS_INSTALL_ROOT: join(f.root, 'install'),
