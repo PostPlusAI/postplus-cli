@@ -114,7 +114,7 @@
     "vendor:skills:build": "node scripts/build-skills-runtime.mjs",
     "vendor:skills:check": "node scripts/check-skills-runtime.mjs",
     "vendor:skills:test": "node --test scripts/vendor-skills-runtime.test.mjs",
-    "test:runtime": "node --test --test-timeout=120000 runtime-manager/*.test.mjs",
+    "test:runtime": "node --test --test-timeout=120000 runtime-manager/*.test.mjs scripts/bootstrap-diagnostics.test.mjs",
     "test:runtime:acceptance": "node --test scripts/managed-runtime-acceptance.test.mjs"
   },
   "dependencies": {

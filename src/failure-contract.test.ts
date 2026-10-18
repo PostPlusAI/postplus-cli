@@ -175,3 +175,33 @@ test('diagnostics redact complete cookies and password values', () => {
   const fact = toFailureFact(new Error('password=hunter2\nCookie: session=abc; other=secretvalue'));
   assert.doesNotMatch(JSON.stringify(fact), /hunter2|secretvalue|session=abc/);
 });
+
+test('runtime facts preserve inherited error codes and share sanitized machine and human evidence', () => {
+  class InheritedCode extends Error { get code() { return 'ENOTFOUND'; } }
+  const original = new InheritedCode('lookup failed at /Users/private-person/cache token=private');
+  const error = Object.assign(original, { component: 'node', operation: 'download-artifact', stage: 'artifact-request',
+    version: '24.21.0', platform: 'darwin-arm64', originalUrl: 'https://user:password@nodejs.org/dist/node.tar.gz?token=private#private',
+    failureUrl: 'https://cdn.test/node.tar.gz?sig=private', httpStatus: 503, elapsedMs: 125, timeoutMs: 300000 });
+  const fact = toFailureFact(error);
+  assert.equal(fact.code, 'ENOTFOUND');
+  assert.equal(fact.originalUrl, 'https://nodejs.org/dist/node.tar.gz?[redacted]');
+  assert.equal(fact.failureUrl, 'https://cdn.test/node.tar.gz?[redacted]');
+  const human = formatFailure(fact);
+  for (const value of ['node', 'download-artifact', 'artifact-request', '24.21.0', 'darwin-arm64', '503', '125', '300000', 'ENOTFOUND', fact.originalUrl!, fact.failureUrl!]) assert.ok(human.includes(value));
+  assert.doesNotMatch(JSON.stringify(fact) + human, /private-person|token=private|sig=private|user:password/);
+});
+
+
+test('child failure envelopes fail closed when required fields are missing or malformed', async () => {
+  const { readFailureOutput } = await import('./failure-contract.js');
+  const error = { code: 'failed', stage: 'artifact-request', service: 'network', message: 'download failed',
+    action: 'Resolve the failure.', retryable: false, cause: [] };
+  assert.ok(readFailureOutput(JSON.stringify({ok:false,error})));
+  for (const key of ['stage', 'service', 'action', 'retryable', 'cause']) {
+    const missing: Record<string, unknown> = {...error};
+    delete missing[key];
+    assert.equal(readFailureOutput(JSON.stringify({ok:false,error:missing})), undefined, key);
+  }
+  assert.equal(readFailureOutput(JSON.stringify({ok:false,error:{...error,cause:'unexpected'}})), undefined);
+  assert.equal(readFailureOutput(JSON.stringify({ok:false,error:{...error,retryable:'true'}})), undefined);
+});

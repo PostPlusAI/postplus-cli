@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
+import { formatFailure, toFailureFact } from './failure-contract.js';
+import { PostPlusNetworkRequestError } from './network-diagnostics.js';
 import { fetchManagedRelease, resolveManagedInvocation } from './managed-runtime.js';
 
 const release = {
@@ -44,4 +46,22 @@ test('retry resolves the newly active private Node and CLI, never the original p
   assert.equal(await readFile(before.executable, 'utf8'), 'fixture', 'old running process retains its immutable files');
   await writeFile(join(root, 'active'), 'broken');
   await assert.rejects(resolveManagedInvocation({ POSTPLUS_INSTALL_ROOT: root }), /Invalid PostPlus installation record/);
+});
+
+
+test('managed release failures retain update context and original transport causes', async () => {
+  const original = Object.assign(new Error('DNS lookup failed'), { code: 'ENOTFOUND' });
+  const network = new PostPlusNetworkRequestError({ cause: original, method: 'GET', targetUrl: 'https://postplus.io/postplus-runtime.json' });
+  await assert.rejects(fetchManagedRelease(async () => { throw network; }, 'update'), (error: unknown) => {
+    const fact = toFailureFact(error);
+    assert.equal(fact.code, 'postplus_cli_cloud_transport_failed');
+    assert.equal(fact.stage, 'release-request');
+    assert.equal(fact.component, 'release-metadata');
+    assert.equal(fact.operation, 'update');
+    assert.equal(fact.currentVersion, 'unknown');
+    assert.equal(fact.targetVersion, 'unknown');
+    assert.ok(fact.cause.some(item => item.code === 'ENOTFOUND'));
+    assert.match(formatFailure(fact), /ENOTFOUND/);
+    return true;
+  });
 });

@@ -8,6 +8,17 @@ export type FailureFact = {
   message: string;
   action: string;
   cause: { name: string; code: string | null; message: string }[];
+  failureStage?: string;
+  currentVersion?: string;
+  targetVersion?: string;
+  component?: string;
+  operation?: string;
+  version?: string;
+  platform?: string;
+  originalUrl?: string;
+  failureUrl?: string;
+  elapsedMs?: number;
+  timeoutMs?: number;
   targetHost?: string;
   method?: string;
   httpStatus?: number;
@@ -43,6 +54,8 @@ export function sanitizeFailureText(value: string): string {
       /((?:authorization|cookie|password|passwd|credential|secret|signature|token|api[_-]?key)[\w-]*["']?\s*[:=]\s*["']?)[^\s,"';}]+/giu,
       "$1[redacted]",
     )
+    .replace(/(?:file:\/\/)?\/(?:Users|home|root|private|tmp|var|Volumes)\/[^\r\n"'<>;,)}]+/gu, "[redacted-path]")
+    .replace(/[A-Za-z]:[\\/][^\r\n"'<>;,)}]+/gu, "[redacted-path]")
     .replace(/[\r\n]+/gu, " ")
     .slice(0, 8_192);
 }
@@ -56,12 +69,48 @@ function string(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
 }
 
+function safeUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol)) return '[redacted-url]';
+    return `${url.protocol}//${url.host}${sanitizeFailureText(url.pathname)}${url.search ? '?[redacted]' : ''}`;
+  } catch { return '[redacted-url]'; }
+}
+
+/** A child report is untrusted input; project only failure-contract fields. */
+export function readFailureOutput(stdout: string): FailureFact | undefined {
+  try {
+    const report = record(JSON.parse(stdout));
+    const error = record(report.error);
+    if (report.ok !== false || !['code', 'stage', 'service', 'message', 'action'].every(key => typeof error[key] === 'string') ||
+        typeof error.retryable !== 'boolean' || !Array.isArray(error.cause)) return undefined;
+    return toFailureFact(Object.assign(new Error(String(error.message)), error));
+  } catch { return undefined; }
+}
+
 export function toFailureFact(
   error: unknown,
   context: { stage?: string; service?: string; helpCommand?: string } = {},
 ): FailureFact {
+  // Operation evidence can cross a command/installation wrapper, while that
+  // wrapper retains ownership of its public error code and next action.
+  const inherited: Record<string, unknown> = {};
+  const traversed = new Set<unknown>();
+  let ancestor: unknown = error;
+  while (ancestor && !traversed.has(ancestor) && traversed.size < 6) {
+    traversed.add(ancestor);
+    const item = record(ancestor);
+    if (ancestor !== error && inherited.failureStage === undefined && string(item.stage)) inherited.failureStage = item.stage;
+    for (const key of ['failureStage', 'currentVersion', 'targetVersion', 'component', 'operation', 'version', 'platform', 'originalUrl', 'failureUrl', 'elapsedMs', 'timeoutMs', 'httpStatus', 'targetHost', 'method', 'correlationId']) {
+      if (inherited[key] === undefined && item[key] !== undefined) inherited[key] = item[key];
+    }
+    ancestor = item.failure ?? item.cause;
+  }
   const source: Record<string, unknown> = {
+    ...inherited,
     ...record(error),
+    code: record(error).code,
     ...(error instanceof PostPlusFailure ? error.details : {}),
   };
   const originalMessage =
@@ -89,22 +138,29 @@ export function toFailureFact(
     cause.length < 4
   ) {
     seen.add(current);
+    if (Array.isArray(current)) {
+      const entries = current.filter((entry, index) => index !== 0 || !cause.some(prior => prior.code === record(entry).code && prior.message === record(entry).message));
+      for (const entry of entries.slice(0, 4 - cause.length)) {
+        const item = record(entry);
+        cause.push({ name: sanitizeFailureText(string(item.name) ?? 'Error'),
+          code: typeof item.code === 'string' || typeof item.code === 'number' ? sanitizeFailureText(String(item.code)) : null,
+          message: sanitizeFailureText(string(item.message) ?? 'Unknown child failure.') });
+      }
+      break;
+    }
     const item = record(current);
     cause.push({
       name: sanitizeFailureText(string(item.name) ?? "Error"),
-      code: string(item.code) ? sanitizeFailureText(String(item.code)) : null,
+      code: typeof item.code === 'string' || typeof item.code === 'number' ? sanitizeFailureText(String(item.code)) : null,
       message: sanitizeFailureText(string(item.message) ?? String(current)),
     });
-    current = item.cause;
+    current = item.failure ?? item.cause;
   }
   return {
-    code,
-    stage: string(source.stage) ?? context.stage ?? "command",
-    service:
-      string(source.service) ??
-      context.service ??
-      (transport ? "network" : "cli"),
-    correlationId: string(source.correlationId) ?? null,
+    code: sanitizeFailureText(code),
+    stage: sanitizeFailureText(string(source.stage) ?? context.stage ?? "command"),
+    service: sanitizeFailureText(string(source.service) ?? context.service ?? (transport ? "network" : "cli")),
+    correlationId: string(source.correlationId) ? sanitizeFailureText(String(source.correlationId)) : null,
     retryable:
       typeof source.retryable === "boolean"
         ? source.retryable
@@ -139,6 +195,12 @@ export function toFailureFact(
                 : "Resolve the reported problem, then retry the command."),
     ),
     cause,
+    ...Object.fromEntries(['failureStage', 'currentVersion', 'targetVersion', 'component', 'operation', 'version', 'platform'].flatMap(key =>
+      string(source[key]) ? [[key, sanitizeFailureText(String(source[key]))]] : [])),
+    ...(source.originalUrl ? { originalUrl: safeUrl(source.originalUrl) } : {}),
+    ...(source.failureUrl ? { failureUrl: safeUrl(source.failureUrl) } : {}),
+    ...Object.fromEntries(['elapsedMs', 'timeoutMs'].flatMap(key =>
+      typeof source[key] === 'number' && Number.isFinite(source[key]) && source[key] >= 0 ? [[key, source[key]]] : [])),
     ...(record(source.recovery).exhausted === true ? { recovery: { attempted: true as const, exhausted: true as const, nextActionAfterUserResolution: sanitizeFailureText(string(record(source.recovery).nextActionAfterUserResolution) ?? '') } } : {}),
     ...(string(source.compatibilityReason) ? { compatibilityReason: sanitizeFailureText(String(source.compatibilityReason)) } : {}),
     ...(source.versions && typeof source.versions === 'object' ? { versions: Object.fromEntries(
@@ -162,7 +224,21 @@ export function toFailureFact(
 }
 
 export function formatFailure(fact: FailureFact): string {
-  return `${fact.message}\nNext: ${fact.action}`;
+  const evidence = fact.component ? [
+    `component=${fact.component}`, `stage=${fact.stage}`, `operation=${fact.operation ?? 'unknown'}`,
+    ...(fact.failureStage ? [`failureStage=${fact.failureStage}`] : []),
+    `currentVersion=${fact.currentVersion ?? 'unknown'}`, `targetVersion=${fact.targetVersion ?? fact.version ?? 'unknown'}`,
+    ...(fact.version ? [`version=${fact.version}`] : []),
+    ...(fact.platform ? [`platform=${fact.platform}`] : []),
+    ...(fact.originalUrl ? [`originalUrl=${fact.originalUrl}`] : []),
+    ...(fact.failureUrl ? [`failureUrl=${fact.failureUrl}`] : []),
+    ...(fact.httpStatus !== undefined ? [`httpStatus=${fact.httpStatus}`] : []),
+    ...(fact.elapsedMs !== undefined ? [`elapsedMs=${fact.elapsedMs}`] : []),
+    ...(fact.timeoutMs !== undefined ? [`timeoutMs=${fact.timeoutMs}`] : []),
+    `code=${fact.code}`,
+    ...fact.cause.map(cause => `${cause.name}${cause.code ? ` code=${cause.code}` : ''}: ${cause.message}`),
+  ].join('; ') : '';
+  return `${fact.message}${evidence ? `\nDiagnostics: ${evidence}` : ''}\nNext: ${fact.action}`;
 }
 
 export function stopAutomaticRecovery(fact: FailureFact): FailureFact {
