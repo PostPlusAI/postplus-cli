@@ -168,12 +168,16 @@ function global:Get-FileHash {
 & $env:BOOTSTRAP_SCRIPT -ProgramOnly
 exit $LASTEXITCODE
 `);
-  return spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', wrapper], {
+  const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', wrapper], {
     env: { ...process.env, POSTPLUS_INSTALL_ROOT: join(f.root, 'install'),
       BOOTSTRAP_SCRIPT: entry ? fileURLToPath(new URL('install.ps1', source)) : join(f.root, 'dist/install.ps1'),
       HTTPS_PROXY: '', HTTP_PROXY: '', ALL_PROXY: '', HTTP_STATUS: '000', ELAPSED: '140.250', CURL_CODE: '28', CURL_ERROR: '', HASH_VALUE: digest, ...overrides },
-    encoding: 'utf8', timeout: 10000,
+    // ARM64 Windows runners can take tens of seconds to initialize PowerShell.
+    // This is the test-host deadline, not the installer's download timeout.
+    encoding: 'utf8', timeout: 60000,
   });
+  assert.ifError(result.error);
+  return result;
 }
 for (const entry of [false, true]) {
   for (const [code, status, message] of [[6, '000', 'Could not resolve host'], [28, '000', 'Operation timed out'], [35, '000', 'SSL connect error'], [60, '000', 'SSL certificate problem'], [22, '403', 'The requested URL returned error']]) {
