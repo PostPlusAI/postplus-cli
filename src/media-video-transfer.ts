@@ -144,11 +144,14 @@ function uploadAddress(value: string) {
     !/^[A-Za-z0-9_-]{1,2048}$/u.test(url.searchParams.get('upload_id') ?? '') ||
     [...url.searchParams.keys()].some(
       (key) =>
-        !['uploadType', 'upload_id', 'name'].includes(key) ||
-        url.searchParams.getAll(key).length !== 1,
+        !['uploadType', 'upload_id', 'name', 'ifGenerationMatch'].includes(
+          key,
+        ) || url.searchParams.getAll(key).length !== 1,
     ) ||
     (url.searchParams.has('name') &&
-      !OBJECT_NAME.test(url.searchParams.get('name')!))
+      !OBJECT_NAME.test(url.searchParams.get('name')!)) ||
+    (url.searchParams.has('ifGenerationMatch') &&
+      url.searchParams.get('ifGenerationMatch') !== '0')
   )
     throw new VideoTransferError('media_video_invalid_upload_session');
   return { url: url.href, bucket, objectName: url.searchParams.get('name') };

@@ -27,7 +27,7 @@ const metadata: LocalVideoMetadata = {
   videoCodec: 'h264',
 };
 const uploadUrl =
-  'https://storage.googleapis.com/upload/storage/v1/b/postplus-test/o?uploadType=resumable&upload_id=secret-session';
+  'https://storage.googleapis.com/upload/storage/v1/b/postplus-test/o?uploadType=resumable&ifGenerationMatch=0&upload_id=secret-session';
 const upload = {
   output: {
     uploadUrl,
@@ -1267,6 +1267,10 @@ for (const invalidUrl of [
   `${uploadUrl}&key=private-key`,
   `${uploadUrl}&access_token=private-access-token`,
   `${uploadUrl}&upload_id=another-session`,
+  uploadUrl.replace('ifGenerationMatch=0', 'ifGenerationMatch=1'),
+  uploadUrl.replace('ifGenerationMatch=0', 'ifGenerationMatch='),
+  `${uploadUrl}&ifGenerationMatch=0`,
+  `${uploadUrl}&ifGenerationMatch=1`,
   `${uploadUrl}&name=arbitrary.mp4`,
   `${uploadUrl}&object=${objectName}`,
   `${uploadUrl}#private-fragment`,
@@ -1482,25 +1486,34 @@ for (const object of [
   });
 }
 
-test('accepts the official session name parameter and 201 object completion', async (t) => {
-  const h = await setup(t);
-  const namedUrl = `${uploadUrl}&name=${objectName}`;
-  h.options.request = async () => ({
-    output: { ...upload.output, uploadUrl: namedUrl },
-  });
-  h.options.dependencies!.fetchResponse = async (url) => {
-    assert.equal(url, namedUrl);
-    return Response.json(
-      { name: objectName, bucket: 'postplus-test' },
-      { status: 201 },
-    );
-  };
-  const result = await prepareVideoAnalysisInput(h.options);
-  assert.equal(
-    result.videoReference,
-    `postplus-video://signed-ticket/objects/${objectName}`,
-  );
-});
+for (const includeCondition of [false, true]) {
+  for (const includeName of [false, true]) {
+    test(`preserves the session URL with create-only condition=${includeCondition}, name=${includeName} and 201 completion`, async (t) => {
+      const h = await setup(t);
+      const sessionUrl =
+        (includeCondition
+          ? uploadUrl
+          : uploadUrl.replace('&ifGenerationMatch=0', '')) +
+        (includeName ? `&name=${objectName}` : '');
+      h.options.request = async () => ({
+        output: { ...upload.output, uploadUrl: sessionUrl },
+      });
+      h.options.dependencies!.fetchResponse = async (url) => {
+        assert.equal(url, sessionUrl);
+        assert.equal(h.state().uploadUrl, sessionUrl);
+        return Response.json(
+          { name: objectName, bucket: 'postplus-test' },
+          { status: 201 },
+        );
+      };
+      const result = await prepareVideoAnalysisInput(h.options);
+      assert.equal(
+        result.videoReference,
+        `postplus-video://signed-ticket/objects/${objectName}`,
+      );
+    });
+  }
+}
 
 test('successful byte acknowledgement with no identity recovers metadata without another upload', async (t) => {
   const h = await setup(t);
