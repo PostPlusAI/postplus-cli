@@ -67,8 +67,16 @@ export async function sendAuthedCloudRequest(
     // existing error handling. HTTP status or prose alone never authorizes replay.
     const payload: unknown = await response.clone().json().catch(() => null);
     if (isPostPlusClientUpgradePayload(payload)) {
-      await clearUpdateCheckCache();
-      throw withResponseMetadata(new PostPlusClientUpgradeRequiredError(payload), response);
+      const error = withResponseMetadata(new PostPlusClientUpgradeRequiredError(payload), response);
+      // A display-cache cleanup failure must not replace the server's required
+      // action. Preserve it as evidence; the updater checks the release afresh.
+      try {
+        await clearUpdateCheckCache();
+      } catch (cause) {
+        error.cause = cause;
+      }
+      void response.body?.cancel().catch(() => undefined);
+      throw error;
     }
   }
 

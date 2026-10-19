@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -53,4 +53,33 @@ test('HTTP status or upgrade prose alone never triggers recovery or consumes the
     assert.equal(await response.text(), body);
     t.mock.restoreAll();
   }
+});
+
+test('cache cleanup failure preserves upgrade action, original cause and response metadata', async (t) => {
+  const config = await mkdtemp(join(tmpdir(), 'postplus-upgrade-cache-'));
+  const previousConfig = process.env.POSTPLUS_CONFIG_DIR;
+  process.env.POSTPLUS_CONFIG_DIR = config;
+  t.after(async () => {
+    if (previousConfig === undefined) delete process.env.POSTPLUS_CONFIG_DIR;
+    else process.env.POSTPLUS_CONFIG_DIR = previousConfig;
+    await rm(config, { recursive: true, force: true });
+  });
+  // rm without recursive cannot remove this: force the same cache-cleanup error
+  // independently of OS permissions or whether the test runs as administrator.
+  await mkdir(join(config, 'update-check.json'));
+  const response = Response.json({ code: 'postplus_client_upgrade_required' }, {
+    status: 426, headers: { 'x-request-id': 'upgrade-fixture' },
+  });
+  t.mock.method(globalThis, 'fetch', async () => response);
+  await assert.rejects(sendAuthedCloudRequest({
+    auth: { apiBaseUrl: 'https://postplus.test', cliSessionToken: 'fixture' },
+    pathName: '/fixture',
+  }), (error: unknown) => {
+    assert.ok(error instanceof PostPlusClientUpgradeRequiredError);
+    assert.ok(error.cause instanceof Error, 'cache failure remains available for diagnosis');
+    assert.equal((error as Error & { httpStatus: number }).httpStatus, 426);
+    assert.equal((error as Error & { correlationId: string }).correlationId, 'upgrade-fixture');
+    return true;
+  });
+  assert.equal(response.bodyUsed, true, 'original response is cancelled before throwing');
 });
