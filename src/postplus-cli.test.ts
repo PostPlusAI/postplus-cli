@@ -586,7 +586,7 @@ function withGoogleVideoUpload(
   fixture: { filePath: string; bytes: Buffer },
 ): typeof fetch {
   const uploadUrl =
-    'https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=local-test';
+    'https://storage.googleapis.com/upload/storage/v1/b/postplus-test/o?uploadType=resumable&upload_id=local-test';
   let operationId: string | undefined;
   let uploads = 0;
   return async (url, init) => {
@@ -597,15 +597,15 @@ function withGoogleVideoUpload(
       'the CLI never receives a Google key',
     );
     if (String(url) === uploadUrl) {
-      assert.equal(init?.method, 'POST');
-      assert.equal(headers.get('x-goog-upload-command'), 'upload, finalize');
+      assert.equal(init?.method, 'PUT');
+      assert.equal(headers.get('content-range'), `bytes 0-${fixture.bytes.length - 1}/${fixture.bytes.length}`);
       const chunks: Buffer[] = [];
       for await (const chunk of init?.body as unknown as ReadStream)
         chunks.push(Buffer.from(chunk));
       assert.deepEqual(Buffer.concat(chunks), fixture.bytes);
       uploads++;
       assert.equal(uploads, 1);
-      return Response.json({ file: { name: 'files/local-test' } });
+      return Response.json({ name: 'postplus-video-00000000-0000-4000-8000-000000000005', bucket: 'postplus-test' });
     }
     const body = JSON.parse(String(init?.body));
     assert.notEqual(
@@ -627,6 +627,7 @@ function withGoogleVideoUpload(
       return Response.json({
         output: {
           uploadUrl,
+          uploadProtocol: 'gcs-resumable-v1',
           uploadToken: 'sealed-test-token',
           expiresAt: Date.now() + 60_000,
         },
@@ -636,7 +637,7 @@ function withGoogleVideoUpload(
       assert.equal(body.operationId, operationId);
       assert.equal(
         body.input.video,
-        'postplus-video://sealed-test-token/files/local-test',
+        'postplus-video://sealed-test-token/objects/postplus-video-00000000-0000-4000-8000-000000000005',
       );
       assert.equal(uploads, 1);
     }
@@ -8415,9 +8416,9 @@ describe('hosted domain commands', () => {
       const localVideo = fixture.filePath;
       const videoBytes = fixture.bytes;
       const mediaReference =
-        'postplus-video://sealed-local-token/files/local-video';
+        'postplus-video://sealed-local-token/objects/postplus-video-00000000-0000-4000-8000-000000000006';
       const signedUploadUrl =
-        'https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=private-upload-token';
+        'https://storage.googleapis.com/upload/storage/v1/b/postplus-test/o?uploadType=resumable&upload_id=private-upload-token';
       const markdown =
         '# Local analysis\n\n## Evidence\n\n00:00–00:01 Observable hook.\n\n## Limitations\n\nNo supported claim omitted.\n';
       const originalFetch = globalThis.fetch;
@@ -8442,10 +8443,10 @@ describe('hosted domain commands', () => {
       globalThis.fetch = async (url, init) => {
         if (String(url) === signedUploadUrl) {
           uploadCount++;
-          assert.equal(init?.method, 'POST');
+          assert.equal(init?.method, 'PUT');
           assert.equal(
-            new Headers(init?.headers).get('x-goog-upload-command'),
-            'upload, finalize',
+            new Headers(init?.headers).get('content-range'),
+            `bytes 0-${videoBytes.length - 1}/${videoBytes.length}`,
           );
           assert.equal(new Headers(init?.headers).has('x-goog-api-key'), false);
           const chunks: Buffer[] = [];
@@ -8453,7 +8454,7 @@ describe('hosted domain commands', () => {
             chunks.push(Buffer.from(chunk));
           }
           assert.deepEqual(Buffer.concat(chunks), videoBytes);
-          return Response.json({ file: { name: 'files/local-video' } });
+          return Response.json({ name: 'postplus-video-00000000-0000-4000-8000-000000000006', bucket: 'postplus-test' });
         }
         assert.equal(
           String(url),
@@ -8476,6 +8477,7 @@ describe('hosted domain commands', () => {
           return Response.json({
             output: {
               uploadUrl: signedUploadUrl,
+              uploadProtocol: 'gcs-resumable-v1',
               uploadToken: 'sealed-local-token',
               expiresAt: Date.now() + 60_000,
             },
@@ -8642,24 +8644,24 @@ import {appendFileSync,readFileSync,existsSync} from 'node:fs';
 const tracePath=${JSON.stringify(tracePath)}, expectedBytes=Buffer.from(${JSON.stringify(fixture.bytes.toString('base64'))},'base64');
 const log=event=>appendFileSync(tracePath,JSON.stringify(event)+'\\n');
 const history=()=>existsSync(tracePath)?readFileSync(tracePath,'utf8').trim().split('\\n').filter(Boolean).map(line=>JSON.parse(line)):[];
-const google='https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=scoped-cli';
+const google='https://storage.googleapis.com/upload/storage/v1/b/postplus-test/o?uploadType=resumable&upload_id=scoped-cli';
 globalThis.fetch=async(url,init)=>{
  const headers=new Headers(init?.headers);assert.equal(headers.has('x-goog-api-key'),false);assert.equal(headers.has('x-google-api-key'),false);
  if(String(url)===google){
-  assert.equal(headers.has('authorization'),false);assert.equal(init.method,'POST');assert.equal(headers.get('x-goog-upload-command'),'upload, finalize');
+  assert.equal(headers.has('authorization'),false);assert.equal(init.method,'PUT');assert.equal(headers.get('content-range'),'bytes 0-'+(expectedBytes.length-1)+'/'+expectedBytes.length);
   const parts=[];for await(const part of init.body)parts.push(Buffer.from(part));assert.deepEqual(Buffer.concat(parts),expectedBytes);
-  log({stage:'upload',bytes:expectedBytes.length});return Response.json({file:{name:'files/cli-test'}});
+  log({stage:'upload',bytes:expectedBytes.length});return Response.json({name:'postplus-video-00000000-0000-4000-8000-000000000007',bucket:'postplus-test'});
  }
  assert.equal(String(url),'https://postplus.test/api/postplus-cli/hosted/capability');
  const body=JSON.parse(String(init.body));assert.equal(body.capability,'video-analysis');
  assert.ok(!JSON.stringify(body).includes('provider-key-must-not-leak'));
  if(body.operation==='prepare-upload'){
   assert.equal(body.input.metadata.bytes,expectedBytes.length);assert.equal(body.input.metadata.hasVideo,true);assert.equal(body.input.metadata.hasAudio,true);
-  log({stage:'prepare',operationId:body.operationId});return Response.json({output:{uploadUrl:google,uploadToken:'sealed-cli-token',expiresAt:Date.now()+60000}});
+  log({stage:'prepare',operationId:body.operationId});return Response.json({output:{uploadUrl:google,uploadProtocol:'gcs-resumable-v1',uploadToken:'sealed-cli-token',expiresAt:Date.now()+60000}});
  }
  const prepared=history().find(event=>event.stage==='prepare');
  if(body.operation==='analyze'){
-  assert.equal(body.operationId,prepared.operationId);assert.equal(body.input.video,'postplus-video://sealed-cli-token/files/cli-test');
+  assert.equal(body.operationId,prepared.operationId);assert.equal(body.input.video,'postplus-video://sealed-cli-token/objects/postplus-video-00000000-0000-4000-8000-000000000007');
   assert.equal(Object.hasOwn(body.input,'prompt'),false);assert.ok(body.estimatedUsage.videoSeconds>0);
   log({stage:'analyze',operationId:body.operationId});
   if(${JSON.stringify(mode)}==='lost-ack')throw new TypeError('fetch failed: analysis ACK lost');
@@ -8802,7 +8804,8 @@ globalThis.fetch=async(url,init)=>{
       return Response.json({
         output: {
           uploadUrl:
-            'https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=expired',
+            'https://storage.googleapis.com/upload/storage/v1/b/postplus-test/o?uploadType=resumable&upload_id=expired',
+          uploadProtocol: 'gcs-resumable-v1',
           uploadToken: 'sealed-expired-token',
           expiresAt: Date.now() - 1,
         },

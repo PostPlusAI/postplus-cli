@@ -27,10 +27,11 @@ const metadata: LocalVideoMetadata = {
   videoCodec: 'h264',
 };
 const uploadUrl =
-  'https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=secret-session';
+  'https://storage.googleapis.com/upload/storage/v1/b/postplus-test/o?uploadType=resumable&upload_id=secret-session';
 const upload = {
   output: {
     uploadUrl,
+    uploadProtocol: 'gcs-resumable-v1' as const,
     uploadToken: 'signed-ticket',
     expiresAt: Date.parse('2099-01-01T00:00:00Z'),
   },
@@ -50,7 +51,11 @@ const completed = {
     billing: { credits: 1 },
   },
 };
-const done = () => Response.json({ file: { name: 'files/test_file' } });
+const done = () =>
+  Response.json({
+    name: 'postplus-video-00000000-0000-4000-8000-000000000001',
+    bucket: 'postplus-test',
+  });
 async function setup(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'postplus-transfer-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -79,6 +84,18 @@ async function setup(t: TestContext) {
         assert.equal(saved?.phase, 'uploading');
         assert.equal(saved.uploadUrl, uploadUrl);
         assert.equal(saved.uploadToken, 'signed-ticket');
+        assert.equal(saved.uploadProtocol, 'gcs-resumable-v1');
+        assert.equal(init.method, 'PUT');
+        assert.equal(init.redirect, 'manual');
+        assert.equal(
+          new Headers(init.headers).get('content-type'),
+          'video/mp4',
+        );
+        assert.equal(
+          new Headers(init.headers).get('content-range'),
+          'bytes 0-9/10',
+        );
+        assert.equal(new Headers(init.headers).get('authorization'), null);
         assert.equal(new Headers(init.headers).get('x-goog-api-key'), null);
         const chunks: Buffer[] = [];
         for await (const chunk of init.body as unknown as AsyncIterable<Buffer>)
@@ -103,7 +120,7 @@ test('local video persists upload credentials before sending bytes and returns r
   const result = await prepareVideoAnalysisInput(h.options);
   assert.equal(
     result.videoReference,
-    'postplus-video://signed-ticket/files/test_file',
+    'postplus-video://signed-ticket/objects/postplus-video-00000000-0000-4000-8000-000000000001',
   );
   assert.equal(result.filePath, h.filePath);
   assert.equal(result.metadata, metadata);
@@ -263,15 +280,16 @@ test('a lost upload ACK queries the same session and sends only remaining bytes'
     assert.equal(url, uploadUrl);
     const headers = new Headers(init.headers);
     if (++calls === 1) {
-      assert.equal(headers.get('x-goog-upload-command'), 'query');
+      assert.equal(headers.get('content-range'), 'bytes */10');
+      assert.equal(headers.get('content-length'), '0');
       return new Response(null, {
+        status: 308,
         headers: {
-          'x-goog-upload-status': 'active',
-          'x-goog-upload-size-received': '4',
+          range: 'bytes=0-3',
         },
       });
     }
-    assert.equal(headers.get('x-goog-upload-offset'), '4');
+    assert.equal(headers.get('content-range'), 'bytes 4-9/10');
     assert.equal(headers.get('content-length'), '6');
     const chunks: Buffer[] = [];
     for await (const chunk of init.body as unknown as AsyncIterable<Buffer>)
@@ -292,19 +310,23 @@ test('a final queried upload is reused, but final state without a file identity 
     metadata,
     phase: 'uploading',
     uploadUrl,
+    uploadProtocol: 'gcs-resumable-v1',
     uploadToken: 'signed-ticket',
   };
   h.options.dependencies!.fetchResponse = async () =>
     Response.json(
-      { file: { name: 'files/recovered' } },
-      { headers: { 'x-goog-upload-status': 'final' } },
+      {
+        name: 'postplus-video-00000000-0000-4000-8000-000000000002',
+        bucket: 'postplus-test',
+      },
+      { status: 200 },
     );
   assert.equal(
     (await prepareVideoAnalysisInput({ ...h.options, state })).videoReference,
-    'postplus-video://signed-ticket/files/recovered',
+    'postplus-video://signed-ticket/objects/postplus-video-00000000-0000-4000-8000-000000000002',
   );
   h.options.dependencies!.fetchResponse = async () =>
-    new Response(null, { headers: { 'x-goog-upload-status': 'final' } });
+    new Response(null, { status: 200 });
   await assert.rejects(
     () => prepareVideoAnalysisInput({ ...h.options, state }),
     { code: 'media_video_upload_result_unknown' },
@@ -369,6 +391,7 @@ test('changed local files and mismatched sources never resume an old upload', as
     filePath: h.filePath,
     metadata,
     uploadUrl,
+    uploadProtocol: 'gcs-resumable-v1',
     uploadToken: 'ticket',
   };
   h.options.dependencies!.inspect = async () => ({
@@ -398,13 +421,14 @@ test('invalid offsets, expired sessions and non-Google upload addresses cannot s
     filePath: h.filePath,
     metadata,
     uploadUrl,
+    uploadProtocol: 'gcs-resumable-v1',
     uploadToken: 'ticket',
   };
   h.options.dependencies!.fetchResponse = async () =>
     new Response(null, {
+      status: 308,
       headers: {
-        'x-goog-upload-status': 'active',
-        'x-goog-upload-size-received': '11',
+        range: 'bytes=0-10',
       },
     });
   await assert.rejects(
@@ -487,7 +511,7 @@ test('one empty-session recreation can finish without reacquiring the source', a
   });
   assert.equal(
     result.videoReference,
-    'postplus-video://signed-ticket/files/test_file',
+    'postplus-video://signed-ticket/objects/postplus-video-00000000-0000-4000-8000-000000000001',
   );
   assert.deepEqual(
     h.requests.map((r) => r.operation),
@@ -520,16 +544,14 @@ test('final session without its ACK recovers identity through hosted metadata, w
     metadata,
     phase: 'uploading',
     uploadUrl,
+    uploadProtocol: 'gcs-resumable-v1',
     uploadToken: 'signed-ticket',
   };
   let queries = 0;
   h.options.dependencies!.fetchResponse = async (_url, init) => {
     queries++;
-    assert.equal(
-      new Headers(init.headers).get('x-goog-upload-command'),
-      'query',
-    );
-    return new Response(null, { headers: { 'x-goog-upload-status': 'final' } });
+    assert.equal(new Headers(init.headers).get('content-range'), 'bytes */10');
+    return new Response(null, { status: 200 });
   };
   h.options.request = async (body) => {
     h.requests.push(body);
@@ -537,12 +559,17 @@ test('final session without its ACK recovers identity through hosted metadata, w
     assert.equal(body.operationId, h.options.operationId);
     assert.deepEqual(body.input, { uploadToken: 'signed-ticket' });
     assert.equal(h.state().phase, 'uploading');
-    return { output: { status: 'completed', fileName: 'files/recovered-123' } };
+    return {
+      output: {
+        status: 'completed',
+        fileName: 'objects/postplus-video-00000000-0000-4000-8000-000000000003',
+      },
+    };
   };
   const result = await prepareVideoAnalysisInput({ ...h.options, state });
   assert.equal(
     result.videoReference,
-    'postplus-video://signed-ticket/files/recovered-123',
+    'postplus-video://signed-ticket/objects/postplus-video-00000000-0000-4000-8000-000000000003',
   );
   assert.equal(h.state().phase, 'uploaded');
   assert.equal(queries, 1);
@@ -560,10 +587,11 @@ test('unknown recovery retains the same session and cannot create another upload
     metadata,
     phase: 'uploading',
     uploadUrl,
+    uploadProtocol: 'gcs-resumable-v1',
     uploadToken: 'signed-ticket',
   };
   h.options.dependencies!.fetchResponse = async () =>
-    new Response(null, { headers: { 'x-goog-upload-status': 'final' } });
+    new Response(null, { status: 200 });
   h.options.request = async (body) => {
     h.requests.push(body);
     return { output: { status: 'unknown', reason: 'scan_limit' } };
@@ -788,6 +816,7 @@ test('upload recovery preserves a recognized authorization error without replaci
     metadata,
     phase: 'uploading',
     uploadUrl,
+    uploadProtocol: 'gcs-resumable-v1',
     uploadToken: 'signed-ticket',
   };
   const failure = new TestHostedProductRequestError({
@@ -799,7 +828,7 @@ test('upload recovery preserves a recognized authorization error without replaci
     throw failure;
   };
   h.options.dependencies!.fetchResponse = async () =>
-    new Response(null, { headers: { 'x-goog-upload-status': 'final' } });
+    new Response(null, { status: 200 });
   await assert.rejects(
     () => prepareVideoAnalysisInput({ ...h.options, state }),
     (error) => error === failure,
@@ -944,11 +973,14 @@ for (const identityInQuery of [true, false]) {
     });
     h.options.dependencies!.fetchResponse = async (url, init) => {
       assert.equal(url, uploadUrl);
-      const command = new Headers(init.headers).get('x-goog-upload-command')!;
+      const command =
+        new Headers(init.headers).get('content-range') === 'bytes */10'
+          ? 'query'
+          : 'upload';
       calls.push(command);
       assert.equal(h.state().phase, 'uploading');
       assert.equal(h.state().uploadToken, 'signed-ticket');
-      if (command === 'upload, finalize') {
+      if (command === 'upload') {
         for await (const _chunk of init.body as unknown as AsyncIterable<Buffer>) {
           /* consume bytes before lost ACK */
         }
@@ -957,10 +989,13 @@ for (const identityInQuery of [true, false]) {
       assert.equal(init.body, undefined);
       return new Response(
         identityInQuery
-          ? JSON.stringify({ file: { name: 'files/recovered' } })
+          ? JSON.stringify({
+              name: 'postplus-video-00000000-0000-4000-8000-000000000002',
+              bucket: 'postplus-test',
+            })
           : null,
         {
-          headers: { 'x-goog-upload-status': 'final' },
+          status: 200,
         },
       );
     };
@@ -970,15 +1005,21 @@ for (const identityInQuery of [true, false]) {
       assert.equal(request.operation, 'recover-upload');
       assert.equal(request.operationId, 'parent-operation');
       assert.deepEqual(request.input, { uploadToken: 'signed-ticket' });
-      return { output: { status: 'completed', fileName: 'files/recovered' } };
+      return {
+        output: {
+          status: 'completed',
+          fileName:
+            'objects/postplus-video-00000000-0000-4000-8000-000000000002',
+        },
+      };
     };
     const result = await prepareVideoAnalysisInput(h.options);
     assert.equal(
       result.videoReference,
-      'postplus-video://signed-ticket/files/recovered',
+      'postplus-video://signed-ticket/objects/postplus-video-00000000-0000-4000-8000-000000000002',
     );
     assert.equal(h.state().phase, 'uploaded');
-    assert.deepEqual(calls, ['upload, finalize', 'query']);
+    assert.deepEqual(calls, ['upload', 'query']);
     assert.deepEqual(budgets, [300_000, 30_000]);
     assert.deepEqual(
       h.requests.map((r) => r.operation),
@@ -1002,28 +1043,28 @@ for (const outcome of [
       './network-diagnostics.js'
     );
     const failure = new PostPlusNetworkRequestError({
-      method: 'POST',
+      method: 'PUT',
       targetUrl: uploadUrl,
       cause: new DOMException('The operation timed out', 'TimeoutError'),
     });
     const calls: string[] = [];
     h.options.dependencies!.fetchResponse = async (_url, init) => {
-      const command = new Headers(init.headers).get('x-goog-upload-command')!;
+      const command =
+        new Headers(init.headers).get('content-range') === 'bytes */10'
+          ? 'query'
+          : 'upload';
       calls.push(command);
-      if (command === 'upload, finalize') throw failure;
+      if (command === 'upload') throw failure;
       assert.equal(init.body, undefined);
       if (outcome === 'query-timeout')
         throw new DOMException('Timed out', 'TimeoutError');
       return new Response(null, {
-        headers: {
-          'x-goog-upload-status': outcome.startsWith('active')
-            ? 'active'
-            : outcome === 'final-unknown'
-              ? 'final'
-              : 'unknown',
-          'x-goog-upload-size-received':
-            outcome === 'active-partial' ? '5' : '0',
-        },
+        status: outcome.startsWith('active')
+          ? 308
+          : outcome === 'final-unknown'
+            ? 200
+            : 503,
+        headers: outcome === 'active-partial' ? { range: 'bytes=0-4' } : {},
       });
     };
     h.options.request = async (request) => {
@@ -1040,7 +1081,7 @@ for (const outcome of [
             'media_video_upload_result_unknown'
           : error === failure,
     );
-    assert.deepEqual(calls, ['upload, finalize', 'query']);
+    assert.deepEqual(calls, ['upload', 'query']);
     assert.equal(h.state().phase, 'uploading');
     assert.equal(h.state().uploadUrl, uploadUrl);
     assert.equal(h.state().uploadToken, 'signed-ticket');
@@ -1072,9 +1113,12 @@ test('timeout while reading the upload ACK body also queries the original sessio
   const h = await setup(t);
   const calls: string[] = [];
   h.options.dependencies!.fetchResponse = async (_url, init) => {
-    const command = new Headers(init.headers).get('x-goog-upload-command')!;
+    const command =
+      new Headers(init.headers).get('content-range') === 'bytes */10'
+        ? 'query'
+        : 'upload';
     calls.push(command);
-    if (command === 'upload, finalize')
+    if (command === 'upload')
       return new Response(
         new ReadableStream({
           start(controller) {
@@ -1082,16 +1126,22 @@ test('timeout while reading the upload ACK body also queries the original sessio
           },
         }),
       );
-    return new Response(JSON.stringify({ file: { name: 'files/recovered' } }), {
-      headers: { 'x-goog-upload-status': 'final' },
-    });
+    return new Response(
+      JSON.stringify({
+        name: 'postplus-video-00000000-0000-4000-8000-000000000002',
+        bucket: 'postplus-test',
+      }),
+      {
+        status: 200,
+      },
+    );
   };
   const result = await prepareVideoAnalysisInput(h.options);
   assert.equal(
     result.videoReference,
-    'postplus-video://signed-ticket/files/recovered',
+    'postplus-video://signed-ticket/objects/postplus-video-00000000-0000-4000-8000-000000000002',
   );
-  assert.deepEqual(calls, ['upload, finalize', 'query']);
+  assert.deepEqual(calls, ['upload', 'query']);
   assert.equal(h.requests.length, 1);
 });
 
@@ -1115,18 +1165,21 @@ test('an aborted deadline still recovers when the response body reports AbortErr
       );
     }
     assert.equal(init.signal?.aborted, false);
-    assert.equal(
-      new Headers(init.headers).get('x-goog-upload-command'),
-      'query',
+    assert.equal(new Headers(init.headers).get('content-range'), 'bytes */10');
+    return new Response(
+      JSON.stringify({
+        name: 'postplus-video-00000000-0000-4000-8000-000000000002',
+        bucket: 'postplus-test',
+      }),
+      {
+        status: 200,
+      },
     );
-    return new Response(JSON.stringify({ file: { name: 'files/recovered' } }), {
-      headers: { 'x-goog-upload-status': 'final' },
-    });
   };
   const result = await prepareVideoAnalysisInput(h.options);
   assert.equal(
     result.videoReference,
-    'postplus-video://signed-ticket/files/recovered',
+    'postplus-video://signed-ticket/objects/postplus-video-00000000-0000-4000-8000-000000000002',
   );
   assert.equal(calls, 2);
 });
@@ -1161,7 +1214,7 @@ test('proven pre-execution preparation rejections do not consume the empty-sessi
   });
   assert.equal(
     result.videoReference,
-    'postplus-video://signed-ticket/files/test_file',
+    'postplus-video://signed-ticket/objects/postplus-video-00000000-0000-4000-8000-000000000001',
   );
   assert.equal(h.state().uploadPreparationAttempts, 1);
   assert.equal(h.requests.length, 4);
@@ -1195,4 +1248,315 @@ test('a rejected preparation does not erase an earlier unknown preparation attem
     { code: 'media_video_upload_preparation_unknown' },
   );
   assert.equal(h.state().uploadPreparationAttempts, 2);
+});
+
+const objectName = 'postplus-video-00000000-0000-4000-8000-000000000001';
+
+for (const invalidUrl of [
+  'not a URL',
+  uploadUrl.replace('https:', 'http:'),
+  uploadUrl.replace('storage.googleapis.com', 'storage.googleapis.com.example'),
+  uploadUrl.replace(
+    'storage.googleapis.com',
+    'user:password@storage.googleapis.com',
+  ),
+  uploadUrl.replace('storage.googleapis.com', 'storage.googleapis.com:444'),
+  uploadUrl.replace('/upload/storage/v1/b/', '/storage/v1/b/'),
+  uploadUrl.replace('uploadType=resumable', 'uploadType=media'),
+  uploadUrl.replace('&upload_id=secret-session', ''),
+  `${uploadUrl}&key=private-key`,
+  `${uploadUrl}&access_token=private-access-token`,
+  `${uploadUrl}&upload_id=another-session`,
+  `${uploadUrl}&name=arbitrary.mp4`,
+  `${uploadUrl}&object=${objectName}`,
+  `${uploadUrl}#private-fragment`,
+]) {
+  test(`rejects an invalid GCS session descriptor before sending bytes: ${invalidUrl.split('?')[0]}`, async (t) => {
+    const h = await setup(t);
+    h.options.request = async () => ({
+      output: { ...upload.output, uploadUrl: invalidUrl },
+    });
+    h.options.dependencies!.fetchResponse = async () =>
+      assert.fail('invalid session cannot upload');
+    await assert.rejects(prepareVideoAnalysisInput(h.options), {
+      code: 'media_video_invalid_upload_session',
+      recoverable: false,
+    });
+    assert.equal(h.state().uploadUrl, undefined);
+  });
+}
+
+for (const protocol of [undefined, 'google-files-v1']) {
+  test(`rejects a preparation using ${String(protocol)} protocol`, async (t) => {
+    const h = await setup(t);
+    h.options.request = async () => ({
+      output: { ...upload.output, uploadProtocol: protocol },
+    });
+    h.options.dependencies!.fetchResponse = async () =>
+      assert.fail('unsupported protocol cannot upload');
+    await assert.rejects(prepareVideoAnalysisInput(h.options), {
+      code: 'media_video_invalid_upload_session',
+    });
+  });
+}
+
+for (const phase of [
+  'upload-preparing',
+  'upload-ready',
+  'uploading',
+  'uploaded',
+] as const) {
+  test(`legacy ${phase} checkpoint stops before local or remote effects`, async (t) => {
+    const h = await setup(t);
+    h.options.dependencies!.inspect = async () =>
+      assert.fail('legacy session must fail before inspect');
+    h.options.dependencies!.fetchResponse = async () =>
+      assert.fail('legacy session cannot upload');
+    h.options.request = async () =>
+      assert.fail('legacy session cannot be replaced');
+    await assert.rejects(
+      prepareVideoAnalysisInput({
+        ...h.options,
+        state: {
+          source: h.filePath,
+          filePath: h.filePath,
+          metadata,
+          phase,
+          ...(phase === 'upload-preparing'
+            ? { uploadPreparationAttempts: 1 }
+            : {
+                uploadUrl:
+                  'https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=legacy',
+                uploadToken: 'legacy-ticket',
+                ...(phase === 'uploaded'
+                  ? { fileName: 'files/legacy-file' }
+                  : {}),
+              }),
+        },
+      }),
+      { code: 'media_video_upload_protocol_unsupported', recoverable: false },
+    );
+    assert.equal(h.snapshots.length, 0);
+  });
+}
+
+test('GCS 308 acknowledgement stops after one byte write and explicit resume queries before the remainder', async (t) => {
+  const h = await setup(t);
+  let calls = 0;
+  h.options.dependencies!.fetchResponse = async () => {
+    calls++;
+    return new Response(null, { status: 308, headers: { range: 'bytes=0-3' } });
+  };
+  await assert.rejects(prepareVideoAnalysisInput(h.options), {
+    code: 'media_video_upload_incomplete',
+    recoverable: true,
+  });
+  assert.equal(calls, 1);
+  assert.equal(h.state().phase, 'uploading');
+  h.options.dependencies!.fetchResponse = async (url, init) => {
+    assert.equal(url, uploadUrl);
+    const headers = new Headers(init.headers);
+    assert.equal(init.method, 'PUT');
+    if (++calls === 2) {
+      assert.equal(headers.get('content-range'), 'bytes */10');
+      assert.equal(headers.get('content-length'), '0');
+      assert.equal(init.body, undefined);
+      return new Response(null, {
+        status: 308,
+        headers: { range: 'bytes=0-3' },
+      });
+    }
+    assert.equal(headers.get('content-range'), 'bytes 4-9/10');
+    assert.equal(headers.get('content-length'), '6');
+    const chunks: Buffer[] = [];
+    for await (const chunk of init.body as unknown as AsyncIterable<Buffer>)
+      chunks.push(chunk);
+    assert.deepEqual(Buffer.concat(chunks), payload.subarray(4));
+    return done();
+  };
+  await prepareVideoAnalysisInput({ ...h.options, state: h.state() });
+  assert.equal(calls, 3);
+  assert.equal(h.requests.length, 1);
+});
+
+test('GCS query with no Range proves zero received bytes and allows explicit resume from zero', async (t) => {
+  const h = await setup(t);
+  let calls = 0;
+  const send = h.options.dependencies!.fetchResponse!;
+  h.options.dependencies!.fetchResponse = async (url, init) => {
+    if (++calls === 1) return new Response(null, { status: 308 });
+    return send(url, init);
+  };
+  await prepareVideoAnalysisInput({
+    ...h.options,
+    state: {
+      source: h.filePath,
+      filePath: h.filePath,
+      metadata,
+      phase: 'uploading',
+      ...upload.output,
+    },
+  });
+  assert.equal(calls, 2);
+});
+
+for (const range of [
+  'bytes=1-4',
+  'bytes=0--1',
+  'bytes=0-10',
+  'bytes=0-9007199254740992',
+  'bytes=0-3,bytes=4-5',
+  'garbage',
+]) {
+  for (const resume of [false, true]) {
+    test(`malformed GCS Range ${range} fails without resending (resume=${resume})`, async (t) => {
+      const h = await setup(t);
+      let calls = 0;
+      h.options.dependencies!.fetchResponse = async () => {
+        calls++;
+        return new Response(null, { status: 308, headers: { range } });
+      };
+      await assert.rejects(
+        prepareVideoAnalysisInput({
+          ...h.options,
+          ...(resume
+            ? {
+                state: {
+                  source: h.filePath,
+                  filePath: h.filePath,
+                  metadata,
+                  phase: 'uploading' as const,
+                  ...upload.output,
+                },
+              }
+            : {}),
+        }),
+        { code: 'media_video_upload_invalid_offset', recoverable: false },
+      );
+      assert.equal(calls, 1);
+    });
+  }
+}
+
+test('308 for all bytes received does not send an invalid empty final chunk or claim completion', async (t) => {
+  const h = await setup(t);
+  let calls = 0;
+  h.options.dependencies!.fetchResponse = async (_url, init) => {
+    calls++;
+    assert.equal(init.body, undefined);
+    return new Response(null, { status: 308, headers: { range: 'bytes=0-9' } });
+  };
+  await assert.rejects(
+    prepareVideoAnalysisInput({
+      ...h.options,
+      state: {
+        source: h.filePath,
+        filePath: h.filePath,
+        metadata,
+        phase: 'uploading',
+        ...upload.output,
+      },
+    }),
+    { code: 'media_video_upload_incomplete', recoverable: true },
+  );
+  assert.equal(calls, 1);
+});
+
+for (const object of [
+  { name: objectName, bucket: 'another-bucket' },
+  { name: objectName },
+  { name: `prefix/${objectName}`, bucket: 'postplus-test' },
+  { name: 'files/old-file', bucket: 'postplus-test' },
+]) {
+  test('rejects completed metadata with invalid object identity without hosted recovery', async (t) => {
+    const h = await setup(t);
+    h.options.dependencies!.fetchResponse = async () => Response.json(object);
+    await assert.rejects(prepareVideoAnalysisInput(h.options), {
+      code: 'media_video_upload_invalid_object',
+    });
+    assert.deepEqual(
+      h.requests.map((r) => r.operation),
+      ['prepare-upload'],
+    );
+    assert.equal(h.state().fileName, undefined);
+  });
+}
+
+test('accepts the official session name parameter and 201 object completion', async (t) => {
+  const h = await setup(t);
+  const namedUrl = `${uploadUrl}&name=${objectName}`;
+  h.options.request = async () => ({
+    output: { ...upload.output, uploadUrl: namedUrl },
+  });
+  h.options.dependencies!.fetchResponse = async (url) => {
+    assert.equal(url, namedUrl);
+    return Response.json(
+      { name: objectName, bucket: 'postplus-test' },
+      { status: 201 },
+    );
+  };
+  const result = await prepareVideoAnalysisInput(h.options);
+  assert.equal(
+    result.videoReference,
+    `postplus-video://signed-ticket/objects/${objectName}`,
+  );
+});
+
+test('successful byte acknowledgement with no identity recovers metadata without another upload', async (t) => {
+  const h = await setup(t);
+  let calls = 0;
+  h.options.dependencies!.fetchResponse = async () => {
+    calls++;
+    return new Response(null, { status: 201 });
+  };
+  h.options.request = async (request) => {
+    h.requests.push(request);
+    return request.operation === 'prepare-upload'
+      ? upload
+      : {
+          output: { status: 'completed', fileName: `objects/${objectName}` },
+        };
+  };
+  await prepareVideoAnalysisInput(h.options);
+  assert.equal(calls, 1);
+  assert.deepEqual(
+    h.requests.map((r) => r.operation),
+    ['prepare-upload', 'recover-upload'],
+  );
+});
+
+test('shared network transport returns GCS 308 without following redirects or requiring Location', async (t) => {
+  const h = await setup(t);
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  let calls = 0;
+  globalThis.fetch = async (_url, init) => {
+    calls++;
+    assert.equal(init?.method, 'PUT');
+    assert.equal(init?.redirect, 'manual');
+    return new Response(null, { status: 308, headers: { range: 'bytes=0-3' } });
+  };
+  delete h.options.dependencies!.fetchResponse;
+  await assert.rejects(prepareVideoAnalysisInput(h.options), {
+    code: 'media_video_upload_incomplete',
+  });
+  assert.equal(calls, 1);
+});
+
+test('a 308 redirect cannot be interpreted as acknowledged bytes', async (t) => {
+  const h = await setup(t);
+  let calls = 0;
+  h.options.dependencies!.fetchResponse = async () => {
+    calls++;
+    return new Response(null, {
+      status: 308,
+      headers: { location: 'https://unrelated.example', range: 'bytes=0-3' },
+    });
+  };
+  await assert.rejects(prepareVideoAnalysisInput(h.options), {
+    code: 'media_video_upload_result_unknown',
+  });
+  assert.equal(calls, 1);
 });
