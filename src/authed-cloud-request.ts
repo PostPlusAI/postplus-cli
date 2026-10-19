@@ -1,5 +1,7 @@
-import { buildPostPlusClientCompatibilityHeaders } from './client-compatibility.js';
+import { buildPostPlusClientCompatibilityHeaders, isPostPlusClientUpgradePayload, PostPlusClientUpgradeRequiredError } from './client-compatibility.js';
 import { fetchWithNetworkDiagnostics } from './network-diagnostics.js';
+import { clearUpdateCheckCache } from './update-check.js';
+import { withResponseMetadata } from './failure-contract.js';
 
 const DEFAULT_AUTHED_REQUEST_TIMEOUT_MS = 15_000;
 
@@ -42,9 +44,9 @@ export type AuthedCloudRequestInput = {
  * Single transport envelope for every authenticated PostPlus Cloud request:
  * canonical header set (`accept` + compatibility headers + `Bearer` token +
  * optional `content-type`), `AbortSignal.timeout`, and an optional once-only
- * 401-refresh-retry. It returns the raw `Response` so each caller keeps its own
- * `!ok` interpretation — this is a narrow transport primitive, not a request
- * framework.
+ * 401-refresh-retry. A structured 426 upgrade rejection is preserved here so
+ * every command can reach the public entry's bounded update/replay runner. Other
+ * responses remain raw for the caller's business-specific interpretation.
  */
 export async function sendAuthedCloudRequest(
   input: AuthedCloudRequestInput,
@@ -58,6 +60,16 @@ export async function sendAuthedCloudRequest(
     const refreshedAuth = await input.retryOn401();
     input.signal?.throwIfAborted();
     response = await issueAuthedCloudRequest(refreshedAuth, input);
+  }
+
+  if (response.status === 426) {
+    // Inspect a clone so malformed or unrelated responses retain their body and
+    // existing error handling. HTTP status or prose alone never authorizes replay.
+    const payload: unknown = await response.clone().json().catch(() => null);
+    if (isPostPlusClientUpgradePayload(payload)) {
+      await clearUpdateCheckCache();
+      throw withResponseMetadata(new PostPlusClientUpgradeRequiredError(payload), response);
+    }
   }
 
   return response;

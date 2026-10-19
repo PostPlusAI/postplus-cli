@@ -1,5 +1,6 @@
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
+import { PostPlusClientUpgradeRequiredError } from './client-compatibility.js';
 import {
   assertLocalAuthUnchanged,
   readLocalConfig,
@@ -26,7 +27,9 @@ export async function switchWorkspace(accountId: string): Promise<unknown> {
           body: { accountId },
           timeoutMs: 30_000,
         });
-      } catch {
+      } catch (error) {
+        // A compatibility rejection proves the switch never began.
+        if (error instanceof PostPlusClientUpgradeRequiredError) throw error;
         throw new Error(
           'Workspace switch outcome is unknown. Run postplus auth login; do not continue using the previous workspace.',
         );

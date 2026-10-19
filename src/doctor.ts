@@ -5,7 +5,7 @@ import {
   resolveFreshRemoteAuth,
 } from './auth-session.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
-import { formatPostPlusCompatibilityError, readPostPlusCompatibilityError } from './client-compatibility.js';
+import { formatPostPlusCompatibilityError, readPostPlusCompatibilityError, PostPlusClientUpgradeRequiredError } from './client-compatibility.js';
 import { resolveHostedBaseUrl } from './hosted-release.js';
 import {
   formatLocalDependencyReport,
@@ -352,6 +352,7 @@ async function checkRemoteAuth(input: FreshRemoteAuth): Promise<DoctorCheck> {
       })}; account ${accountId}; user ${user}; subscription ${subscription}`,
     );
   } catch (error) {
+    if (error instanceof PostPlusClientUpgradeRequiredError) return createCompatibilityFailureCheck(error);
     return createFail(
       'remote_auth',
       'Remote auth',
@@ -470,6 +471,7 @@ async function checkHostedCapabilities(
       `Configuration checks passed (${relevantCapabilities.length} capabilities; subscription ${subscription}). Live provider access and source availability are checked when a request runs.`,
     );
   } catch (error) {
+    if (error instanceof PostPlusClientUpgradeRequiredError) return createCompatibilityFailureCheck(error);
     return createFail(
       'hosted_capabilities',
       'Hosted capabilities',
@@ -485,17 +487,18 @@ function createClientCompatibilityFailure(
   payload: unknown,
   response: Response,
 ): DoctorCheck | null {
-  const compatibilityError = formatPostPlusCompatibilityError(payload);
+  const error = readPostPlusCompatibilityError(payload);
+  return error ? createCompatibilityFailureCheck(withResponseMetadata(error, response)) : null;
+}
 
-  if (!compatibilityError) {
-    return null;
-  }
-
+// Diagnostics report compatibility as its own check, rather than mislabeling a
+// shared transport rejection as an authentication or provider-readiness failure.
+function createCompatibilityFailureCheck(error: Error): DoctorCheck {
   return createFail(
     'client_compatibility',
     'Client compatibility',
-    compatibilityError,
-    undefined, { failure: toFailureFact(withResponseMetadata(readPostPlusCompatibilityError(payload)!, response), { stage: 'compatibility', service: 'postplus-cloud' }) },
+    error.message,
+    undefined, { failure: toFailureFact(error, { stage: 'compatibility', service: 'postplus-cloud' }) },
   );
 }
 

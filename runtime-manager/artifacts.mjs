@@ -11,6 +11,9 @@ export async function hashDirectory(root) {
   async function walk(directory, prefix = '') {
     for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
       if (!prefix && entry.name === RECEIPT) continue;
+      // Finder can add folder display settings after installation. Only regular
+      // metadata files are excluded; links/directories still undergo validation.
+      if (entry.name === '.DS_Store' && entry.isFile()) continue;
       const name = prefix + entry.name;
       const path = join(directory, entry.name);
       hash.update(JSON.stringify([name, entry.isDirectory() ? 'directory' : entry.isSymbolicLink() ? 'link' : 'file']) + '\n');
