@@ -1,8 +1,8 @@
-import { PostPlusFailure } from './failure-contract.js';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { PostPlusFailure } from './failure-contract.js';
 import { VIDEO_UPLOAD_TIMEOUT_MS } from './generated/hosted-execution-manifest.generated.js';
 import {
   type LocalVideoMetadata,
@@ -48,6 +48,7 @@ export type VideoTransferState = {
   sourceResult?: SourceResult;
   sourceHandle?: string;
   uploadPreparationAttempts?: number;
+  uploadProtocol?: 'gcs-resumable-v1';
   uploadUrl?: string;
   uploadToken?: string;
   expiresAt?: number;
@@ -117,22 +118,59 @@ const output = (value: unknown) => {
   const body = record(value);
   return record(body.output ?? body);
 };
+const UPLOAD_PROTOCOL = 'gcs-resumable-v1' as const;
+const OBJECT_NAME =
+  /^postplus-video-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 function uploadAddress(value: string) {
-  const url = new URL(value);
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new VideoTransferError('media_video_invalid_upload_session');
+  }
+  const bucket =
+    /^\/upload\/storage\/v1\/b\/([a-z0-9][a-z0-9._-]{1,220}[a-z0-9])\/o$/u.exec(
+      url.pathname,
+    )?.[1];
   if (
     url.protocol !== 'https:' ||
-    url.hostname !== 'generativelanguage.googleapis.com' ||
+    url.hostname !== 'storage.googleapis.com' ||
+    url.port ||
     url.username ||
-    url.password
+    url.password ||
+    url.hash ||
+    !bucket ||
+    url.searchParams.get('uploadType') !== 'resumable' ||
+    !/^[A-Za-z0-9_-]{1,2048}$/u.test(url.searchParams.get('upload_id') ?? '') ||
+    [...url.searchParams.keys()].some(
+      (key) =>
+        !['uploadType', 'upload_id', 'name', 'ifGenerationMatch'].includes(
+          key,
+        ) || url.searchParams.getAll(key).length !== 1,
+    ) ||
+    (url.searchParams.has('name') &&
+      !OBJECT_NAME.test(url.searchParams.get('name')!)) ||
+    (url.searchParams.has('ifGenerationMatch') &&
+      url.searchParams.get('ifGenerationMatch') !== '0')
   )
     throw new VideoTransferError('media_video_invalid_upload_session');
-  return url.href;
+  return { url: url.href, bucket, objectName: url.searchParams.get('name') };
 }
 function fileNameFrom(value: unknown) {
-  const name = record(record(value).file).name;
-  return typeof name === 'string' && /^files\/[a-zA-Z0-9_-]+$/u.test(name)
-    ? name
+  return typeof value === 'string' &&
+    value.startsWith('objects/') &&
+    OBJECT_NAME.test(value.slice('objects/'.length))
+    ? value
     : undefined;
+}
+function receivedOffset(response: Response, total: number) {
+  const range = response.headers.get('range');
+  if (range === null) return 0;
+  const matched = /^bytes=0-(\d+)$/u.exec(range);
+  const offset = matched ? Number(matched[1]) + 1 : NaN;
+  if (!Number.isSafeInteger(offset) || offset < 1 || offset > total)
+    throw new VideoTransferError('media_video_upload_invalid_offset');
+  return offset;
 }
 
 /** Download once, keep evidence locally, and send bytes to the existing Google upload session. */
@@ -147,6 +185,19 @@ export async function prepareVideoAnalysisInput(
   const state: VideoTransferState = structuredClone(
     options.state ?? { source, phase: 'initial' },
   );
+  if (
+    (state.uploadProtocol !== undefined &&
+      state.uploadProtocol !== UPLOAD_PROTOCOL) ||
+    ((state.uploadPreparationAttempts ||
+      state.uploadUrl ||
+      state.uploadToken ||
+      state.fileName ||
+      ['upload-preparing', 'upload-ready', 'uploading', 'uploaded'].includes(
+        state.phase,
+      )) &&
+      state.uploadProtocol !== UPLOAD_PROTOCOL)
+  )
+    throw new VideoTransferError('media_video_upload_protocol_unsupported');
   const save = () => options.saveState(structuredClone(state));
   const inspect = dependencies.inspect ?? inspectVideoFile;
   const now = dependencies.now ?? Date.now;
@@ -155,7 +206,8 @@ export async function prepareVideoAnalysisInput(
     ((url, init) =>
       fetchWithNetworkDiagnostics(url, init, {
         label: 'media-video-upload',
-        redirectPolicy: 'error',
+        // GCS uses 308 for an incomplete upload, not a redirect.
+        redirectPolicy: 'manual',
       }));
   const deadline = now() + (dependencies.waitTimeoutMs ?? 120_000);
   const sleep =
@@ -288,8 +340,22 @@ export async function prepareVideoAnalysisInput(
       metadata: state.metadata,
       sourceBilling: state.sourceResult?.billing,
     };
-  if (state.fileName && state.uploadToken) return result();
+  if (
+    state.uploadToken !== undefined &&
+    !/^[a-zA-Z0-9_.-]+$/u.test(state.uploadToken)
+  )
+    throw new VideoTransferError('media_video_invalid_upload_session');
+  if (state.fileName) {
+    if (!state.uploadToken || !fileNameFrom(state.fileName))
+      throw new VideoTransferError('media_video_invalid_upload_session');
+    return result();
+  }
 
+  if (
+    (!state.uploadUrl || !state.uploadToken) &&
+    ['upload-ready', 'uploading', 'uploaded'].includes(state.phase)
+  )
+    throw new VideoTransferError('media_video_invalid_upload_session');
   if (!state.uploadUrl || !state.uploadToken) {
     // No bytes can be sent before the returned session is persisted. A lost
     // preparation ACK can therefore recreate one empty session on explicit resume.
@@ -300,6 +366,7 @@ export async function prepareVideoAnalysisInput(
       );
     state.uploadPreparationAttempts =
       (state.uploadPreparationAttempts ?? 0) + 1;
+    state.uploadProtocol = UPLOAD_PROTOCOL;
     state.phase = 'upload-preparing';
     await save();
     progress('Preparing the video upload.');
@@ -328,39 +395,42 @@ export async function prepareVideoAnalysisInput(
       );
     }
     if (
+      prepared.uploadProtocol !== UPLOAD_PROTOCOL ||
       typeof prepared.uploadUrl !== 'string' ||
       typeof prepared.uploadToken !== 'string' ||
       !prepared.uploadToken ||
-      prepared.uploadToken.includes('/')
+      !/^[a-zA-Z0-9_.-]+$/u.test(prepared.uploadToken) ||
+      typeof prepared.expiresAt !== 'number' ||
+      !Number.isFinite(prepared.expiresAt)
     )
       throw new VideoTransferError('media_video_invalid_upload_session');
-    state.uploadUrl = uploadAddress(prepared.uploadUrl);
+    state.uploadUrl = uploadAddress(prepared.uploadUrl).url;
     state.uploadToken = prepared.uploadToken;
-    state.expiresAt =
-      typeof prepared.expiresAt === 'number' &&
-      Number.isFinite(prepared.expiresAt)
-        ? prepared.expiresAt
-        : undefined;
+    state.expiresAt = prepared.expiresAt;
     state.phase = 'upload-ready';
     await save();
   }
-  if (state.expiresAt && state.expiresAt <= now())
+  if (state.expiresAt !== undefined && state.expiresAt <= now())
     throw new VideoTransferError('media_video_upload_session_expired');
-  const uploadUrl = uploadAddress(state.uploadUrl);
+  const session = uploadAddress(state.uploadUrl);
+  const uploadUrl = session.url;
+  const total = state.metadata.bytes;
+  const queryUpload = () =>
+    uploadRequest({
+      headers: { 'content-length': '0', 'content-range': `bytes */${total}` },
+    });
   let offset = 0;
   if (state.phase === 'uploading') {
     progress('Checking the existing upload session.');
-    const response = await uploadRequest({
-      headers: { 'x-goog-upload-command': 'query' },
-    });
-    const status = response.headers.get('x-goog-upload-status');
-    if (status === 'final') return completeUpload(response);
-    const received = response.headers.get('x-goog-upload-size-received');
-    if (status !== 'active' || received === null || !/^\d+$/u.test(received))
-      throw new VideoTransferError('media_video_upload_result_unknown', true);
-    offset = Number(received);
-    if (!Number.isSafeInteger(offset) || offset > state.metadata.bytes)
-      throw new VideoTransferError('media_video_upload_invalid_offset');
+    const response = await queryUpload();
+    if (response.status !== 308) return completeUpload(response);
+    try {
+      offset = receivedOffset(response, total);
+    } finally {
+      await response.body?.cancel().catch(() => undefined);
+    }
+    if (offset === total)
+      throw new VideoTransferError('media_video_upload_incomplete', true);
   }
   state.phase = 'uploading';
   await save();
@@ -373,26 +443,23 @@ export async function prepareVideoAnalysisInput(
   try {
     const response = await uploadRequest({
       headers: {
-        'x-goog-upload-command': 'upload, finalize',
-        'x-goog-upload-offset': String(offset),
+        'content-type': state.metadata.mimeType,
+        'content-range': `bytes ${offset}-${total - 1}/${total}`,
         'content-length': String(state.metadata.bytes - offset),
       },
       body: body as unknown as RequestInit['body'],
       duplex: 'half',
       signal: uploadSignal,
     });
-    const name = fileNameFrom(
-      await response.json().catch((error: unknown) => {
-        if (uploadSignal.aborted || isTimeoutError(error)) throw error;
-        return null;
-      }),
-    );
-    if (!name)
-      throw new VideoTransferError('media_video_upload_result_unknown', true);
-    state.fileName = name;
-    state.phase = 'uploaded';
-    await save();
-    return result();
+    if (response.status === 308) {
+      try {
+        receivedOffset(response, total);
+      } finally {
+        await response.body?.cancel().catch(() => undefined);
+      }
+      throw new VideoTransferError('media_video_upload_incomplete', true);
+    }
+    return await completeUpload(response, uploadSignal);
   } catch (error) {
     // A timeout says nothing about whether Google finalized the bytes. Stop the
     // stream before one read-only query; never send bytes again in this call.
@@ -401,23 +468,42 @@ export async function prepareVideoAnalysisInput(
       progress('Upload response timed out; checking the existing session.');
       let response: Response | undefined;
       try {
-        response = await uploadRequest({
-          headers: { 'x-goog-upload-command': 'query' },
-        });
+        response = await queryUpload();
       } catch {
         // Keep the original upload diagnostic and durable session on query failure.
       }
-      if (response?.headers.get('x-goog-upload-status') === 'final')
-        return completeUpload(response);
-      await response?.body?.cancel().catch(() => undefined);
+      if (response && response.status !== 308) return completeUpload(response);
+      try {
+        if (response) receivedOffset(response, total);
+      } finally {
+        await response?.body?.cancel().catch(() => undefined);
+      }
     }
     throw error;
   } finally {
     body?.destroy();
   }
 
-  async function completeUpload(response: Response) {
-    let name = fileNameFrom(await response.json().catch(() => null));
+  async function completeUpload(response: Response, signal?: AbortSignal) {
+    const object = record(
+      await response.json().catch((error: unknown) => {
+        if (signal?.aborted || isTimeoutError(error)) throw error;
+        return null;
+      }),
+    );
+    let name: string | undefined;
+    if (object.name !== undefined || object.bucket !== undefined) {
+      name =
+        typeof object.name === 'string' && OBJECT_NAME.test(object.name)
+          ? `objects/${object.name}`
+          : undefined;
+      if (
+        !name ||
+        object.bucket !== session.bucket ||
+        (session.objectName && object.name !== session.objectName)
+      )
+        throw new VideoTransferError('media_video_upload_invalid_object');
+    }
     if (!name) {
       progress('Recovering the completed upload identity.');
       await save();
@@ -435,9 +521,11 @@ export async function prepareVideoAnalysisInput(
         throw new VideoTransferError('media_video_upload_result_unknown', true);
       }
       if (recovered.status === 'completed')
-        name = fileNameFrom({ file: { name: recovered.fileName } });
+        name = fileNameFrom(recovered.fileName);
       if (!name)
         throw new VideoTransferError('media_video_upload_result_unknown', true);
+      if (session.objectName && name !== `objects/${session.objectName}`)
+        throw new VideoTransferError('media_video_upload_invalid_object');
     }
     state.fileName = name;
     state.phase = 'uploaded';
@@ -449,17 +537,25 @@ export async function prepareVideoAnalysisInput(
     try {
       const response = await fetchResponse(uploadUrl, {
         ...init,
-        method: 'POST',
-        redirect: 'error',
+        method: 'PUT',
+        redirect: 'manual',
         signal: init.signal ?? AbortSignal.timeout(30_000),
       });
-      if (!response.ok) {
+      if (
+        ![200, 201, 308].includes(response.status) ||
+        response.headers.has('location')
+      ) {
         await response.body?.cancel();
         throw new VideoTransferError('media_video_upload_result_unknown', true);
       }
       return response;
     } catch (error) {
-      if (error instanceof PostPlusNetworkRequestError || error instanceof PostPlusFailure) throw error;
+      if (
+        error instanceof PostPlusNetworkRequestError ||
+        error instanceof PostPlusFailure ||
+        error instanceof VideoTransferError
+      )
+        throw error;
       throw new VideoTransferError('media_video_upload_result_unknown', true, {
         cause: error,
       });

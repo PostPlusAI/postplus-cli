@@ -90,12 +90,12 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
       globalThis.fetch = async (url, init) => {
         const state = JSON.parse(readFileSync(filename, 'utf8'));
         const save = () => writeFileSync(filename, JSON.stringify(state));
-        if (String(url).startsWith('https://generativelanguage.googleapis.com/upload/')) {
+        if (String(url).startsWith('https://storage.googleapis.com/upload/')) {
           const bytes = [];
           for await (const chunk of init.body) bytes.push(Buffer.from(chunk));
           assert.deepEqual(Buffer.concat(bytes), readFileSync(${JSON.stringify(video)}));
           state.uploads++; save();
-          return Response.json({ file: { name: 'files/original-upload' } });
+          return Response.json({ name: 'postplus-video-00000000-0000-4000-8000-000000000004', bucket: 'postplus-test' });
         }
         assert.equal(String(url), 'https://postplus.test/api/postplus-cli/hosted/capability');
         const body = JSON.parse(init.body);
@@ -114,7 +114,8 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
         }
         if (body.operation === 'prepare-upload') {
           save(); return Response.json({ output: {
-            uploadUrl: 'https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=original',
+            uploadUrl: 'https://storage.googleapis.com/upload/storage/v1/b/postplus-test/o?uploadType=resumable&upload_id=original',
+            uploadProtocol: 'gcs-resumable-v1',
             uploadToken: 'original-token', expiresAt: Date.now() + 60000,
           } });
         }
@@ -123,7 +124,7 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
           return Response.json({ output: { data: { id: 'original-run', status: 'accepted' } } });
         }
         if (body.operation === 'analyze') {
-          assert.equal(body.input.video, 'postplus-video://original-token/files/original-upload');
+          assert.equal(body.input.video, 'postplus-video://original-token/objects/postplus-video-00000000-0000-4000-8000-000000000004');
           state.accepted++; save();
           if (scenario === 'unknown') throw new TypeError('Lost submit acknowledgement');
           return Response.json({ output: { data: { id: 'original-run', status: 'accepted', stage: 'analyzing' } } });
@@ -220,7 +221,7 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
       if (scenario === 'generation') assert.equal(checkpoint.handle, 'original-run');
       else {
         assert.equal(checkpoint.videoTransfer.uploadToken, 'original-token');
-        assert.equal(checkpoint.videoTransfer.fileName, 'files/original-upload');
+        assert.equal(checkpoint.videoTransfer.fileName, 'objects/postplus-video-00000000-0000-4000-8000-000000000004');
         assert.equal(checkpoint.videoRequest.prompt, 'Retain original intent & text');
       }
     }
