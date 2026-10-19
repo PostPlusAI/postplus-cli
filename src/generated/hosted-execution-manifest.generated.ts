@@ -1641,7 +1641,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--limit",
               "type": "number",
               "required": false,
-              "description": "Maximum result count.",
+              "description": "Maximum top-level comments per post; enabled replies add extra results beyond this limit.",
               "default": 20,
               "integer": true,
               "min": 1,
@@ -1653,7 +1653,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--include-replies",
               "type": "boolean",
               "required": false,
-              "description": "Include nested public replies.",
+              "description": "Paid option: include replies as additional results, beyond the per-post top-level limit.",
               "default": false
             }
           ]
@@ -1680,8 +1680,17 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--hashtag",
               "type": "string",
-              "required": true,
-              "description": "Hashtag without #; repeat for more than one.",
+              "required": false,
+              "description": "Hashtag without #; use hashtag OR query.",
+              "repeatable": true
+            },
+            {
+              "name": "queries",
+              "class": "intent",
+              "flag": "--query",
+              "type": "string",
+              "required": false,
+              "description": "Content keyword or multi-word phrase; use query OR hashtag.",
               "repeatable": true
             },
             {
@@ -1690,7 +1699,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--limit",
               "type": "number",
               "required": false,
-              "description": "Maximum result count.",
+              "description": "Maximum posts or reels per hashtag or keyword, not a combined total.",
               "default": 20,
               "integer": true,
               "min": 1,
@@ -1702,7 +1711,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--kind",
               "type": "string",
               "required": false,
-              "description": "Content type.",
+              "description": "Content type; keyword search supports posts and reels.",
               "default": "posts",
               "enumValues": [
                 "posts",
@@ -1710,6 +1719,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
                 "stories"
               ]
             }
+          ],
+          "requiredAnyOf": [
+            "hashtags",
+            "queries"
           ]
         },
         {
@@ -1720,9 +1733,19 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "class": "intent",
               "flag": "--handle",
               "type": "string",
-              "required": true,
-              "description": "Public account handle; repeat for more than one.",
+              "required": false,
+              "description": "Account handle; use handle OR post URL.",
               "repeatable": true
+            },
+            {
+              "name": "urls",
+              "class": "intent",
+              "flag": "--url",
+              "type": "string",
+              "required": false,
+              "description": "Instagram post or Reel URL; one item per URL; use URL OR handle.",
+              "repeatable": true,
+              "format": "url"
             },
             {
               "name": "limit",
@@ -1730,12 +1753,16 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--limit",
               "type": "number",
               "required": false,
-              "description": "Maximum result count.",
+              "description": "Maximum posts per account. Direct post URLs return one item each; omit limit in URL mode.",
               "default": 20,
               "integer": true,
               "min": 1,
               "max": 200
             }
+          ],
+          "requiredAnyOf": [
+            "handles",
+            "urls"
           ]
         },
         {
@@ -1797,7 +1824,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--limit",
               "type": "number",
               "required": false,
-              "description": "Maximum result count.",
+              "description": "Maximum results per search phrase, not a combined total.",
               "default": 20,
               "integer": true,
               "min": 1,
@@ -2126,7 +2153,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--limit",
               "type": "number",
               "required": false,
-              "description": "Maximum result count.",
+              "description": "Maximum comments per post, including replies.",
               "default": 20,
               "integer": true,
               "min": 1,
@@ -2138,7 +2165,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--include-replies",
               "type": "boolean",
               "required": false,
-              "description": "Include comment replies.",
+              "description": "Include up to 5 replies per top-level comment within the per-post limit.",
               "default": false
             }
           ]
@@ -2161,7 +2188,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--limit",
               "type": "number",
               "required": false,
-              "description": "Maximum result count.",
+              "description": "Maximum videos per profile; each video includes author metadata.",
               "default": 20,
               "integer": true,
               "min": 1,
@@ -2188,7 +2215,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--limit",
               "type": "number",
               "required": false,
-              "description": "Maximum result count.",
+              "description": "Maximum related videos per seed URL. The source video is also returned and must be deduplicated.",
               "default": 20,
               "integer": true,
               "min": 1,
@@ -2200,7 +2227,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--country",
               "type": "string",
               "required": false,
-              "description": "Two-letter market code.",
+              "description": "Two-letter proxy location; does not establish creator or audience country.",
               "default": "US"
             }
           ]
@@ -2223,7 +2250,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--limit",
               "type": "number",
               "required": false,
-              "description": "Maximum result count.",
+              "description": "Maximum accounts per search phrase.",
               "default": 20,
               "integer": true,
               "min": 1,
@@ -2277,11 +2304,40 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--limit",
               "type": "number",
               "required": false,
-              "description": "Maximum result count.",
+              "description": "Maximum videos per hashtag, profile, query or related-video seed, not a combined total. Direct URLs return one each.",
               "default": 20,
               "integer": true,
               "min": 1,
               "max": 200
+            },
+            {
+              "name": "sort",
+              "class": "intent",
+              "flag": "--sort",
+              "type": "string",
+              "required": false,
+              "description": "Paid video-search sorting; only with query inputs.",
+              "enumValues": [
+                "relevant",
+                "liked",
+                "latest"
+              ]
+            },
+            {
+              "name": "time_range",
+              "class": "intent",
+              "flag": "--time-range",
+              "type": "string",
+              "required": false,
+              "description": "Paid video-search date filter; only with query inputs.",
+              "enumValues": [
+                "all",
+                "day",
+                "week",
+                "month",
+                "3months",
+                "6months"
+              ]
             },
             {
               "name": "country",
@@ -2289,7 +2345,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--country",
               "type": "string",
               "required": false,
-              "description": "Two-letter market code.",
+              "description": "Two-letter proxy location; does not establish creator or audience country.",
               "default": "US"
             }
           ],
