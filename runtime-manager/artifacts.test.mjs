@@ -47,3 +47,33 @@ test('artifact integrity includes links and rejects targets outside the installa
   await symlink(process.execPath, join(root, 'outside'));
   await assert.rejects(hashDirectory(root), /leaves its managed directory/);
 });
+
+test('Finder metadata does not break reuse; real file changes still fail verification', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'postplus-artifact-finder-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'bin'));
+  await writeFile(join(root, 'bin/node'), 'approved runtime');
+  const contentHash = await hashDirectory(root);
+  const sha256 = 'a'.repeat(64);
+  await writeFile(join(root, '.postplus-artifact.json'), JSON.stringify({ schemaVersion: 1, sha256, contentHash }));
+  await writeFile(join(root, '.DS_Store'), 'folder display settings');
+  await writeFile(join(root, 'bin/.DS_Store'), 'nested display settings');
+  await verifyArtifactDirectory(root, sha256);
+  assert.equal((await prepareArtifact(root, { sha256 }, root, () => assert.fail('must reuse runtime'))).reused, true);
+  await writeFile(join(root, 'bin/node'), 'modified runtime');
+  await assert.rejects(verifyArtifactDirectory(root, sha256), /integrity verification failed/);
+});
+
+test('a directory or symlink named .DS_Store cannot hide executable content', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'postplus-artifact-finder-type-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const original = await hashDirectory(root);
+  await mkdir(join(root, '.DS_Store'));
+  await writeFile(join(root, '.DS_Store/program'), 'executable');
+  assert.notEqual(await hashDirectory(root), original);
+  await rm(join(root, '.DS_Store'), { recursive: true });
+  if (process.platform !== 'win32') {
+    await symlink(process.execPath, join(root, '.DS_Store'));
+    await assert.rejects(hashDirectory(root), /leaves its managed directory/);
+  }
+});
