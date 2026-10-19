@@ -118,6 +118,7 @@ Usage:
   postplus runs list [--status <status>] [--since <iso>] [--limit <n>] [--json]
   postplus runs show <run-id> [--json]
   postplus research schema [--route <route>] [--json]
+  postplus research report --input <result.json> [--analysis <findings.json>] --output <research.html>
   postplus research run <route> --<semantic flags> --wait --output <result.json>
   postplus research run --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
   postplus media schema [--endpoint <endpoint-key>] [--json]
@@ -601,7 +602,7 @@ async function main(): Promise<void> {
     ? [...inputArgs.slice(1), '--help'] : inputArgs;
   const [command, ...rest] = args;
   // Help and bundled capability discovery do not inspect or mutate account state.
-  if (command && command !== 'list' && command !== 'ad-library' && !args.some(isHelpArg)) await assertConfigFilePermissions();
+  if (command && command !== 'list' && command !== 'ad-library' && !(command === 'research' && rest[0] === 'report') && !args.some(isHelpArg)) await assertConfigFilePermissions();
   const json = rest.includes('--json');
 
   switch (command) {
@@ -878,7 +879,7 @@ function helpCommandForArgs(args: string[]): string {
   const children: Record<string, string[]> = {
     auth: ['login', 'refresh', 'revoke', 'status', 'validate', 'logout'], skills: ['verify'], quote: ['confirm'],
     runs: ['list', 'show'], studio: ['init', 'open', 'status'],
-    research: ['schema', 'run'], media: ['schema', 'poll', 'prepare', 'estimate', ...buildVerbTargetIndex('media').keys()],
+    research: ['schema', 'run', 'report'], media: ['schema', 'poll', 'prepare', 'estimate', ...buildVerbTargetIndex('media').keys()],
     'media-file': ['upload', 'download'],
   };
   if (subcommand && children[command]?.includes(subcommand)) {

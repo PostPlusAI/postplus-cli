@@ -1,3 +1,4 @@
+import { runResearchReport } from './research-report.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -115,6 +116,10 @@ export async function runHostedDomainCommand(
   const [subcommand, ...rest] = args;
 
   if (domain === 'research') {
+    if (subcommand === 'report') {
+      if (context) throw new Error('Research report is a local CLI command; it does not run in hosted sessions.');
+      return runResearchReport(rest);
+    }
     if (subcommand === 'schema') {
       return runHostedSchema(domain, rest, context);
     }
@@ -2333,6 +2338,8 @@ Usage:
   postplus research run <route> --<semantic flags> --wait --output <result.json>
   postplus research run --resume-from <result.json> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json]
   postplus research schema [--route <route>] [--json]
+  postplus research report --input <result.json> [--analysis <findings.json>] --output <research.html>
+  postplus research report --analysis-schema
 
 Run \`postplus research run <route> --help\` for route-specific flags.
 Collect public research evidence or resume an existing hosted research run.

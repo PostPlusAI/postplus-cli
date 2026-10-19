@@ -83,7 +83,11 @@
     "runtime-manager/node-releases.json",
     "build/managed-runtime.js",
     "runtime-manager/path-registration.mjs",
-    "runtime-manager/npm-entry.cjs"
+    "runtime-manager/npm-entry.cjs",
+    "build/research-report.js",
+    "build/research-report-detail.js",
+    "build/research-report-model.js",
+    "build/research-report-analysis.js"
   ],
   "publishConfig": {
     "access": "public",
