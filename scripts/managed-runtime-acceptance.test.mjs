@@ -121,6 +121,10 @@ test('official bootstrap installs and reuses a complete managed runtime independ
   const active = (await readFile(join(program, 'active'), 'utf8')).split('\n');
   const managedNode = join(program, active[3]);
   const managedCli = join(program, active[4]);
+  // Reproduce Finder adding metadata to an already verified installation. The
+  // official update must reuse it without repair or another Node download.
+  await writeFile(join(managedNode, '..', '.DS_Store'), 'Finder runtime settings');
+  await writeFile(join(managedCli, '..', '.DS_Store'), 'Finder program settings');
   const updateDriver = join(root, 'update-driver.mjs');
   await writeFile(updateDriver, `
     import { pathToFileURL } from 'node:url';
