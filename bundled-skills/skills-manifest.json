@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-10-20.1",
+  "releaseId": "skills-2026-10-20.2",
   "skills": [
     {
       "name": "ads",
       "path": "skills/60-ads/ads/SKILL.md",
-      "contentHash": "72ae9de380c87d682af980df7fed81cc99fba0a9c22a3408e956b8ed555e36ff"
+      "contentHash": "208cf8307832eaff7b037ca3295cf9ec4d34de97aced92f28dbf207d4ee825cc"
     },
     {
       "name": "audio-transcription",
