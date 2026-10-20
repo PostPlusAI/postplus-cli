@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-10-20.1",
-  "title": "More precise social research and evidence-led reports.",
-  "summary": "Improves Instagram, TikTok and Meta ad research guidance, parameter selection and reusable evidence.",
+  "releaseId": "skills-2026-10-20.2",
+  "title": "Complete paused Meta ad builds and previews.",
+  "summary": "Plan and build complete paused website-conversion ads with verified budgets, audiences, creative copy and previews.",
   "highlights": [
-    "Distinguish topical ad discovery from verified advertiser research.",
-    "Use collected post, creator and comment evidence in Instagram and TikTok reports.",
-    "Reuse existing research results before starting additional paid collection."
+    "Use the same complete Meta build instructions through your agent and PostPlus CLI.",
+    "Keep campaigns, ad sets and ads paused while checking independent copy, images, destinations and tracking labels.",
+    "Inspect the original created object after an uncertain result instead of creating it again."
   ]
 }
