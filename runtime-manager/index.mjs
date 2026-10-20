@@ -3,7 +3,7 @@ import { readFile, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCommand } from '../build/command-runner.js';
-import { PostPlusFailure, writeFailure } from '../build/failure-contract.js';
+import { PostPlusFailure, readFailureOutput, writeFailure } from '../build/failure-contract.js';
 import { diagnosticFetch } from '../build/network-diagnostics.js';
 import { fetchRelease, validateRelease } from './distribution.mjs';
 import { registerCommandPath } from './path-registration.mjs';
@@ -17,7 +17,7 @@ export async function setup({ release, root = defaultInstallRoot(), command = 'i
   delete env.NODE_OPTIONS;
   delete env.NODE_PATH;
   const run = async (executable, args) => (await runCommand(executable, args, { env, timeoutMs: 300_000 })).stdout;
-  return installRelease({ release, root, fetchFn, run, cliArchive, nodeArchive, repair,
+  return installRelease({ release, root, fetchFn, run, cliArchive, nodeArchive, repair, operation: command,
     afterActivate: async installed => {
       if (programOnly) {
         const pathRegistration = await registerCommandPath(installed.root);
@@ -31,11 +31,19 @@ export async function setup({ release, root = defaultInstallRoot(), command = 'i
           { env: { ...env, POSTPLUS_INSTALL_ROOT: installed.root,
             POSTPLUS_CLI_UPDATE_CONTINUATION_VERSION: release.cliVersion }, timeoutMs: 300_000 });
         report = JSON.parse(result.stdout);
-        if (report.ok !== true) throw new Error('PostPlus skill setup did not return verified success.');
+        if (report.ok !== true) {
+          const failure = readFailureOutput(result.stdout);
+          throw failure ? Object.assign(new Error(failure.message), { failure }) : new Error('PostPlus skill setup did not return verified success.');
+        }
       } catch (cause) {
         throw new PostPlusFailure('PostPlus program is installed, but skill setup did not complete.', {
           code: 'postplus_skills_setup_incomplete', stage: 'skills-installation', service: 'local', retryable: false,
-          action: `Use the installed command at ${installed.commandPath} to finish ${command}; the program update was preserved.`,
+          component: 'skills', operation: command, version: release.skillsReleaseId, targetVersion: release.skillsReleaseId,
+          platform: `${process.platform}-${process.arch}`,
+          action: cause?.failure?.action
+            ? `${cause.failure.action} The program update was preserved.`
+            : `Use the installed PostPlus command to finish ${command}; the program update was preserved.`,
+          ...(cause?.failure?.recovery ? { recovery: cause.failure.recovery } : {}),
         }, { cause });
       }
       const pathRegistration = await registerCommandPath(installed.root);
@@ -66,7 +74,7 @@ async function main(args) {
   }
   const release = options['--release-file']
     ? validateRelease(JSON.parse(await readFile(resolve(options['--release-file']), 'utf8')))
-    : await fetchRelease(diagnosticFetch);
+    : await fetchRelease(diagnosticFetch, undefined, { operation: command });
   const report = await setup({ command, currentDirectory, programOnly, repair, release,
     root: options['--root'] || defaultInstallRoot(), cliArchive: options['--cli-archive'], nodeArchive: options['--node-archive'] });
   process.stdout.write(JSON.stringify(report) + '\n');

@@ -43,72 +43,116 @@ export function selectNodeArtifact(release, platform = process.platform, arch = 
   return artifact;
 }
 
-export async function fetchRelease(fetchFn, url = RELEASE_URL) {
-  const location = new URL(url);
-  if (location.protocol !== 'https:' || location.username || location.password) throw new Error('PostPlus release metadata requires HTTPS.');
-  const response = await fetchFn(location, { signal: AbortSignal.timeout(30_000), redirect: 'error' });
-  if (!response.ok || !response.body) {
-    await response.body?.cancel();
-    throw new Error(`PostPlus release information could not be downloaded (HTTP ${response.status}).`);
-  }
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of response.body) {
-    size += chunk.byteLength;
-    if (size > 128 * 1024) throw new Error('PostPlus release metadata is too large.');
-    chunks.push(Buffer.from(chunk));
-  }
-  return validateRelease(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+// Add operation evidence without reclassifying an existing transport/OS error.
+// Serialization and redaction remain owned by the CLI failure contract.
+export function runtimeFailure(cause, context) {
+  if (cause?.component || cause?.details?.component) return cause;
+  const error = new Error(cause instanceof Error ? cause.message : 'PostPlus runtime operation failed.', { cause });
+  Object.assign(error, {
+    code: typeof cause?.code === 'string' ? cause.code : 'postplus_runtime_operation_failed',
+    service: cause?.service ?? cause?.details?.service ?? 'managed-runtime', retryable: cause?.retryable ?? cause?.details?.retryable ?? false,
+    action: cause?.action ?? cause?.details?.action ?? 'Resolve the reported runtime operation failure, then retry the same installation or update command.',
+    currentVersion: 'unknown', targetVersion: context.version ?? 'unknown',
+    ...context,
+  });
+  return error;
 }
 
-export async function downloadArtifact(artifact, destination, fetchFn) {
-  validateArtifact(artifact);
-  // Follow only HTTPS redirects with a fixed hop bound. GitHub release downloads
-  // redirect to their asset CDN; a redirect never authorizes plaintext HTTP.
+export async function fetchRelease(fetchFn, url = RELEASE_URL, context = {}) {
+  const started = performance.now();
+  const timeoutMs = 30_000;
+  let stage = 'release-request';
+  let response;
+  try {
+    const location = new URL(url);
+    if (location.protocol !== 'https:' || location.username || location.password) throw new Error('PostPlus release metadata requires HTTPS.');
+    response = await fetchFn(location, { signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
+    if (!response.ok || !response.body) {
+      await response.body?.cancel();
+      throw new Error(`PostPlus release information could not be downloaded (HTTP ${response.status}).`);
+    }
+    stage = 'release-body';
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response.body) {
+      size += chunk.byteLength;
+      if (size > 128 * 1024) throw new Error('PostPlus release metadata is too large.');
+      chunks.push(Buffer.from(chunk));
+    }
+    stage = 'release-validation';
+    return validateRelease(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+  } catch (cause) {
+    throw runtimeFailure(cause, { component: 'release-metadata', stage, operation: context.operation ?? 'fetch-release',
+      platform: `${process.platform}-${process.arch}`, originalUrl: String(url), failureUrl: String(url),
+      elapsedMs: Math.round(performance.now() - started), timeoutMs,
+      ...(response ? { httpStatus: response.status } : {}) });
+  }
+}
+
+export async function downloadArtifact(artifact, destination, fetchFn, context = {}) {
+  const started = performance.now();
+  const timeoutMs = 300_000;
+  let stage = 'artifact-validation';
   let url = artifact.url;
   let response;
-  for (let redirects = 0; redirects <= 5; redirects++) {
-    response = await fetchFn(url, { signal: AbortSignal.timeout(300_000), redirect: 'manual' });
-    if (![301, 302, 303, 307, 308].includes(response.status)) break;
-    const next = response.headers.get('location');
-    await response.body?.cancel();
-    if (!next || redirects === 5) throw new Error('PostPlus artifact redirect limit or location is invalid.');
-    const resolved = new URL(next, url);
-    if (resolved.protocol !== 'https:' || resolved.username || resolved.password) throw new Error('PostPlus artifact redirect must remain HTTPS.');
-    url = resolved.href;
-  }
-  if (!response.ok || !response.body) {
-    await response.body?.cancel();
-    throw new Error(`PostPlus artifact download failed (HTTP ${response.status}).`);
-  }
-  const hash = createHash('sha256');
-  let bytes = 0;
-  const measure = new Transform({ transform(chunk, encoding, callback) {
-    bytes += chunk.length;
-    if (bytes > 512 * 1024 * 1024) return callback(new Error('PostPlus artifact exceeds the download limit.'));
-    hash.update(chunk); callback(null, chunk);
-  } });
-  // Acquire exclusive ownership before cleanup is allowed to remove this path.
-  let file;
-  try { file = await open(destination, 'wx', 0o600); }
-  catch (error) { await response.body.cancel(); throw error; }
   try {
-    await pipeline(Readable.fromWeb(response.body), measure, file.createWriteStream());
-    if (hash.digest('hex') !== artifact.sha256) throw new Error('PostPlus download checksum does not match the approved release.');
-    return destination;
-  } catch (error) { await file.close(); await rm(destination, { force: true }); throw error; }
-  finally { await file.close(); }
+    validateArtifact(artifact);
+    // HTTPS redirects and the existing hop/timeout bounds remain unchanged.
+    stage = 'artifact-request';
+    for (let redirects = 0; redirects <= 5; redirects++) {
+      response = await fetchFn(url, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
+      if (![301, 302, 303, 307, 308].includes(response.status)) break;
+      stage = 'artifact-redirect';
+      const next = response.headers.get('location');
+      await response.body?.cancel();
+      if (!next || redirects === 5) throw new Error('PostPlus artifact redirect limit or location is invalid.');
+      const resolved = new URL(next, url);
+      url = resolved.href;
+      if (resolved.protocol !== 'https:' || resolved.username || resolved.password) throw new Error('PostPlus artifact redirect must remain HTTPS.');
+      response = undefined;
+      stage = 'artifact-request';
+    }
+    if (!response.ok || !response.body) {
+      await response.body?.cancel();
+      throw new Error(`PostPlus artifact download failed (HTTP ${response.status}).`);
+    }
+    const hash = createHash('sha256');
+    let bytes = 0;
+    const measure = new Transform({ transform(chunk, encoding, callback) {
+      bytes += chunk.length;
+      if (bytes > 512 * 1024 * 1024) return callback(new Error('PostPlus artifact exceeds the download limit.'));
+      hash.update(chunk); callback(null, chunk);
+    } });
+    let file;
+    stage = 'artifact-write';
+    try { file = await open(destination, 'wx', 0o600); }
+    catch (error) { await response.body.cancel(); throw error; }
+    try {
+      stage = 'artifact-body';
+      await pipeline(Readable.fromWeb(response.body), measure, file.createWriteStream());
+      stage = 'artifact-checksum';
+      if (hash.digest('hex') !== artifact.sha256) throw new Error('PostPlus download checksum does not match the approved release.');
+      return destination;
+    } catch (error) { await file.close(); await rm(destination, { force: true }); throw error; }
+    finally { await file.close(); }
+  } catch (cause) {
+    throw runtimeFailure(cause, { component: 'artifact', ...context, stage, operation: context.operation ?? 'download-artifact',
+      platform: `${process.platform}-${process.arch}`, originalUrl: artifact.url, failureUrl: url,
+      elapsedMs: Math.round(performance.now() - started), timeoutMs,
+      ...(response ? { httpStatus: response.status } : {}) });
+  }
 }
 
-export async function extractArtifact(archive, artifact, destination) {
-  // This is called only after verifying the exact approved archive digest.
-  await mkdir(destination, { recursive: true });
-  if (new URL(artifact.url).pathname.endsWith('.zip')) {
-    // Windows' native bsdtar supports ZIP as well as the CLI's tar archive.
-    // Use the same extractor for both bootstrap and later runtime updates.
-    await exec(TAR_EXECUTABLE, ['-xf', archive, '-C', destination], { timeout: 120_000 });
-  } else {
-    await exec(TAR_EXECUTABLE, ['-xzf', archive, '-C', destination], { timeout: 120_000 });
+export async function extractArtifact(archive, artifact, destination, context = {}) {
+  const started = performance.now();
+  try {
+    // Called only after verifying the approved archive digest.
+    await mkdir(destination, { recursive: true });
+    await exec(TAR_EXECUTABLE, [new URL(artifact.url).pathname.endsWith('.zip') ? '-xf' : '-xzf', archive, '-C', destination], { timeout: 120_000 });
+    return join(destination, artifact.directory);
+  } catch (cause) {
+    throw runtimeFailure(cause, { component: 'artifact', ...context, stage: 'artifact-extract', operation: context.operation ?? 'extract-artifact',
+      platform: `${process.platform}-${process.arch}`, originalUrl: artifact.url,
+      elapsedMs: Math.round(performance.now() - started), timeoutMs: 120_000 });
   }
-  return join(destination, artifact.directory);
 }

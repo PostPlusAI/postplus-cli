@@ -1,6 +1,6 @@
 {
   "name": "@postplus/cli",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017",
   "type": "module",
   "description": "PostPlus CLI for PostPlus Cloud auth, status, and diagnostics.",
@@ -118,7 +118,7 @@
     "vendor:skills:build": "node scripts/build-skills-runtime.mjs",
     "vendor:skills:check": "node scripts/check-skills-runtime.mjs",
     "vendor:skills:test": "node --test scripts/vendor-skills-runtime.test.mjs",
-    "test:runtime": "node --test --test-timeout=120000 runtime-manager/*.test.mjs",
+    "test:runtime": "node --test --test-timeout=120000 runtime-manager/*.test.mjs scripts/bootstrap-diagnostics.test.mjs",
     "test:runtime:acceptance": "node --test scripts/managed-runtime-acceptance.test.mjs"
   },
   "dependencies": {

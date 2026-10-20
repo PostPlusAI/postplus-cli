@@ -48,6 +48,33 @@ test('artifact integrity includes links and rejects targets outside the installa
   await assert.rejects(hashDirectory(root), /leaves its managed directory/);
 });
 
+test('preparation reports filesystem and extraction failures without changing an old generation', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'postplus-prepare-failure-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const old = join(root, 'old-generation');
+  await mkdir(old);
+  await writeFile(join(old, 'keep'), 'running old program');
+  const bytes = Buffer.from('not an archive');
+  const artifact = { url: 'https://example.test/node.tar.gz', directory: 'node', sha256: createHash('sha256').update(bytes).digest('hex') };
+  await assert.rejects(prepareArtifact(root, artifact, join(root, 'new-generation'), async () => new Response(bytes), undefined, { component: 'node', version: '24.21.0' }), error => {
+    assert.equal(error.component, 'node');
+    assert.equal(error.version, '24.21.0');
+    assert.equal(error.stage, 'artifact-extract');
+    assert.equal(error.timeoutMs, 120000);
+    assert.ok(error.cause);
+    return true;
+  });
+  const file = join(root, 'not-a-directory');
+  await writeFile(file, 'file');
+  await assert.rejects(prepareArtifact(file, artifact, join(file, 'new'), async () => assert.fail('must not fetch'), undefined, { component: 'cli', version: '0.2.21' }), error => {
+    assert.equal(error.component, 'cli');
+    assert.equal(error.stage, 'artifact-prepare');
+    assert.ok(['ENOTDIR', 'EEXIST'].includes(error.code));
+    return true;
+  });
+  assert.equal(await readFile(join(old, 'keep'), 'utf8'), 'running old program');
+});
+
 test('Finder metadata does not break reuse; real file changes still fail verification', async t => {
   const root = await mkdtemp(join(tmpdir(), 'postplus-artifact-finder-'));
   t.after(() => rm(root, { recursive: true, force: true }));

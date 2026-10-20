@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
-import { downloadArtifact, extractArtifact } from './distribution.mjs';
+import { downloadArtifact, extractArtifact, runtimeFailure } from './distribution.mjs';
 const RECEIPT = '.postplus-artifact.json';
 
 export async function hashDirectory(root) {
@@ -45,40 +45,50 @@ export async function verifyArtifactDirectory(directory, sha256) {
   }
 }
 
-export async function prepareArtifact(root, artifact, destination, fetchFn, archiveFile, { repair = false } = {}) {
-  let exists = false;
-  let repairReason;
-  try { await lstat(destination); exists = true; }
-  catch (error) { if (error.code !== 'ENOENT') throw error; }
-  if (exists) {
-    try {
-      await verifyArtifactDirectory(destination, artifact.sha256);
-      return { directory: destination, reused: true, repaired: false };
-    } catch (error) {
-      if (!repair) throw error;
-      // An explicitly requested repair prepares a new immutable generation.
-      // Never overwrite or remove files that a running process could hold.
-      repairReason = error.message;
-      destination += `-repair-${randomUUID()}`;
-    }
-  }
-  await mkdir(root, { recursive: true });
-  const temp = await mkdtemp(join(root, '.prepare-'));
+export async function prepareArtifact(root, artifact, destination, fetchFn, archiveFile, { repair = false, ...context } = {}) {
+  const started = performance.now();
+  let stage = 'artifact-prepare';
   try {
-    const archive = archiveFile ?? join(temp, new URL(artifact.url).pathname.endsWith('.zip') ? 'artifact.zip' : 'artifact.tar.gz');
-    if (archiveFile) {
-      const hash = createHash('sha256');
-      for await (const bytes of createReadStream(archiveFile)) hash.update(bytes);
-      if (hash.digest('hex') !== artifact.sha256) throw new Error('Local PostPlus archive does not match the approved release.');
-    } else await downloadArtifact(artifact, archive, fetchFn);
-    const source = await extractArtifact(archive, artifact, join(temp, 'extracted'));
-    const staged = join(temp, 'prepared');
-    await cp(source, staged, { recursive: true, dereference: false, verbatimSymlinks: true });
-    await rm(join(staged, RECEIPT), { force: true });
-    const contentHash = await hashDirectory(staged);
-    await writeFile(join(staged, RECEIPT), JSON.stringify({ schemaVersion: 1, sha256: artifact.sha256, contentHash }) + '\n', { mode: 0o600 });
-    await mkdir(join(destination, '..'), { recursive: true });
-    await rename(staged, destination);
-    return { directory: destination, reused: false, repaired: Boolean(repairReason), ...(repairReason ? { repairReason } : {}) };
-  } finally { await rm(temp, { recursive: true, force: true }); }
+    let exists = false;
+    let repairReason;
+    try { await lstat(destination); exists = true; }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (exists) {
+      try {
+        await verifyArtifactDirectory(destination, artifact.sha256);
+        return { directory: destination, reused: true, repaired: false };
+      } catch (error) {
+        if (!repair) throw error;
+        // An explicitly requested repair prepares a new immutable generation.
+        // Never overwrite or remove files that a running process could hold.
+        repairReason = error.message;
+        destination += `-repair-${randomUUID()}`;
+      }
+    }
+    await mkdir(root, { recursive: true });
+    const temp = await mkdtemp(join(root, '.prepare-'));
+    try {
+      const archive = archiveFile ?? join(temp, new URL(artifact.url).pathname.endsWith('.zip') ? 'artifact.zip' : 'artifact.tar.gz');
+      if (archiveFile) {
+        stage = 'artifact-checksum';
+        const hash = createHash('sha256');
+        for await (const bytes of createReadStream(archiveFile)) hash.update(bytes);
+        if (hash.digest('hex') !== artifact.sha256) throw new Error('Local PostPlus archive does not match the approved release.');
+      } else await downloadArtifact(artifact, archive, fetchFn, context);
+      const source = await extractArtifact(archive, artifact, join(temp, 'extracted'), context);
+      stage = 'artifact-prepare';
+      const staged = join(temp, 'prepared');
+      await cp(source, staged, { recursive: true, dereference: false, verbatimSymlinks: true });
+      await rm(join(staged, RECEIPT), { force: true });
+      const contentHash = await hashDirectory(staged);
+      await writeFile(join(staged, RECEIPT), JSON.stringify({ schemaVersion: 1, sha256: artifact.sha256, contentHash }) + '\n', { mode: 0o600 });
+      await mkdir(join(destination, '..'), { recursive: true });
+      await rename(staged, destination);
+      return { directory: destination, reused: false, repaired: Boolean(repairReason), ...(repairReason ? { repairReason } : {}) };
+    } finally { await rm(temp, { recursive: true, force: true }); }
+  } catch (cause) {
+    throw runtimeFailure(cause, { component: 'artifact', ...context, stage, operation: context.operation ?? 'prepare-artifact',
+      platform: `${process.platform}-${process.arch}`, originalUrl: artifact.url,
+      elapsedMs: Math.round(performance.now() - started) });
+  }
 }
