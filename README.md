@@ -30,8 +30,9 @@ your original task rather than repeating this introduction.
 
 Cloud tasks require a connected account. Run `postplus auth login` when the CLI
 requests it, and approve the real browser connection yourself. Never share
-credentials with the agent. Quotes, publishing, and replacing business content
-require the applicable user approval.
+credentials with the agent. PostPlus tasks use existing account credits automatically when the server can
+reserve the required balance. Respect any no-spend or scope restriction in the
+user request. Publishing and replacing business content still require approval.
 
 ## Connect a marketing channel
 

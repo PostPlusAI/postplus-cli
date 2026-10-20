@@ -82,7 +82,7 @@ export type PrepareVideoAnalysisInputOptions = {
   saveState(state: VideoTransferState): Promise<void>;
   request(body: VideoTransferRequest): Promise<unknown>;
   onProgress?(message: string): void;
-  /** The outer HTTP boundary recognizes its product/quote classes without a circular import. */
+  /** The outer HTTP boundary recognizes its product error classes without a circular import. */
   isHostedRequestError?(error: unknown): boolean;
   /** The outer compatibility boundary proves that this request never executed. */
   isRequestRejectedBeforeExecution?(error: unknown): boolean;

@@ -13,12 +13,12 @@
 // parameters (no `resolveFreshRemoteAuth()` disk read, no 401-refresh-retry — the
 // host supplies fresh session auth each turn), the request-json body comes from
 // `requestJson` instead of a `--request <file>`, and the parsed payload is RETURNED
-// (the structured HostedProductRequestError / quote-confirmation error are thrown
+// (the structured HostedProductRequestError is thrown
 // verbatim) instead of being written to stdout/file with an exit code.
 //
 // Scope: only the hosted spend/write surfaces go through here —
 // media / research / media-file. Read-only diagnostics (status / doctor
-// / skills / whoami / quote / list / --version / --help) are NOT hosted-domain
+// / skills / whoami / list / --version / --help) are NOT hosted-domain
 // commands and are out of scope for this entry.
 
 import type { AuthedCloudRequestAuth } from './authed-cloud-request.js';
@@ -59,7 +59,7 @@ export type RunHostedRequestInput = {
 /**
  * Runs a hosted media / research / media-file request in-process and
  * returns the parsed hosted payload. Throws the structured
- * HostedProductRequestError / quote-confirmation error VERBATIM on failure — no
+ * HostedProductRequestError VERBATIM on failure — no
  * stdout, no file writes, no exit code. The wire request is identical to the bin
  * path for the same input (proven by the parity test).
  */
@@ -100,7 +100,7 @@ export type RunHostedCapabilityEnvelopeInput = {
 /**
  * Posts a hosted capability envelope in-process and returns the parsed payload.
  * Shares `postHostedJson` with every bin verb, so headers and the structured
- * HostedProductRequestError / quote-confirmation error behavior are identical.
+ * HostedProductRequestError behavior are identical.
  */
 export async function runHostedCapabilityEnvelope(
   input: RunHostedCapabilityEnvelopeInput,
