@@ -39,14 +39,6 @@ import {
 } from './hosted-domain-commands.js';
 import { assertConfigFilePermissions } from './local-state.js';
 import {
-  QUOTE_AUTO_CONFIRM_UNDER_ENV,
-  QuoteAutoConfirmCeilingExceededError,
-  QuoteConfirmationNonInteractiveError,
-  confirmLargeCreditQuote,
-  readLargeCreditQuoteConfirmationChallenge,
-  resolveLargeCreditQuoteConfirmation,
-} from './quote-confirmation.js';
-import {
   type PostPlusSkillsInstallScope,
   formatPostPlusSkillsInstallCommand,
   loadPublicSkillCatalog,
@@ -128,7 +120,6 @@ Usage:
   postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
   postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
   postplus studio init|open|status   Open bundled Local Studio
-  postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <credits>]
   postplus skills verify [--json]
   postplus install [--current-directory]
   postplus update [--current-directory]
@@ -336,145 +327,6 @@ Official skills:
   }
 }
 
-async function runQuoteCommand(rest: string[]): Promise<number> {
-  if (!rest.length || isHelpArg(rest[0]!) || (rest[0] === 'confirm' && rest.some(isHelpArg))) return printQuoteHelp();
-  const [subcommand, ...options] = rest;
-
-  if (subcommand !== 'confirm') {
-    throw new Error(`Unknown command: quote ${subcommand}`);
-  }
-
-  const parsed = parseQuoteConfirmOptions(options);
-
-  if (!parsed.json) {
-    throw new Error('quote confirm requires --json.');
-  }
-
-  if (!parsed.challengeFile) {
-    throw new Error('quote confirm requires --challenge-file.');
-  }
-
-  const challenge = readLargeCreditQuoteConfirmationChallenge(
-    JSON.parse(await readFile(parsed.challengeFile, 'utf8')),
-  );
-
-  if (!challenge) {
-    process.stderr.write(
-      'Invalid large credit quote confirmation challenge.\n',
-    );
-    return 1;
-  }
-
-  const ceilingMillicredits = resolveQuoteAutoConfirmCeiling(
-    parsed.autoConfirmUnder,
-  );
-
-  try {
-    writeJson(
-      await resolveLargeCreditQuoteConfirmation(challenge, {
-        confirm: confirmLargeCreditQuote,
-        ceilingMillicredits,
-      }),
-    );
-  } catch (error) {
-    if (
-      error instanceof QuoteAutoConfirmCeilingExceededError ||
-      error instanceof QuoteConfirmationNonInteractiveError
-    ) {
-      process.stderr.write(`${error.message}\n`);
-      return 1;
-    }
-
-    throw error;
-  }
-
-  return 0;
-}
-
-/**
- * Resolves the public credit ceiling into internal ledger units. Precedence:
- * explicit --auto-confirm-under flag, then the
- * POSTPLUS_QUOTE_AUTO_CONFIRM_UNDER_CREDITS env var. Returns null when
- * neither is set, leaving today's interactive behavior unchanged.
- */
-function resolveQuoteAutoConfirmCeiling(
-  flagValue: number | null,
-): number | null {
-  if (flagValue !== null) {
-    return Math.round(flagValue * 1_000);
-  }
-
-  const envValue = process.env[QUOTE_AUTO_CONFIRM_UNDER_ENV];
-  if (envValue === undefined || envValue.trim() === '') {
-    return null;
-  }
-
-  const parsed = Number(envValue);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error(
-      `Invalid ${QUOTE_AUTO_CONFIRM_UNDER_ENV}: expected a non-negative number of PostPlus credits.`,
-    );
-  }
-
-  return Math.round(parsed * 1_000);
-}
-
-function parseQuoteConfirmOptions(args: string[]): {
-  autoConfirmUnder: number | null;
-  challengeFile: string | null;
-  json: boolean;
-} {
-  const options = {
-    autoConfirmUnder: null as number | null,
-    challengeFile: null as string | null,
-    json: false,
-  };
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === '--json') {
-      options.json = true;
-      continue;
-    }
-
-    if (arg === '--challenge-file') {
-      const challengeFile = args[index + 1];
-
-      if (!challengeFile || challengeFile.startsWith('--')) {
-        throw new Error('Missing value for --challenge-file.');
-      }
-
-      options.challengeFile = challengeFile;
-      index += 1;
-      continue;
-    }
-
-    if (arg === '--auto-confirm-under') {
-      const rawValue = args[index + 1];
-
-      if (!rawValue || rawValue.startsWith('--')) {
-        throw new Error('Missing value for --auto-confirm-under.');
-      }
-
-      const value = Number(rawValue);
-      if (!Number.isFinite(value) || value < 0) {
-        throw new Error(
-          'Invalid value for --auto-confirm-under: expected a non-negative number of PostPlus credits.',
-        );
-      }
-
-      options.autoConfirmUnder = value;
-      index += 1;
-      continue;
-    }
-
-    throw new Error(`Unknown option for quote confirm: ${arg}`);
-  }
-
-  return options;
-}
-
 function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -674,9 +526,6 @@ async function main(): Promise<void> {
       process.exitCode = (await runMediaFileCommand(rest)) as number;
       return;
       return;
-    case 'quote':
-      process.exitCode = await runQuoteCommand(rest);
-      return;
     case 'skills':
       process.exitCode = await runSkillsCommand(rest);
       return;
@@ -857,27 +706,12 @@ function printReadOnlyHelp(command: 'list' | 'version', json: boolean): number {
   return 0;
 }
 
-function printQuoteHelp(): number {
-  process.stdout.write(`Authorize a quoted operation only after user approval. Help does not confirm or execute anything.
-Usage: postplus quote confirm --json --challenge-file <path> [--auto-confirm-under <credits>]
-Options:
-  --challenge-file  Read the challenge returned by the blocked operation.
-  --json  Required structured response.
-  --auto-confirm-under  Use only the user's already approved credit threshold.
-  --help, -h  Show this help.
-Examples:
-  postplus quote confirm --json --challenge-file ./challenge.json
-Next: After approval, use the returned token with the original operation's retry instructions.
-`);
-  return 0;
-}
-
 function helpCommandForArgs(args: string[]): string {
   const [command, subcommand, target] = args[0] === 'help' ? args.slice(1) : args;
   if (!command || command.startsWith('-')) return 'postplus';
   const parts = ['postplus', command];
   const children: Record<string, string[]> = {
-    auth: ['login', 'refresh', 'revoke', 'status', 'validate', 'logout'], skills: ['verify'], quote: ['confirm'],
+    auth: ['login', 'refresh', 'revoke', 'status', 'validate', 'logout'], skills: ['verify'],
     runs: ['list', 'show'], studio: ['init', 'open', 'status'],
     research: ['schema', 'run', 'report'], media: ['schema', 'poll', 'prepare', 'estimate', ...buildVerbTargetIndex('media').keys()],
     'media-file': ['upload', 'download'],
