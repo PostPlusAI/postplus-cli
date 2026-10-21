@@ -85,7 +85,10 @@
     "build/research-report.js",
     "build/research-report-detail.js",
     "build/research-report-model.js",
-    "build/research-report-analysis.js"
+    "build/research-report-analysis.js",
+    "build/video-text.js",
+    "build/video-text-command.js",
+    "assets/video-text"
   ],
   "publishConfig": {
     "access": "public",

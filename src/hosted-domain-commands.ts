@@ -974,7 +974,7 @@ function readMediaReferenceValue(output: Record<string, unknown>): string {
 // stops at the durable PostPlus reference: endpoint-owned provider
 // materialization happens later at the Web boundary, after every local file has
 // staged successfully and before the single provider submit.
-async function stageHostedMediaFile(input: {
+export async function stageHostedMediaFile(input: {
   file: LocalMediaFile;
   operationId: string;
   skillName: string;

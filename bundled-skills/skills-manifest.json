@@ -130,7 +130,12 @@
     {
       "name": "video-batch-runner",
       "path": "skills/40-creative/video-batch-runner/SKILL.md",
-      "contentHash": "82aa532860c384299ae215e8077fc74aadd699ebdfbd4db994b5475d155c50a4"
+      "contentHash": "5b3e10c4d54e6b0f7d57dc157201a16d9ecce98f94681caf862ba9bfd48846f7"
+    },
+    {
+      "name": "video-postproduction",
+      "path": "skills/40-creative/video-postproduction/SKILL.md",
+      "contentHash": "19aab825a1cb73d35d30e6c3f02f040cb0f080b79d2fa46569c48a3beccb567b"
     },
     {
       "name": "video-transcription",

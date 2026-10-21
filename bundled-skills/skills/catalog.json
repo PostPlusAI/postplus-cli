@@ -590,6 +590,23 @@
     {
       "familyId": "media-production",
       "familyName": "Media and Creative Production",
+      "name": "video-postproduction",
+      "description": "Burn timed captions and static text overlays into an existing video when text postproduction is requested. Keep the raw video and editable text plan.",
+      "category": "generate",
+      "example": "Add readable phrase captions and a short opening hook to this raw video.",
+      "path": "skills/40-creative/video-postproduction/SKILL.md",
+      "status": "released",
+      "supportedModels": [],
+      "requirements": {
+        "localDependencies": [
+          "ffmpeg",
+          "ffprobe"
+        ]
+      }
+    },
+    {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
       "name": "video-transcription",
       "description": "Transcribe speech in local or remote videos with timestamps. Convert existing timed transcripts locally into SRT or ASS; use media-analysis for visual understanding.",
       "category": "transcribe",

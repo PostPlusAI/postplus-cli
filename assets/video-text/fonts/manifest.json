@@ -1,0 +1,21 @@
+{
+  "sourceCommit": "47d54ca1ebb14fd864695f1d39dc734f39017c33",
+  "fonts": [
+    {
+      "family": "Arimo",
+      "file": "Arimo.ttf",
+      "sha256": "e43898b143ec826ac8cb4034816458a7047fbe0836558de2a1f8c6223ae3e0ca",
+      "license": "OFL-1.1",
+      "licenseFile": "Arimo.ttf.OFL.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/arimo/Arimo%5Bwght%5D.ttf"
+    },
+    {
+      "family": "Noto Sans SC",
+      "file": "NotoSansSC.ttf",
+      "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+      "license": "OFL-1.1",
+      "licenseFile": "NotoSansSC.ttf.OFL.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
+    }
+  ]
+}
