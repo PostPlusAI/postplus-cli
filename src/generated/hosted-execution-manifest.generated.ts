@@ -1746,13 +1746,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "type": "media-url",
               "mediaKind": "video",
               "required": true
-            },
-            {
-              "name": "prompt",
-              "class": "intent",
-              "flag": "--prompt",
-              "type": "string",
-              "required": false
             }
           ]
         }

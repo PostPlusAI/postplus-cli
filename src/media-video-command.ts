@@ -75,7 +75,6 @@ export async function executeVideoAnalysis(input: {
     operationId: string;
   };
   originalSource: string;
-  prompt?: string;
   skillName: string;
   outputPath: string | null;
   json: boolean;
@@ -87,7 +86,6 @@ export async function executeVideoAnalysis(input: {
   const {
     body,
     originalSource,
-    prompt,
     skillName,
     outputPath,
     json,
@@ -105,7 +103,6 @@ export async function executeVideoAnalysis(input: {
   if (checkpoint) {
     const videoRequest = {
       source: originalSource,
-      ...(prompt !== undefined ? { prompt } : {}),
       skill: skillName,
       ...(estimatedUsage ? { videoSeconds: estimatedUsage.videoSeconds } : {}),
     };
