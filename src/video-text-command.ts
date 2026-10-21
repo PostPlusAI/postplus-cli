@@ -10,6 +10,7 @@ import {
   stageHostedMediaFile,
 } from './hosted-domain-commands.js';
 import { createMediaFileFingerprint } from './hosted-media-transfer.js';
+import { readManagedSkillBaseline } from './local-state.js';
 import {
   VIDEO_TEXT_LIMITS,
   VIDEO_TEXT_PLAN_SCHEMA,
@@ -240,7 +241,11 @@ export async function runVideoTextCommand(args: string[]): Promise<number> {
     } else {
       await runMediaFileCommand(
         ['download', '--reference', reference, '--output-file', output],
-        { auth },
+        {
+          auth,
+          skillsReleaseId:
+            (await readManagedSkillBaseline()).releaseId ?? undefined,
+        },
       );
       await writeFile(
         output + '.plan.json',

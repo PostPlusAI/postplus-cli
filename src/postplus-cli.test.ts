@@ -1,3 +1,4 @@
+import { runVideoTextCommand } from './video-text-command.js';
 import { switchWorkspace } from './workspace-commands.js';
 import { serializeInstallerEntries } from './fixtures/skills-bundle-fixture.test.js';
 import { INSTALLER_LABELS, writeFixtureBundle, writeInstalledFixture } from './fixtures/skills-bundle-fixture.test.js';
@@ -10412,6 +10413,42 @@ globalThis.fetch=async(url,init)=>{
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('video-text status downloads the saved result with the selected skills version and one JSON response', async () => {
+    const downloadDir = await mkdtemp(resolve(tmpdir(), 'postplus-video-text-download-'));
+    tempDirs.push(downloadDir);
+    const mediaPath = resolve(downloadDir, 'rendered.mp4');
+    const mediaReference = 'postplus-media://results/user_1/hosted-media/outputs/rendered.mp4';
+    const bytes = (await tinyVideoFixture()).bytes;
+    const plan = { schemaVersion: 1, width: 32, height: 32, captions: [{ start: 0, end: 1, text: 'Hello' }] };
+    await setLocalSession({ accountId: 'account_1', accountName: 'Account', apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token', sessionExpiresAt: null, userEmail: 'agent@example.com', userId: 'user_1' });
+    await writeManagedSkillBaseline({ releaseId: 'skills-video-text-test', skillNames: ['video-postproduction'] }, 'global');
+    const originalFetch = globalThis.fetch, originalWrite = process.stdout.write.bind(process.stdout);
+    let stdout = '', readRequests = 0;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url === 'https://postplus.test/api/video-text') {
+        assert.equal(JSON.parse(String(init?.body)).action, 'status');
+        return Response.json({ state: 'completed', output: { mediaReference, plan, outputSha256: createHash('sha256').update(bytes).digest('hex') } });
+      }
+      if (url === 'https://postplus.test/api/postplus-cli/hosted/capability') {
+        readRequests++;
+        assert.equal(new Headers(init?.headers).get('x-postplus-skills-release-id'), 'skills-video-text-test');
+        assert.equal(JSON.parse(String(init?.body)).operation, 'create-read-url');
+        return Response.json({ output: { signedUrl: 'https://download.test/video-text' } });
+      }
+      if (url === 'https://download.test/video-text') return new Response(bytes, { status: 200 });
+      throw Error('Unexpected fetch: ' + url);
+    };
+    process.stdout.write = ((chunk: unknown) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
+    try {
+      assert.equal(await runVideoTextCommand(['status', '--operation-id', '00000000-0000-4000-8000-000000000001', '--output', mediaPath, '--json']), 0);
+      assert.equal(readRequests, 1);
+      assert.equal(JSON.parse(stdout).state, 'completed');
+      assert.deepEqual(await readFile(mediaPath), bytes);
+      assert.deepEqual(JSON.parse(await readFile(mediaPath + '.plan.json', 'utf8')), plan);
+    } finally { globalThis.fetch = originalFetch; process.stdout.write = originalWrite; }
   });
 
   it('media-file download resolves a persistent reference and honors the last repeated boolean value', async () => {
