@@ -3604,8 +3604,6 @@ describe('update checks', () => {
       'video-analysis',
       '--video',
       './demo.mov',
-      '--prompt',
-      'Analyze it',
     ];
 
     const result = await runPostPlusClientUpgradeRecovery(
@@ -6147,7 +6145,9 @@ describe('hosted domain commands', () => {
       '--help',
     ]);
     assert.match(analyzeHelp, /flags \(normalized media intent\)/u);
-    assert.match(analyzeHelp, /--video <video>.*--prompt <prompt>/u);
+    assert.match(analyzeHelp, /--video <video>/u);
+    assert.doesNotMatch(analyzeHelp, /--prompt/);
+    assert.match(analyzeHelp, /fixed prompt/);
     assert.doesNotMatch(analyzeHelp, /Gemini request payload|file_reference/u);
 
   });
@@ -8003,8 +8003,6 @@ describe('hosted domain commands', () => {
           'video-analysis',
           '--video',
           'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
-          '--prompt',
-          'Analyze this video for hook, pacing, and CTA.',
         ],
         {
           auth: {
@@ -8019,7 +8017,6 @@ describe('hosted domain commands', () => {
       assert.equal(body.operation, 'analyze');
       assert.equal(body.modelKey, 'video-analysis');
       assert.deepEqual(body.input, {
-        prompt: 'Analyze this video for hook, pacing, and CTA.',
         video:
           'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
       });
@@ -8057,8 +8054,6 @@ describe('hosted domain commands', () => {
             'video-analysis',
             '--video',
             'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
-            '--prompt',
-            'Analyze this clip.',
             '--wait',
           ]),
         /Unknown option for media analyze: --wait\./u,
@@ -8118,8 +8113,6 @@ describe('hosted domain commands', () => {
           'video-analysis',
           '--video',
           pageUrl,
-          '--prompt',
-          'Analyze this TikTok video.',
         ],
         {
           auth: {
@@ -8133,7 +8126,6 @@ describe('hosted domain commands', () => {
       assert.equal(hostedBodies[0]?.capability, 'video-analysis');
       assert.equal(hostedBodies[0]?.operation, 'analyze');
       assert.deepEqual(hostedBodies[0]?.input, {
-        prompt: 'Analyze this TikTok video.',
         video: pageUrl,
       });
     } finally {
@@ -8226,7 +8218,6 @@ describe('hosted domain commands', () => {
           assert.equal(uploadCount, 1);
           assert.deepEqual(body.input, {
             video: mediaReference,
-            prompt: 'private local prompt',
           });
           const directory = resolve(
             process.env.POSTPLUS_CONFIG_DIR!,
@@ -8304,8 +8295,6 @@ describe('hosted domain commands', () => {
           'video-analysis',
           '--video',
           localVideo,
-          '--prompt',
-          'private local prompt',
           '--poll-interval-seconds',
           '0.001',
         ];
@@ -8609,8 +8598,6 @@ globalThis.fetch=async(url,init)=>{
           'video-analysis',
           '--video',
           'https://cdn.example.com/video.mp4',
-          '--prompt',
-          'Analyze the video.',
           '--wait-seconds',
           '0',
         ],
@@ -8675,8 +8662,6 @@ globalThis.fetch=async(url,init)=>{
           'video-analysis',
           '--video',
           'https://cdn.example.com/video.mp4',
-          '--prompt',
-          'Analyze the video.',
         ],
         {
           auth: {
@@ -8774,8 +8759,6 @@ globalThis.fetch=async(url,init)=>{
               'video-analysis',
               '--video',
               fixture.filePath,
-              '--prompt',
-              'Describe only the opening.',
               '--wait-seconds',
               '0',
             ]
@@ -8863,8 +8846,6 @@ globalThis.fetch=async(url,init)=>{
             'video-analysis',
             '--video',
             'https://video.example/clip.mp4',
-            '--prompt',
-            'Analyze.',
             '--poll-interval-seconds',
             '0.001',
           ],
@@ -8915,8 +8896,6 @@ globalThis.fetch=async(url,init)=>{
             'video-analysis',
             '--video',
             'https://video.example/clip.mp4',
-            '--prompt',
-            'Analyze.',
             '--hosted-operation-id',
             'original-operation',
             '--poll-interval-seconds',
@@ -9229,8 +9208,6 @@ globalThis.fetch=async(url,init)=>{
                 'video-analysis',
                 '--video',
                 localFixture.filePath,
-                '--prompt',
-                'secret prompt',
               ]
             : [
                 'create',
@@ -9724,8 +9701,6 @@ globalThis.fetch=async(url,init)=>{
             'video-analysis',
             '--video',
             localFixture.filePath,
-            '--prompt',
-            'Analyze this video.',
             '--output',
             outputPath,
           ]),
@@ -10024,8 +9999,6 @@ globalThis.fetch=async(url,init)=>{
           'video-analysis',
           '--video',
           localFixture.filePath,
-          '--prompt',
-          'private prompt',
           '--output',
           outputPath,
         ]),
@@ -10130,8 +10103,6 @@ globalThis.fetch=async(url,init)=>{
           'video-analysis',
           '--video',
           localFixture.filePath,
-          '--prompt',
-          'Analyze.',
         ]),
         1,
       );
@@ -10180,8 +10151,6 @@ globalThis.fetch=async(url,init)=>{
             'video-analysis',
             '--video',
             'https://example.com/video.mp4',
-            '--prompt',
-            'Analyze.',
           ],
           {
             auth: {
@@ -10237,8 +10206,6 @@ globalThis.fetch=async(url,init)=>{
           'video-analysis',
           '--video',
           'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
-          '--prompt',
-          'Analyze this short clip.',
           '--video-seconds',
           '30',
         ],
@@ -10288,8 +10255,6 @@ globalThis.fetch=async(url,init)=>{
             'video-analysis',
             '--video',
             'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
-            '--prompt',
-            'Analyze this short clip.',
             '--video-seconds',
             '0',
           ]),
@@ -13855,4 +13820,29 @@ describe('studio commands', () => {
       resolve('/tmp/demo/PostPlus Studio'),
     );
   });
+});
+
+it('rejects custom video-analysis prompts before any upload or hosted request', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    throw new Error('unexpected network');
+  };
+  try {
+    await assert.rejects(
+      runHostedDomainCommand('media', [
+        'analyze',
+        'video-analysis',
+        '--video',
+        './does-not-exist.mp4',
+        '--prompt',
+        'Only summarize the hook',
+      ]),
+      /Unknown option.*--prompt/,
+    );
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

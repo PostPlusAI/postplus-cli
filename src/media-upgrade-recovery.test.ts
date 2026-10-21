@@ -179,7 +179,7 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
     const original = scenario === 'generation'
       ? ['media', 'create', 'image-gpt-image-2-text', '--prompt', 'Original generation', '--wait', '--output', output, '--json']
       : ['media', 'analyze', 'video-analysis', '--video', video,
-      '--prompt', 'Retain original intent & text', '--output', output, '--json'];
+       '--output', output, '--json'];
     let result = await run(original);
     await assert.rejects(readFile(wrongCliMarker), {code:'ENOENT'});
     const checkpointDir = path.join(config, 'media-runs');
@@ -222,7 +222,7 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
       else {
         assert.equal(checkpoint.videoTransfer.uploadToken, 'original-token');
         assert.equal(checkpoint.videoTransfer.fileName, 'objects/postplus-video-00000000-0000-4000-8000-000000000004');
-        assert.equal(checkpoint.videoRequest.prompt, 'Retain original intent & text');
+        assert.equal(checkpoint.videoRequest.prompt, undefined);
       }
     }
     t.diagnostic(`exit=${result.code}; updates=${state.updates}; uploads=${state.uploads}; accepted=${state.accepted}; operations=${state.operations.map((o: { operation: string }) => o.operation).join(',')}`);

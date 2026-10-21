@@ -336,7 +336,7 @@ function buildMediaSchemaReport(
     notes: [
       'Each media endpoint exposes only supported role and intent flags. Omit optional flags to use the published defaults.',
       'Media role flags accept a local file path directly; the CLI stages local bytes before the single hosted submit.',
-      'Video analysis accepts normalized --video and --prompt flags; PostPlus owns the remaining execution details.',
+      'Video analysis accepts --video and uses the fixed full-timeline prompt owned by PostPlus.',
       'PostPlus handles operation identity and credit safeguards before execution.',
       'Run `postplus media <verb> <endpoint-key> --help` for a single endpoint flag/enum/default breakdown.',
       'Each endpoint contract carries a copy-pasteable example (required fields ∪ prompt, enums at their first value) under example.command / example.request.',
@@ -380,10 +380,9 @@ function buildMediaSchemaReport(
             input: {
               additionalProperties: false,
               properties: {
-                prompt: { minLength: 1, type: 'string' },
                 video: { minLength: 1, type: 'string' },
               },
-              required: ['prompt', 'video'],
+              required: ['video'],
               type: 'object',
             },
           },

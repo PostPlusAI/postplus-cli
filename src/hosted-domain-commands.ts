@@ -494,7 +494,6 @@ async function runVideoAnalysisVerb(args: {
     'hosted-operation-id',
     'json',
     'output',
-    'prompt',
     'skill',
     'wait-seconds',
     'poll-interval-seconds',
@@ -508,12 +507,8 @@ async function runVideoAnalysisVerb(args: {
   }
 
   const outputPath = flags.values.get('output') ?? null;
-  const prompt = flags.values.get('prompt');
-  if (prompt !== undefined && !prompt.trim())
-    throw new Error('--prompt must be non-empty when provided.');
   const originalSource = requireFlag(flags, 'video');
   let normalizedInput: Record<string, unknown> = {
-    ...(prompt !== undefined ? { prompt } : {}),
     video: originalSource,
   };
   if (context)
@@ -567,7 +562,6 @@ async function runVideoAnalysisVerb(args: {
     ],
     body,
     originalSource,
-    prompt,
     skillName: flags.values.get('skill') ?? resolved.skill,
     outputPath,
     json: flags.booleans.has('json'),
@@ -2394,8 +2388,8 @@ function printMediaEndpointHelp(
                     to Google Files through a hosted-authorized session.
                     For X, obtain a video file or direct media URL first.
                     Existing PostPlus media references use their owned read URL.
-  --prompt <text>    Optional question or format; omitted means the default shot
-                    table and production notes. Custom text replaces that default.
+  PostPlus uses one fixed prompt to record the complete audiovisual timeline.
+  Custom analysis prompts are not supported.
   --video-seconds <n>  Optional duration hint. Validated local/Google media metadata
                     takes precedence; omit this hint when duration is unknown.
   The command polls the same durable run until completion or timeout by default;
