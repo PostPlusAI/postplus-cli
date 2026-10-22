@@ -251,14 +251,23 @@ export async function resumeHostedMediaUpload(input: {
   } catch {
     throw new Error('Media upload checkpoint target identity is unreadable.');
   }
-  if (
-    saved.operationId !== input.operationId ||
-    !sameFingerprint(saved.fingerprint, input.fingerprint) ||
-    !Array.isArray(identity) ||
-    identity[0] !== input.owner
+  let mismatch: string | null = null;
+  if (saved.operationId !== input.operationId) {
+    mismatch = 'operation';
+  } else if (!Array.isArray(identity) || identity[0] !== input.owner) {
+    mismatch = 'account';
+  } else if (
+    !(record.completed
+      ? sameCompletedContent(saved.fingerprint, input.fingerprint)
+      : sameFingerprint(saved.fingerprint, input.fingerprint))
   ) {
+    mismatch = record.completed
+      ? 'completed file content or size'
+      : 'in-progress source fingerprint';
+  }
+  if (mismatch) {
     throw new Error(
-      'Media upload checkpoint does not match the source, operation or account.',
+      `Media upload checkpoint does not match its ${mismatch}. Retry with the original operation, account and file; use a new operation for changed content.`,
     );
   }
   if (record.completed)
@@ -328,10 +337,18 @@ export async function uploadHostedMediaFile(input: {
       completed.operationId !== input.operationId ||
       completed.targetIdentity !== targetIdentity ||
       completed.mediaReference !== input.mediaReference ||
-      !sameFingerprint(completed.fingerprint, input.fingerprint)
+      !sameCompletedContent(completed.fingerprint, input.fingerprint)
     ) {
+      const mismatch =
+        completed.operationId !== input.operationId
+          ? 'operation'
+          : completed.targetIdentity !== targetIdentity
+            ? 'storage target'
+            : completed.mediaReference !== input.mediaReference
+              ? 'media reference'
+              : 'completed file content or size';
       throw new Error(
-        'Completed media upload checkpoint does not match the source, operation or target.',
+        `Completed media upload checkpoint does not match its ${mismatch}. Retry the original operation and target, or start a new operation for changed content.`,
       );
     }
     return {
@@ -1355,6 +1372,16 @@ function sameFingerprint(
   return (
     left.contentSha256 === right.contentSha256 &&
     left.mtimeMs === right.mtimeMs &&
+    left.sizeBytes === right.sizeBytes
+  );
+}
+
+function sameCompletedContent(
+  left: MediaFileFingerprint,
+  right: MediaFileFingerprint,
+) {
+  return (
+    left.contentSha256 === right.contentSha256 &&
     left.sizeBytes === right.sizeBytes
   );
 }
