@@ -1,5 +1,12 @@
 # Meta Ads: evidence, diagnosis, and supported changes
 
+For a complete new single-image website-conversion campaign, use
+[paused build and preview](meta-paused-build.md). Discover `POSTPLUS_METAADS_`
+tools with `postplus channels tools list --toolkit metaads`, inspect with
+`postplus channels tools show`, and use `channels tools run` with an exact
+account target. Retain the first result and operation ID. Stop at paused
+objects and previews; this decimal contract does not change older update units.
+
 Use this reference for Meta account reviews, creative decisions, and specific account operations. Use [channel execution](channel-execution.md) for connection, authorization, operation identity, and recovery; use [performance reporting](performance-report.md) for date windows, comparisons, and metric math. `B` below means the business data at `output.result.data` in the first successful CLI response.
 
 ## Strategy field lookup
