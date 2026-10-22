@@ -92,6 +92,20 @@ test('invalid or unsafe plans fail before video execution', () => {
   ];
   for (const plan of cases) assert.throws(() => parseVideoTextPlan(plan));
 });
+test('captions reject control characters while preserving line breaks and Unicode', () => {
+  for (let code = 0; code <= 0x9f; code++) {
+    if ((code >= 0x20 && code < 0x7f) || code === 0x0a) continue;
+    const input = base();
+    input.captions[0]!.text = `Before${String.fromCodePoint(code)}after`;
+    assert.throws(() => parseVideoTextPlan(input), /control characters/);
+  }
+  const input = base();
+  input.captions[0]!.text = '中文 😀\nNext line';
+  assert.equal(
+    parseVideoTextPlan(input).captions[0]!.text,
+    input.captions[0]!.text,
+  );
+});
 test('CLI rejects unsupported flags and invalid remote wait before auth, upload or rendering', async () => {
   await assert.rejects(
     runVideoTextCommand([
