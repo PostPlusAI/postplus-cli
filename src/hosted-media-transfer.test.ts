@@ -209,6 +209,14 @@ test('CLI upload prints its generated operation and resumes only that operation 
   globalThis.fetch = async (url, init) => {
     if (String(url).startsWith('https://postplus.test/')) {
       const body = JSON.parse(String(init?.body));
+      if (body.operation === 'create-read-url') {
+        return Response.json({
+          output: {
+            mediaReference: ref,
+            signedUrl: 'https://storage.test/read?secret=private',
+          },
+        });
+      }
       operations.push(body.operationId);
       assert.match(body.file.fingerprint.contentSha256, /^[a-f0-9]{64}$/);
       return Response.json({
@@ -224,6 +232,10 @@ test('CLI upload prints its generated operation and resumes only that operation 
           },
         },
       });
+    }
+    if (String(url) === 'https://storage.test/read?secret=private') {
+      assert.equal(init?.method, 'HEAD');
+      return new Response(null, { headers: { 'content-length': '10' } });
     }
     methods.push(init!.method!);
     if (init?.method === 'POST')
@@ -930,13 +942,25 @@ test('checkpoint cleanup failure reports committed output without claiming a res
   }
 });
 
-test('completed CLI upload returns before a refusing signer and rejects changed owner or source', async () => {
+test('completed CLI upload reuses by content, verifies the remote reference, and rejects owner or source changes', async () => {
   const file = path.join(directory, 'pre-sign.bin');
   await writeFile(file, '0123');
   let signs = 0;
   let puts = 0;
+  let reads = 0;
+  let failRead = false;
   globalThis.fetch = async (url, init) => {
     if (String(url).startsWith('https://postplus.test/')) {
+      const body = JSON.parse(String(init?.body));
+      if (body.operation === 'create-read-url') {
+        reads++;
+        return Response.json({
+          output: {
+            mediaReference: ref,
+            signedUrl: 'https://storage.test/read?secret=private',
+          },
+        });
+      }
       signs++;
       if (signs > 1) throw new Error('signer refuses existing object');
       return Response.json({
@@ -950,6 +974,12 @@ test('completed CLI upload returns before a refusing signer and rejects changed 
         },
       });
     }
+    if (String(url) === 'https://storage.test/read?secret=private') {
+      assert.equal(init?.method, 'HEAD');
+      if (failRead) throw new Error(`network interrupted at ${String(url)}`);
+      return new Response(null, { headers: { 'content-length': '4' } });
+    }
+    assert.equal(String(url), 'https://storage.test/upload');
     puts++;
     for await (const _ of init!.body as NodeJS.ReadableStream) {
     }
@@ -966,21 +996,38 @@ test('completed CLI upload returns before a refusing signer and rejects changed 
   ];
   await runMediaFileCommand(args);
   await runMediaFileCommand(args);
+  const sourceStat = await stat(file);
+  await utimes(file, sourceStat.atime, new Date(sourceStat.mtimeMs + 5_000));
+  await runMediaFileCommand(args);
+  failRead = true;
+  await assert.rejects(runMediaFileCommand(args), (error: unknown) => {
+    assert.match(String(error), /network or timeout failure/);
+    assert.doesNotMatch(String(error), /secret=private/);
+    return true;
+  });
+  failRead = false;
   assert.equal(signs, 1);
   assert.equal(puts, 1);
-  await setLocalSession({
-    accountId: 'wrong-account',
+  assert.equal(reads, 3);
+  const originalSession = {
+    accountId: 'account',
     apiBaseUrl: 'https://postplus.test',
-    cliSessionToken: 'other-token',
+    cliSessionToken: 'test-token',
     sessionExpiresAt: null,
     userEmail: null,
     userId: 'user',
-  });
+  };
+  const readsBeforeMismatch = reads;
+  await setLocalSession({ ...originalSession, accountId: 'wrong-account' });
   await assert.rejects(runMediaFileCommand(args), /checkpoint does not match/);
+  await setLocalSession({ ...originalSession, apiBaseUrl: 'https://staging.test' });
+  await assert.rejects(runMediaFileCommand(args), /checkpoint does not match/);
+  await setLocalSession(originalSession);
   await writeFile(file, '5678');
-  await assert.rejects(runMediaFileCommand(args), /checkpoint does not match/);
+  await assert.rejects(runMediaFileCommand(args), /completed file content or size/);
   assert.equal(signs, 1);
   assert.equal(puts, 1);
+  assert.equal(reads, readsBeforeMismatch);
 });
 test('local media staging reuses completed identity before signing even without its staging cache', async () => {
   const file = path.join(directory, 'stage.png');
@@ -988,31 +1035,85 @@ test('local media staging reuses completed identity before signing even without 
   let signs = 0;
   let puts = 0;
   let estimates = 0;
+  let reads = 0;
+  let readFailure:
+    | '403'
+    | '404'
+    | 'network'
+    | 'size'
+    | 'no-length'
+    | null = null;
+  const uploadedSizes = new Map<string, number>();
+  const uploadedRefsByName = new Map<string, string>();
   globalThis.fetch = async (url, init) => {
-    if (String(url).startsWith('https://storage.test/')) {
-      puts++;
-      for await (const _ of init!.body as NodeJS.ReadableStream) {
+    if (String(url).startsWith('https://storage.test/read?')) {
+      assert.equal(init?.method, 'HEAD');
+      reads++;
+      if (readFailure === 'network') {
+        throw new Error(`network interrupted at ${String(url)}`);
       }
+      if (readFailure === '403') return new Response(null, { status: 403 });
+      if (readFailure === '404') return new Response(null, { status: 404 });
+      const parsed = new URL(String(url));
+      const size = Number(parsed.searchParams.get('size')) + (readFailure === 'size' ? 1 : 0);
+      if (readFailure === 'no-length') return new Response(null);
+      return new Response(null, { headers: { 'content-length': String(size) } });
+    }
+    if (String(url) === 'https://storage.test/upload') {
+      assert.equal(init?.method, 'PUT');
+      puts++;
+      for await (const _ of init!.body as NodeJS.ReadableStream) {}
       return new Response(null);
     }
-    const body = JSON.parse(String(init?.body));
-    if (body.capability === 'media-file') {
-      signs++;
-      if (signs > 1) throw new Error('signer refuses existing object');
-      return Response.json({
-        output: {
-          mediaReference: ref,
-          signedUpload: {
-            method: 'PUT',
-            url: 'https://storage.test/upload',
-            requiredHeaders: {},
+    if (String(url).startsWith('https://postplus.test/')) {
+      const body = JSON.parse(String(init?.body));
+      if (body.operation === 'create-read-url') {
+        reads++;
+        const mediaReference = body.file.mediaReference;
+        return Response.json({
+          output: {
+            mediaReference,
+            signedUrl: `https://storage.test/read?size=${uploadedSizes.get(mediaReference)}&ref=${encodeURIComponent(mediaReference)}`,
           },
-        },
-      });
+        });
+      }
+      if (body.operation === 'create-upload-url') {
+        signs++;
+        const mediaReference = `postplus-media://uploads/staged-${signs}`;
+        uploadedSizes.set(mediaReference, body.file.sizeBytes);
+        uploadedRefsByName.set(body.file.name, mediaReference);
+        return Response.json({
+          output: {
+            mediaReference,
+            signedUpload: {
+              method: 'PUT',
+              url: 'https://storage.test/upload',
+              requiredHeaders: {},
+            },
+          },
+        });
+      }
+      if (
+        String(url).includes('/hosted/estimate') &&
+        body.capability === 'media-generation'
+      ) {
+        estimates++;
+        if (body.endpointKey === 'video-seedance-2-5-reference') {
+          assert.deepEqual(
+            body.input.reference_images,
+            imagePaths.map((imagePath) =>
+              uploadedRefsByName.get(path.basename(imagePath)),
+            ),
+          );
+          assert.deepEqual(body.input.reference_videos, [uploadedRefsByName.get(path.basename(video))]);
+        } else {
+          assert.deepEqual(body.input.images, [uploadedRefsByName.get('stage.png')]);
+        }
+        return Response.json({ estimateOnly: true });
+      }
+      throw new Error(`unexpected hosted operation ${body.operation}`);
     }
-    estimates++;
-    assert.deepEqual(body.input.images, [ref]);
-    return Response.json({ estimateOnly: true });
+    throw new Error(`unexpected URL ${String(url)}`);
   };
   const args = [
     'estimate',
@@ -1024,14 +1125,70 @@ test('local media staging reuses completed identity before signing even without 
     '--output',
     path.join(directory, 'estimate.json'),
   ];
+  const cachePath = path.join(
+    process.env.POSTPLUS_CONFIG_DIR!,
+    'media-staging-cache.json',
+  );
   await runHostedDomainCommand('media', args);
   await rm(
     path.join(process.env.POSTPLUS_CONFIG_DIR!, 'media-staging-cache.json'),
   );
+  const originalStat = await stat(file);
+  await utimes(file, originalStat.atime, new Date(originalStat.mtimeMs + 5_000));
+  for (const [failure, expected] of [
+    ['403', /HEAD returned HTTP 403/],
+    ['404', /HEAD returned HTTP 404/],
+    ['network', /network or timeout failure/],
+    ['size', /does not match local size/],
+  ] as const) {
+    readFailure = failure;
+    await assert.rejects(runHostedDomainCommand('media', args), expected);
+    await assert.rejects(
+      readFile(
+        path.join(process.env.POSTPLUS_CONFIG_DIR!, 'media-staging-cache.json'),
+      ),
+    );
+  }
+  readFailure = null;
   await runHostedDomainCommand('media', args);
-  assert.equal(signs, 1);
-  assert.equal(puts, 1);
-  assert.equal(estimates, 2);
+  await rm(cachePath);
+  readFailure = 'no-length';
+  await runHostedDomainCommand('media', args);
+  readFailure = null;
+  const copied = path.join(directory, 'stage-copy.png');
+  await writeFile(copied, 'png-bytes');
+  const cache = JSON.parse(await readFile(cachePath, 'utf8'));
+  for (const entry of Object.values(cache.entries) as Array<{
+    expiresAt: number;
+  }>) {
+    entry.expiresAt = 0;
+  }
+  await writeFile(cachePath, JSON.stringify(cache));
+  await runHostedDomainCommand('media', [...args.slice(0, args.indexOf(file)), copied, ...args.slice(args.indexOf(file) + 1)]);
+  const video = path.join(directory, 'seedance-reference.mp4');
+  await writeFile(video, 'video-reference-bytes');
+  const imagePaths = Array.from({ length: 5 }, (_, index) =>
+    path.join(directory, `seedance-reference-${index + 1}.png`),
+  );
+  await Promise.all(
+    imagePaths.map((imagePath, index) =>
+      writeFile(imagePath, `seedance-image-${index + 1}`),
+    ),
+  );
+  const videoArgs = [
+    'estimate', 'video-seedance-2-5-reference', '--prompt', 'match this motion',
+    '--reference-video', video,
+    ...imagePaths.flatMap((imagePath) => ['--reference-image', imagePath]),
+  ];
+  await runHostedDomainCommand('media', videoArgs);
+  await rm(cachePath);
+  const videoStat = await stat(video);
+  await utimes(video, videoStat.atime, new Date(videoStat.mtimeMs + 5_000));
+  await runHostedDomainCommand('media', videoArgs);
+  assert.equal(signs, 7);
+  assert.equal(puts, 7);
+  assert.equal(estimates, 6);
+  assert.equal(reads, 26);
 });
 test('real CLI process recovers final ACK loss from its original session while the signer refuses', async () => {
   const file = path.join(directory, 'process.bin');
