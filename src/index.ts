@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { runVideoTextCommand } from './video-text-command.js';
 import { runAdLibraryCommand } from './ad-library.js';
 import { HostedProductRequestError } from './hosted-command-runtime.js';
 import { runWorkspaceCommand } from './workspace-commands.js';
@@ -118,7 +117,6 @@ Usage:
   postplus media <verb> <endpoint-key> --<role/intent flags> [--wait] [--output <result.json>]
   postplus media estimate <endpoint-key> --<same flags> [--json]
   postplus media poll --handle <run-id> [--wait-seconds <n>] [--poll-interval-seconds <n>] [--debug] [--json] [--output <result.json>]
-  postplus video-text <schema|render|status> [--help]
   postplus media-file upload --input-file <path> [--mime <type>] [--skill <skill-id>] [--json] [--output <result.json>]
   postplus media-file download (--reference <postplus-media://...> | --url <https://...>) --output-file <path> [--skill <skill-id>] [--debug] [--json] [--output <result.json>]
   postplus studio init|open|status   Open bundled Local Studio
@@ -524,9 +522,6 @@ async function main(): Promise<void> {
         rest,
       )) as number;
       return;
-    case 'video-text':
-      process.exitCode = await runVideoTextCommand(rest);
-      return;
     case 'media-file':
       process.exitCode = (await runMediaFileCommand(rest)) as number;
       return;
@@ -719,7 +714,7 @@ function helpCommandForArgs(args: string[]): string {
     auth: ['login', 'refresh', 'revoke', 'status', 'validate', 'logout'], skills: ['verify'],
     runs: ['list', 'show'], studio: ['init', 'open', 'status'],
     research: ['schema', 'run', 'report'], media: ['schema', 'poll', 'prepare', 'estimate', ...buildVerbTargetIndex('media').keys()],
-    'media-file': ['upload', 'download'], 'video-text': ['schema', 'render', 'status'],
+    'media-file': ['upload', 'download'],
   };
   if (subcommand && children[command]?.includes(subcommand)) {
     if (/^[a-z][a-z0-9-]*$/.test(subcommand)) parts.push(subcommand);

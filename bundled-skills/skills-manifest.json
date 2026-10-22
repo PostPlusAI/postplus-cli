@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-10-22.1",
+  "releaseId": "skills-2026-10-22.2",
   "skills": [
     {
       "name": "ads",
@@ -130,12 +130,7 @@
     {
       "name": "video-batch-runner",
       "path": "skills/40-creative/video-batch-runner/SKILL.md",
-      "contentHash": "5b3e10c4d54e6b0f7d57dc157201a16d9ecce98f94681caf862ba9bfd48846f7"
-    },
-    {
-      "name": "video-postproduction",
-      "path": "skills/40-creative/video-postproduction/SKILL.md",
-      "contentHash": "19aab825a1cb73d35d30e6c3f02f040cb0f080b79d2fa46569c48a3beccb567b"
+      "contentHash": "6ecedb25362ccfcc6001c9b6cea95a491389d4618679bc1068853bbf190c3ae9"
     },
     {
       "name": "video-transcription",

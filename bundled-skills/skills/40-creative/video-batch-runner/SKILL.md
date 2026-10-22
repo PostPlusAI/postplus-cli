@@ -53,9 +53,8 @@ architect, preflight report, reference contract, or model-specific submitter.
    --skill video-batch-runner`.
 9. On successful generation, deliver the raw result, actual model/endpoint,
    submitted prompt and reference roles, and original run information. Inspect
-   the finished clip only when the user asks for that check. If text postproduction
-   is requested, call `video-postproduction` separately; generation delivery does
-   not wait for transcription, frame extraction or editing.
+   the finished clip only when the user asks for that check. Generation delivery
+   does not wait for transcription, frame extraction or editing.
 
 ## Execution Rules
 
