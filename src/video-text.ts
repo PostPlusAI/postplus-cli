@@ -254,7 +254,11 @@ export function parseVideoTextPlan(raw: unknown): VideoTextPlan {
       throw Error('Text fades exceed the cue duration.');
     if (
       !item.text.trim() ||
-      /[\\{}\u0000-\u0009\u000b-\u001f\u007f-\u009f]/u.test(item.text)
+      /[\\{}]/u.test(item.text) ||
+      Array.from(item.text).some((character) => {
+        const code = character.codePointAt(0)!;
+        return (code < 0x20 && code !== 0x0a) || (code >= 0x7f && code <= 0x9f);
+      })
     )
       throw Error(
         'Text contains unsupported control characters or ASS markup.',
