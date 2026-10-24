@@ -178,7 +178,7 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
     };
     const original = scenario === 'generation'
       ? ['media', 'create', 'image-gpt-image-2-text', '--prompt', 'Original generation', '--wait', '--output', output, '--json']
-      : ['media', 'analyze', 'video-analysis', '--video', video,
+      : ['media', 'analyze', 'video-analysis', '--cloud', '--video', video,
        '--output', output, '--json'];
     let result = await run(original);
     await assert.rejects(readFile(wrongCliMarker), {code:'ENOENT'});

@@ -13,6 +13,7 @@ import {
 } from './hosted-command-runtime.js';
 import { getPostPlusConfigDir, readLocalConfig } from './local-state.js';
 import type { VideoTransferState } from './media-video-transfer.js';
+import type { VisualFrameRange } from './media-video-contact-sheet.js';
 
 // Hosted status and fees remain authoritative. Video checkpoints additionally
 // retain private local transport state so a resume never repeats paid work.
@@ -29,6 +30,7 @@ export type MediaRunCheckpoint = {
     skill: string;
     videoSeconds?: number;
     downloadOnly?: boolean;
+    contactSheet?: VisualFrameRange;
   };
   videoTransfer?: VideoTransferState;
   analysisSubmissionAttempted?: true;
@@ -220,6 +222,17 @@ export async function readMediaRunCheckpoint(
       typeof request.skill !== 'string'
     )
       throw new Error('Invalid video recovery input.');
+    if ('contactSheet' in request && request.contactSheet !== undefined) {
+      const range = request.contactSheet;
+      if (!('downloadOnly' in request) || request.downloadOnly !== true ||
+        !range || typeof range !== 'object' || Array.isArray(range) ||
+        Object.entries(range).some(([key, value]) =>
+          !['startSeconds', 'endSeconds', 'frameIntervalSeconds'].includes(key) ||
+          typeof value !== 'number' || !Number.isFinite(value) || value < 0) ||
+        ('frameIntervalSeconds' in range && range.frameIntervalSeconds === 0) ||
+        ('endSeconds' in range && Number(range.endSeconds) <= Number('startSeconds' in range ? range.startSeconds : 0)))
+        throw new Error('Invalid local frame recovery input.');
+    }
   }
   if (
     data.analysisSubmissionAttempted !== undefined &&

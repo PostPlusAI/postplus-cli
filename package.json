@@ -57,6 +57,7 @@
     "build/hosted-command-runtime.js",
     "build/media-run-checkpoint.js",
     "build/media-video-command.js",
+    "build/media-video-contact-sheet.js",
     "build/hosted-command-runtime.d.ts",
     "build/client-compatibility.d.ts",
     "build/hosted-media-transfer.js",

@@ -21,6 +21,7 @@ import {
 } from './hosted-command-runtime.js';
 import { getPostPlusConfigDir } from './local-state.js';
 import { withMediaEvidence } from './media-evidence-retention.js';
+import { prepareVideoContactSheet, type VisualFrameRange } from './media-video-contact-sheet.js';
 import {
   type MediaRunCheckpoint,
   type PreparedMediaCheckpoint,
@@ -146,6 +147,13 @@ export async function executeVideoAnalysis(input: {
             request: (request) =>
               requestVideoTransfer(request, skillName, context),
             onProgress: (message) => process.stderr.write(`${message}\n`),
+            beforeUpload: async (video) => {
+              const evidence = await prepareVideoContactSheet({
+                ...video,
+                parentDirectory: path.join(getPostPlusConfigDir(), 'media-evidence', path.basename(checkpoint.filePath, '.json'), 'visual'),
+              });
+              process.stderr.write(`Local visual evidence prepared before cloud upload: ${evidence.manifestPath}\n`);
+            },
           }).catch((error: unknown) => {
             // The private checkpoint is separate from the requested result file.
             // A structured transfer failure must still reach that result file.
@@ -350,6 +358,7 @@ async function requestVideoTransfer(
 export async function prepareVideoEvidence(
   source: string,
   resume?: PreparedMediaCheckpoint,
+  contactSheet?: VisualFrameRange,
 ) {
   const operationId =
     resume?.record.operationId ?? `postplus-cli:media:prepare:${randomUUID()}`;
@@ -363,10 +372,12 @@ export async function prepareVideoEvidence(
     ));
   if (!checkpoint)
     throw new Error('Video preparation requires a local checkpoint.');
+  contactSheet ??= checkpoint.record.videoRequest?.contactSheet;
   checkpoint.record.videoRequest = {
     source,
     skill: 'media-analysis',
     downloadOnly: true,
+    ...(contactSheet !== undefined ? { contactSheet } : {}),
   };
   await writeResult(checkpoint.record, checkpoint.filePath, false);
   process.stderr.write(`Resume: ${checkpoint.resumeCommand}\n`);
@@ -490,7 +501,14 @@ export async function resumeVideoCheckpoint(input: {
       'Video recovery requires an unsubmitted analysis checkpoint.',
     );
   if (original.downloadOnly) {
-    const result = await prepareVideoEvidence(original.source, checkpoint);
+    const prepared = await prepareVideoEvidence(original.source, checkpoint);
+    const result = original.contactSheet !== undefined ? {
+      ...await prepareVideoContactSheet({
+        filePath: prepared.filePath, metadata: prepared.metadata, range: original.contactSheet,
+        ...(outputPath ? { parentDirectory: path.join(path.dirname(path.resolve(outputPath)), '.postplus', 'media-analysis') } : {}),
+      }),
+      sourceBilling: prepared.sourceBilling, sourceResumeCommand: prepared.resumeCommand,
+    } : prepared;
     await writeResult(result, outputPath, json);
     return 0;
   }

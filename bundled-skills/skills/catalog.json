@@ -382,7 +382,7 @@
       "familyId": "media-production",
       "familyName": "Media and Creative Production",
       "name": "media-analysis",
-      "description": "Analyze videos, images, or carousels with visible and audible evidence. Answer visual questions, inspect frames, or compare references shot by shot when requested.",
+      "description": "Analyze videos, images, or carousels. Start videos with local contact sheets, refine visual details locally, and use cloud analysis only for important speech that subtitles cannot establish.",
       "category": "analyze",
       "example": "Explain what happens in this video and show the frames supporting your analysis.",
       "path": "skills/40-creative/media-analysis/SKILL.md",

@@ -471,6 +471,28 @@ test('download-only keeps usable local evidence without creating an upload or in
   assert.equal(uploaded, false);
 });
 
+test('local evidence finishes before any cloud upload preparation, and its failure prevents upload', async (t) => {
+  const h = await setup(t);
+  let inspected = false;
+  h.options.beforeUpload = async (video) => {
+    assert.equal(h.requests.length, 0);
+    assert.equal(video.filePath, h.filePath);
+    assert.deepEqual(video.metadata, metadata);
+    inspected = true;
+  };
+  const original = h.options.request;
+  h.options.request = async (request) => {
+    assert.equal(inspected, true);
+    return original(request);
+  };
+  await prepareVideoAnalysisInput(h.options);
+  const other = await setup(t);
+  other.options.beforeUpload = async () => { throw new Error('local visual extraction failed'); };
+  await assert.rejects(prepareVideoAnalysisInput(other.options), /local visual extraction failed/u);
+  assert.equal(other.requests.length, 0);
+  assert.equal(other.state().phase, 'downloaded');
+});
+
 test('download-only social acquisition retains billing and never purchases video analysis', async (t) => {
   const h = await setup(t);
   h.options.source = 'https://facebook.com/ads/library/?id=123';
