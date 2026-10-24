@@ -321,3 +321,15 @@ test('accepted submission with a failed status poll stays unknown without resubm
   assert.match(result.next, /run --status accepted-op/);
   assert.ok(!messages.join('').includes('private status'));
 });
+
+
+test('shared Meta funding explains the platform wait without changing the submitted request', async () => {
+  const messages: string[] = [];
+  const bodies: unknown[] = [];
+  await runChannelToolCommand(['run', 'POSTPLUS_METAADS_SET_CAMPAIGN_BUDGET', '--connection', '11111111-1111-4111-8111-111111111111', '--input-file', '/tmp/input.json'], {
+    readInput: async () => JSON.stringify({ apply: true }), diagnostic: t => messages.push(t), output: () => {},
+    submit: async input => { bodies.push(input.body); return { output: { execution: { resultStatus: 'succeeded' } } }; },
+  });
+  assert.ok(messages.some(t => t.includes('31 seconds')));
+  assert.equal(bodies.length, 1);
+});

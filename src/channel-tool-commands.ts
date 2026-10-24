@@ -303,6 +303,7 @@ export async function runChannelToolCommand(
   // The caller can inspect this ID if the submit response is lost.
   diagnostic(`Channel operation: ${command.operationId}\n`);
   if (command.targetId) diagnostic(`Target ID: ${command.targetId}\n`);
+  if (command.tool === 'POSTPLUS_METAADS_SET_CAMPAIGN_BUDGET' && (argumentsValue as Record<string, unknown>).apply === true) diagnostic('Validating shared campaign funding; Meta requires about 31 seconds between validation and submission. The configuration is checked again before the single write.\n');
   let result: unknown;
   try {
     result = await submit({

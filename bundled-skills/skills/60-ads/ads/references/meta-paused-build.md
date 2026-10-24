@@ -1,7 +1,7 @@
-# Build and preview a paused Meta campaign
+# Build, revise and preview a paused Meta campaign
 
 Use this path for an authorized new website-conversion campaign with ad-set
-budgets and single-image ads. Read the current schemas and availability first.
+budgets and image or video ads. Read the current schemas and availability first.
 If a deployment reports `meta_build_not_enabled`, name that preparation gap;
 do not invent fields on another tool or claim the account lacks permissions.
 
@@ -83,3 +83,62 @@ Continue from confirmed uploaded hashes and created IDs. Do not recreate prior
 successful steps after a later failure. Report configuration differences instead
 of silently changing the plan. Finish at paused objects and previews. Future
 activation requires a separately supported action and explicit delivery approval.
+
+## Local video, draft revisions and copying
+
+A local finished video can be uploaded; it is not an image-only workflow.
+Use `METAADS_CREATE_AD_VIDEO` with its `video` file slot, or its supported
+`file_url`. The direct file limit is 100 MiB. For CLI, first use
+`postplus media-file upload --input-file ./finished.mp4 --json`, preserve the
+returned owned reference, then map `{"video":"<owned reference>"}` through
+`--media-map-file` on the channel run. Do not pass a local path as a URL or
+manufacture an upload key. For MCP, use the host upload/import path to obtain
+an owned PostPlus file reference and pass `mediaReferences.video` when preparing
+the channel request; a path on the user's computer is not accessible to MCP.
+
+Preserve the returned video ID. Read `METAADS_GET_VIDEO` with its actual fields
+schema until Meta reports processing ready; an upload acknowledgement is not a
+ready-to-use ad video. Use `POSTPLUS_METAADS_CREATE_VIDEO_CREATIVE` with that ID,
+a thumbnail image hash and the same separate copy/CTA/destination/tracking
+fields as image creation. Attach the creative through CREATE_PAUSED_AD and
+preview the exact ad. A processing failure is not permission to upload again.
+
+For a complete account inventory, use `POSTPLUS_METAADS_LIST_OBJECTS` with
+`object_kind=campaign|adset|ad`, optionally `parent_id` for the exact parent.
+Continue with `next_cursor` as `after` until `complete=true`; keep the account,
+kind and parent unchanged. Never count the first page as the whole account.
+
+Read the exact draft with `POSTPLUS_METAADS_READ_BUILD_OBJECT` and preserve
+`snapshot`. `POSTPLUS_METAADS_UPDATE_PAUSED_DRAFT` uses it as `expected_snapshot`:
+- For an ad, change its name or attach a new `creative_id`. To revise copy,
+  destination, image or video, create the new creative first and attach its ID.
+  Keep the original creative; do not mutate a shared asset used by other ads.
+- For an ad set, change name, audience or start/end. Audience replacement uses
+  the same discovery IDs and explicit expansion acceptance as creation. Preserve
+  budget and unaffected schedule fields. This action cannot activate delivery.
+
+Use `POSTPLUS_METAADS_DUPLICATE_PAUSED_OBJECT` for one authorized native copy
+of a paused campaign, ad set or ad, with snapshot and the requested copy name.
+Campaign/ad-set copies include children; the result verifies source/copy IDs
+and paused hierarchy. This is a new copy, not a retry of an uncertain result.
+Retain `createdResource` from the original receipt when verification is lost,
+then read/list that copied hierarchy. No automatic lifetime-once strategy guard
+or recurring executor is installed.
+
+Ordinary `POSTPLUS_METAADS_UPDATE_BUDGET` changes an existing amount with
+currency/ownership/snapshot checks and independent readback; it adds no fixed
+31-second wait. `SET_CAMPAIGN_BUDGET apply=true` is a structural change: validate,
+wait about 31 seconds for Meta, recheck configuration, submit once, verify.
+`apply=false` is an optional validation-only request, not a required extra step
+before an already-authorized apply. A separate recent operation may still hit
+Meta's account/object limits; inspect its outcome before any new request.
+
+Preview results retain safe native frame dimensions when Meta supplies them.
+Use those dimensions in a host-supported frame; a direct full-page opening may
+not have the same layout. Inspect desktop and mobile visual output separately.
+If dimensions are absent, do not invent them or mark visual acceptance passed.
+
+Finish by presenting completed steps, exact new/changed object IDs, current
+paused state, remaining failures and the next supported continuation. A lost
+business response is recovered by reading those objects, not by recreating
+successful steps. Keep the original unknown receipt unchanged.

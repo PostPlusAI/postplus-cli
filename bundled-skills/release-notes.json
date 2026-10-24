@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-10-23.staging.1",
-  "title": "Meta Ads staging acceptance",
-  "summary": "Test complete paused Meta builds and verified existing-object management together with the latest released media fixes.",
+  "releaseId": "skills-2026-10-24.staging.3",
+  "title": "Meta Ads basic operations on staging",
+  "summary": "Revise and copy paused Meta drafts, upload local videos and inspect complete inventories through both agent entry paths.",
   "highlights": [
-    "Prepare complete paused Meta campaigns and native previews with explicit currency and decimal amounts.",
-    "Inspect exact Meta objects and update authorized names, statuses or existing budgets using fresh snapshots.",
-    "Preserve current released media analysis and raw generated media delivery; withdrawn video text editing stays removed."
+    "Upload local video through the existing owned-file path, then create a video creative and paused ad.",
+    "Revise paused draft copy/assets/audiences/schedules and make verified native paused copies.",
+    "Use complete paginated discovery and separate ordinary budget changes from shared-budget validation."
   ]
 }
