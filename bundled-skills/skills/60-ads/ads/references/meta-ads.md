@@ -351,8 +351,10 @@ levels. A stale snapshot requires another inspection and review of the changed
 facts. It is not permission to repeat an uncertain mutation.
 
 To enable a shared campaign budget where none exists, inspect and show
-`POSTPLUS_METAADS_SET_CAMPAIGN_BUDGET`. Start with `apply:false`, the exact
-amount/currency/period and the inspection snapshot. `validation_only` means the
+`POSTPLUS_METAADS_SET_CAMPAIGN_BUDGET`. Use `apply:false` when only validation is requested, with the exact
+amount/currency/period and inspection snapshot. An already authorized
+`apply:true` validates internally; no separate validation call is required.
+`validation_only` means the
 platform accepted a validation request; no budget was applied. Actual applying
 uses a new operation ID with `apply:true` only within the user's authorization
 for the full campaign. It validates again, checks for intervening configuration

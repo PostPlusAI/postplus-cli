@@ -96,8 +96,9 @@ manufacture an upload key. For MCP, use the host upload/import path to obtain
 an owned PostPlus file reference and pass `mediaReferences.video` when preparing
 the channel request; a path on the user's computer is not accessible to MCP.
 
-Preserve the returned video ID. Read `METAADS_GET_VIDEO` with its actual fields
-schema until Meta reports processing ready; an upload acknowledgement is not a
+Preserve the returned video ID. Use `METAADS_GET_OBJECT` with `object_id` set
+to that ID and `fields: ["id", "status"]` until `status.video_status` is `ready`.
+`METAADS_GET_VIDEO` is deprecated. An upload acknowledgement is not a
 ready-to-use ad video. Use `POSTPLUS_METAADS_CREATE_VIDEO_CREATIVE` with that ID,
 a thumbnail image hash and the same separate copy/CTA/destination/tracking
 fields as image creation. Attach the creative through CREATE_PAUSED_AD and
@@ -121,6 +122,8 @@ Use `POSTPLUS_METAADS_DUPLICATE_PAUSED_OBJECT` for one authorized native copy
 of a paused campaign, ad set or ad, with snapshot and the requested copy name.
 Campaign/ad-set copies include children; the result verifies source/copy IDs
 and paused hierarchy. This is a new copy, not a retry of an uncertain result.
+Native copies explicitly reuse each source ad's creative to preserve its CTA,
+copy, destination and tracking when Meta generates a different creative.
 Retain `createdResource` from the original receipt when verification is lost,
 then read/list that copied hierarchy. No automatic lifetime-once strategy guard
 or recurring executor is installed.
@@ -134,8 +137,9 @@ before an already-authorized apply. A separate recent operation may still hit
 Meta's account/object limits; inspect its outcome before any new request.
 
 Preview results retain safe native frame dimensions when Meta supplies them.
-Use those dimensions in a host-supported frame; a direct full-page opening may
-not have the same layout. Inspect desktop and mobile visual output separately.
+Use those dimensions in a host-supported frame. Inspect desktop and mobile
+visual output separately: native dimensions alone do not establish readable
+layout, and Meta's desktop portrait preview may still squeeze its headline.
 If dimensions are absent, do not invent them or mark visual acceptance passed.
 
 Finish by presenting completed steps, exact new/changed object IDs, current
