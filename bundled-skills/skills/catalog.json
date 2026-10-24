@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "releaseId": "skills-2026-10-24.staging.5",
+  "releaseId": "skills-2026-10-24.staging.7",
   "productBrief": {
     "schemaVersion": 1,
     "paragraphs": [
@@ -15,13 +15,14 @@
   },
   "releaseNotes": {
     "schemaVersion": 1,
-    "releaseId": "skills-2026-10-24.staging.5",
-    "title": "Clear results and safer task recovery",
-    "summary": "Staging candidate: agents handle routine technical steps and report useful results while preserving original-task recovery.",
+    "releaseId": "skills-2026-10-24.staging.7",
+    "title": "Local video evidence and clear task recovery",
+    "summary": "Staging candidate: inspect local video contact sheets before optional cloud speech analysis, with clear results and original-task recovery.",
     "highlights": [
       "Keep internal identifiers and recovery mechanics in execution records; explain results, limits and known cost in chat.",
       "Reuse existing authorization and preserve user intent when correcting definite pre-submission input errors.",
-      "Recover interrupted research by its saved original identity; preserve already submitted batch results."
+      "Recover interrupted research by its saved original identity; preserve already submitted batch results.",
+      "Start CLI video analysis with local contact sheets, refine visual questions locally, and use cloud analysis only for important speech that subtitles cannot establish."
     ]
   },
   "source": "PostPlusAI/postplus-skills",
@@ -382,7 +383,7 @@
       "familyId": "media-production",
       "familyName": "Media and Creative Production",
       "name": "media-analysis",
-      "description": "Analyze videos, images, or carousels with visible and audible evidence. Answer visual questions, inspect frames, or compare references shot by shot when requested.",
+      "description": "Analyze videos, images, or carousels. Start videos with local contact sheets, refine visual details locally, and use cloud analysis only for important speech that subtitles cannot establish.",
       "category": "analyze",
       "example": "Explain what happens in this video and show the frames supporting your analysis.",
       "path": "skills/40-creative/media-analysis/SKILL.md",

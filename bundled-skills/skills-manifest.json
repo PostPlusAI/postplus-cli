@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-10-24.staging.5",
+  "releaseId": "skills-2026-10-24.staging.7",
   "skills": [
     {
       "name": "ads",
@@ -85,7 +85,7 @@
     {
       "name": "media-analysis",
       "path": "skills/40-creative/media-analysis/SKILL.md",
-      "contentHash": "ba66fc0e235643c7f79002cf2b416037b5eaa83e65508a3faed8752c945570e1"
+      "contentHash": "6c438210505cdf6c1cdff441b2398e1c42958c151082a1f078ceff6637a48f1f"
     },
     {
       "name": "pinterest-search",

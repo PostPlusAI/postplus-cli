@@ -91,6 +91,44 @@ test('an explicitly requested output inside the cache protects that directory', 
   assert.equal(await collectExpiredMediaEvidence(f.root, TTL * 4), 0);
 });
 
+async function visualCache(f: Awaited<ReturnType<typeof fixture>>) {
+  const directory = path.join(f.cache, 'visual', 'a'.repeat(12) + '-Ab12cd');
+  await mkdir(path.join(directory, 'frames'), { recursive: true });
+  for (const name of ['contact-sheet.json', 'frames.concat', 'contact-sheet-0001.jpg', 'frames/frame-0000000000000000.jpg']) {
+    await writeFile(path.join(directory, name), 'generated evidence');
+  }
+  return directory;
+}
+
+test('terminal generated contact sheets expire with their original cloud cache', async (t) => {
+  const f = await fixture(t);
+  await withMediaEvidence(f.checkpoint, async (terminal) => {
+    await f.create(); await visualCache(f); terminal();
+  }, f.options);
+  assert.equal(await collectExpiredMediaEvidence(f.root, 1000 + TTL), 1);
+  await assert.rejects(readdir(f.cache), { code: 'ENOENT' });
+  assert.equal(typeof await readFile(f.checkpoint, 'utf8'), 'string');
+});
+
+for (const alteration of ['modified-frame', 'user-note', 'linked-frame', 'empty-run-directory'] as const) {
+  test(`contact-sheet cache is protected after ${alteration}`, async (t) => {
+    const f = await fixture(t);
+    let directory = '';
+    await withMediaEvidence(f.checkpoint, async (terminal) => {
+      await f.create(); directory = await visualCache(f); terminal();
+    }, f.options);
+    const frame = path.join(directory, 'frames', 'frame-0000000000000000.jpg');
+    if (alteration === 'modified-frame') await writeFile(frame, 'user replacement');
+    if (alteration === 'user-note') await writeFile(path.join(directory, 'notes.txt'), 'user notes');
+    if (alteration === 'linked-frame') {
+      await rm(frame); await symlink(f.checkpoint, frame);
+    }
+    if (alteration === 'empty-run-directory') await mkdir(path.join(f.cache, 'visual', 'b'.repeat(12) + '-Ef34gh'));
+    assert.equal(await collectExpiredMediaEvidence(f.root, 1000 + TTL), 0);
+    assert.equal(await readFile(path.join(f.cache, 'video.mp4'), 'utf8'), 'cached video');
+  });
+}
+
 test('an exception releases this invocation lease but cannot mark unknown work terminal', async (t) => {
   const f = await fixture(t);
   await assert.rejects(withMediaEvidence(f.checkpoint, async () => { await f.create(); throw new Error('unknown response'); }, f.options), /unknown response/);

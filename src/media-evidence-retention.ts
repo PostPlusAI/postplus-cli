@@ -79,13 +79,40 @@ async function safeDirectory(directory: string): Promise<boolean> {
 async function cacheSnapshot(directory: string): Promise<Record<string, string> | null> {
   if (!await safeDirectory(directory)) return null;
   const result: Record<string, string> = {};
-  for (const name of (await readdir(directory)).sort()) {
-    if (!['video.mp4', 'audio.m4a', 'source.mp4'].includes(name)) return null;
-    const info = await lstat(path.join(directory, name));
-    if (!info.isFile() || info.nlink !== 1) return null;
-    result[name] = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+  // Only the generator's fixed layout is disposable. Unknown files, links or
+  // changed descendants protect the entire cache, just like user video edits.
+  async function visit(relative: string, level: 'cache' | 'visual' | 'run' | 'frames'): Promise<boolean> {
+    const current = path.join(directory, relative);
+    if (!await safeDirectory(current)) return false;
+    if (relative) {
+      const info = await lstat(current);
+      result[`${relative}/`] = `${info.dev}:${info.ino}:${info.mtimeMs}:${info.ctimeMs}`;
+    }
+    for (const name of (await readdir(current)).sort()) {
+      const child = relative ? `${relative}/${name}` : name;
+      if (level === 'cache' && name === 'visual') {
+        if (!await visit(child, 'visual')) return false;
+        continue;
+      }
+      if (level === 'visual') {
+        if (!/^[a-f0-9]{12}-[A-Za-z0-9]{6}$/.test(name) || !await visit(child, 'run')) return false;
+        continue;
+      }
+      if (level === 'run' && name === 'frames') {
+        if (!await visit(child, 'frames')) return false;
+        continue;
+      }
+      const allowed = level === 'cache' ? ['video.mp4', 'audio.m4a', 'source.mp4'].includes(name)
+        : level === 'run' ? ['contact-sheet.json', 'frames.concat'].includes(name) || /^contact-sheet-\d+\.jpg$/.test(name)
+        : level === 'frames' && /^frame--?\d+\.jpg$/.test(name);
+      if (!allowed) return false;
+      const info = await lstat(path.join(directory, child));
+      if (!info.isFile() || info.nlink !== 1) return false;
+      result[child] = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+    }
+    return true;
   }
-  return result;
+  return await visit('', 'cache') ? result : null;
 }
 
 export async function collectExpiredMediaEvidence(root = getPostPlusConfigDir(), now = Date.now()): Promise<number> {

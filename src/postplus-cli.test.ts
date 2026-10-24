@@ -3601,7 +3601,7 @@ describe('update checks', () => {
     const originalArgs = [
       'media',
       'analyze',
-      'video-analysis',
+      'video-analysis', '--cloud',
       '--video',
       './demo.mov',
     ];
@@ -6141,7 +6141,7 @@ describe('hosted domain commands', () => {
       'build/index.js',
       'media',
       'analyze',
-      'video-analysis',
+      'video-analysis', '--cloud',
       '--help',
     ]);
     assert.match(analyzeHelp, /flags \(normalized media intent\)/u);
@@ -8061,7 +8061,7 @@ describe('hosted domain commands', () => {
         'media',
         [
           'analyze',
-          'video-analysis',
+          'video-analysis', '--cloud',
           '--video',
           'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
         ],
@@ -8112,7 +8112,7 @@ describe('hosted domain commands', () => {
         () =>
           runHostedDomainCommand('media', [
             'analyze',
-            'video-analysis',
+            'video-analysis', '--cloud',
             '--video',
             'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
             '--wait',
@@ -8171,7 +8171,7 @@ describe('hosted domain commands', () => {
         'media',
         [
           'analyze',
-          'video-analysis',
+          'video-analysis', '--cloud',
           '--video',
           pageUrl,
         ],
@@ -8353,7 +8353,7 @@ describe('hosted domain commands', () => {
       try {
         const command = [
           'analyze',
-          'video-analysis',
+          'video-analysis', '--cloud',
           '--video',
           localVideo,
           '--poll-interval-seconds',
@@ -8472,7 +8472,7 @@ globalThis.fetch=async(url,init)=>{
       const command = [
         'media',
         'analyze',
-        'video-analysis',
+        'video-analysis', '--cloud',
         '--video',
         fixture.filePath,
         '--poll-interval-seconds',
@@ -8603,7 +8603,7 @@ globalThis.fetch=async(url,init)=>{
       await assert.rejects(
         runHostedDomainCommand('media', [
           'analyze',
-          'video-analysis',
+          'video-analysis', '--cloud',
           '--video',
           fixture.filePath,
         ]),
@@ -8656,7 +8656,7 @@ globalThis.fetch=async(url,init)=>{
         'media',
         [
           'analyze',
-          'video-analysis',
+          'video-analysis', '--cloud',
           '--video',
           'https://cdn.example.com/video.mp4',
           '--wait-seconds',
@@ -8720,7 +8720,7 @@ globalThis.fetch=async(url,init)=>{
         'media',
         [
           'analyze',
-          'video-analysis',
+          'video-analysis', '--cloud',
           '--video',
           'https://cdn.example.com/video.mp4',
         ],
@@ -8817,7 +8817,7 @@ globalThis.fetch=async(url,init)=>{
         const args = fixture
           ? [
               'analyze',
-              'video-analysis',
+              'video-analysis', '--cloud',
               '--video',
               fixture.filePath,
               '--wait-seconds',
@@ -8904,7 +8904,7 @@ globalThis.fetch=async(url,init)=>{
           'media',
           [
             'analyze',
-            'video-analysis',
+            'video-analysis', '--cloud',
             '--video',
             'https://video.example/clip.mp4',
             '--poll-interval-seconds',
@@ -8954,7 +8954,7 @@ globalThis.fetch=async(url,init)=>{
           'media',
           [
             'analyze',
-            'video-analysis',
+            'video-analysis', '--cloud',
             '--video',
             'https://video.example/clip.mp4',
             '--hosted-operation-id',
@@ -9268,7 +9268,7 @@ globalThis.fetch=async(url,init)=>{
           capability === 'video-analysis'
             ? [
                 'analyze',
-                'video-analysis',
+                'video-analysis', '--cloud',
                 '--video',
                 localFixture.filePath,
               ]
@@ -9772,7 +9772,7 @@ globalThis.fetch=async(url,init)=>{
         assert.equal(
           await runHostedDomainCommand('media', [
             'analyze',
-            'video-analysis',
+            'video-analysis', '--cloud',
             '--video',
             localFixture.filePath,
             '--output',
@@ -10070,7 +10070,7 @@ globalThis.fetch=async(url,init)=>{
       await assert.rejects(
         runHostedDomainCommand('media', [
           'analyze',
-          'video-analysis',
+          'video-analysis', '--cloud',
           '--video',
           localFixture.filePath,
           '--output',
@@ -10174,7 +10174,7 @@ globalThis.fetch=async(url,init)=>{
       assert.equal(
         await runHostedDomainCommand('media', [
           'analyze',
-          'video-analysis',
+          'video-analysis', '--cloud',
           '--video',
           localFixture.filePath,
         ]),
@@ -10222,7 +10222,7 @@ globalThis.fetch=async(url,init)=>{
           'media',
           [
             'analyze',
-            'video-analysis',
+            'video-analysis', '--cloud',
             '--video',
             'https://example.com/video.mp4',
           ],
@@ -10277,7 +10277,7 @@ globalThis.fetch=async(url,init)=>{
         'media',
         [
           'analyze',
-          'video-analysis',
+          'video-analysis', '--cloud',
           '--video',
           'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
           '--video-seconds',
@@ -10326,7 +10326,7 @@ globalThis.fetch=async(url,init)=>{
         () =>
           runHostedDomainCommand('media', [
             'analyze',
-            'video-analysis',
+            'video-analysis', '--cloud',
             '--video',
             'postplus-media://uploads/users/user_1/hosted-media/inputs/clip.mp4',
             '--video-seconds',
@@ -12130,7 +12130,7 @@ globalThis.fetch=async(url,init)=>{
       assert.equal(
         await runHostedDomainCommand('media', [
           'analyze',
-          'video-analysis',
+          'video-analysis', '--cloud',
           '--video',
           source,
           '--output',
@@ -12217,7 +12217,7 @@ globalThis.fetch=async(url,init)=>{
       assert.equal(
         await runHostedDomainCommand('media', [
           'analyze',
-          'video-analysis',
+          'video-analysis', '--cloud',
           '--video',
           fixture.filePath,
           '--output',
@@ -12295,7 +12295,7 @@ globalThis.fetch=async(url,init)=>{
       }, fixture);
       const args = [
         'analyze',
-        'video-analysis',
+        'video-analysis', '--cloud',
         '--video',
         fixture.filePath,
         '--output',
@@ -12395,7 +12395,7 @@ globalThis.fetch=async(url,init)=>{
       try {
         const firstCall = runHostedDomainCommand('media', [
           'analyze',
-          'video-analysis',
+          'video-analysis', '--cloud',
           '--video',
           fixture.filePath,
           '--output',
@@ -12533,7 +12533,7 @@ globalThis.fetch=async(url,init)=>{
         try {
           let command = [
             'analyze',
-            'video-analysis',
+            'video-analysis', '--cloud',
             '--video',
             source,
             '--hosted-operation-id',
@@ -12634,7 +12634,7 @@ describe('automatic existing-credit execution contract', () => {
     try {
       for (const args of [
         ['create', 'video-seedance-2-5-text', '--prompt', 'demo', '--resolution', '720p', '--duration', '5'],
-        ['analyze', 'video-analysis', '--video', 'https://example.com/video.mp4'],
+        ['analyze', 'video-analysis', '--cloud', '--video', 'https://example.com/video.mp4'],
       ]) {
         await assert.rejects(runHostedRequest({ domain: 'media', args: [...args, '--quote-confirmation-token', 'retired'], auth: {apiBaseUrl: 'https://postplus.test', cliSessionToken: 'token'} }), /Unknown option.*quote-confirmation-token/u);
       }
@@ -13907,7 +13907,7 @@ it('rejects custom video-analysis prompts before any upload or hosted request', 
     await assert.rejects(
       runHostedDomainCommand('media', [
         'analyze',
-        'video-analysis',
+        'video-analysis', '--cloud',
         '--video',
         './does-not-exist.mp4',
         '--prompt',

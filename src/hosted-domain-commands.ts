@@ -62,6 +62,12 @@ import {
 } from './media-video-command.js';
 import { fetchVideoDownloadResponse, inspectVideoFile } from './media-video-file.js';
 import {
+  assertContactSheetTools,
+  prepareVideoContactSheet,
+  validateVisualFrameRange,
+  type VisualFrameRange,
+} from './media-video-contact-sheet.js';
+import {
   fetchWithNetworkDiagnostics,
   isNetworkFailure,
 } from './network-diagnostics.js';
@@ -491,7 +497,7 @@ async function runVideoAnalysisVerb(args: {
   // copied example reaches the command-specific allowlist and is reported as
   // unsupported. Without this, the generic parser mislabels the bare flag as
   // a value-taking option with a missing value.
-  const flags = parseFlags(args.args, new Set(['json', 'wait']));
+  const flags = parseFlags(args.args, new Set(['json', 'wait', 'cloud']));
   const allowedKeys = new Set([
     'hosted-operation-id',
     'json',
@@ -501,6 +507,10 @@ async function runVideoAnalysisVerb(args: {
     'poll-interval-seconds',
     'video-seconds',
     'video',
+    'cloud',
+    'start-seconds',
+    'end-seconds',
+    'frame-interval-seconds',
   ]);
   for (const key of [...flags.values.keys(), ...flags.booleans]) {
     if (!allowedKeys.has(key)) {
@@ -510,6 +520,44 @@ async function runVideoAnalysisVerb(args: {
 
   const outputPath = flags.values.get('output') ?? null;
   const originalSource = requireFlag(flags, 'video');
+  const range: VisualFrameRange = {};
+  for (const [flag, property] of [
+    ['start-seconds', 'startSeconds'],
+    ['end-seconds', 'endSeconds'],
+    ['frame-interval-seconds', 'frameIntervalSeconds'],
+  ] as const) {
+    if (flags.values.has(flag)) range[property] = Number(flags.values.get(flag));
+  }
+  validateVisualFrameRange(range);
+  if (context || flags.booleans.has('cloud')) {
+    if (Object.keys(range).length)
+      throw new Error('--cloud requires the original full video; local frame-range options cannot be combined with cloud analysis.');
+  } else {
+    for (const flag of ['hosted-operation-id', 'video-seconds', 'wait-seconds', 'poll-interval-seconds']) {
+      if (flags.values.has(flag))
+        throw new Error(`--${flag} requires --cloud. Resume an existing cloud task with its returned poll command.`);
+    }
+    // No auth or hosted request is needed for a readable local video. Check
+    // local tools before a remote source can incur a collection charge.
+    await assertContactSheetTools();
+    const local = /^(?:https:\/\/|postplus-media:\/\/)/iu.test(originalSource)
+      ? await prepareVideoEvidence(originalSource, undefined, range)
+      : { filePath: originalSource };
+    const evidence = await prepareVideoContactSheet({
+      filePath: local.filePath,
+      ...('metadata' in local ? { metadata: local.metadata } : {}),
+      range,
+      toolsChecked: true,
+      ...(outputPath ? { parentDirectory: path.join(path.dirname(path.resolve(outputPath)), '.postplus', 'media-analysis') } : {}),
+    });
+    const result = {
+      ...evidence,
+      ...('sourceBilling' in local ? { sourceBilling: local.sourceBilling, sourceResumeCommand: local.resumeCommand } : {}),
+    };
+    await writeResult(result, outputPath, flags.booleans.has('json'));
+    process.stderr.write(`Local visual evidence prepared: ${evidence.manifestPath}\nInspect the returned images before deciding whether important unsubtitled speech requires cloud analysis.\n`);
+    return 0;
+  }
   let normalizedInput: Record<string, unknown> = {
     video: originalSource,
   };
@@ -1370,7 +1418,9 @@ async function runMediaPoll(
           resolved,
           modelKey: 'video-analysis',
           verb: 'analyze',
-          args,
+          // The checkpoint already identifies authorized cloud work, including
+          // checkpoints written before contact sheets became the CLI default.
+          args: [...args, '--cloud'],
         });
       },
     });
@@ -2594,28 +2644,41 @@ function printMediaEndpointHelp(
 
   Surface: flags (normalized media intent)
   Usage:
-    postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} [--video-seconds <n>] [--wait-seconds <n>] [--poll-interval-seconds <n>] [--json] [--output <result.md>]
+    postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} [--start-seconds <n>] [--end-seconds <n>] [--frame-interval-seconds <n>] [--json] [--output <contact-sheet.json>]
+    postplus ${domain} ${verb} ${targetKey} ${formatFlagsUsage(fields)} --cloud [--video-seconds <n>] [--wait-seconds <n>] [--poll-interval-seconds <n>] [--output <analysis.md>]
 
   --video <video>    Local video path or HTTPS video/social URL. Supported social
                     sources: TikTok, Instagram, Facebook Reels/Ads and YouTube.
-                    The CLI downloads and validates locally, then uploads directly
-                    to Google Files through a hosted-authorized session.
+                    The CLI prepares a local contact sheet first: one frame per
+                    second, scene-change candidates and the last decoded frame.
                     For X, obtain a video file or direct media URL first.
                     Existing PostPlus media references use their owned read URL.
-  PostPlus uses one fixed prompt to record the complete audiovisual timeline.
-  Custom analysis prompts are not supported.
+  Default: returns visual evidence for your Agent to inspect, without cloud
+  inference. Local files need no account connection; source collection may cost
+  credits. The JSON output identifies every frame and measured timestamp.
+  --start-seconds / --end-seconds  Refine only this elapsed-time interval locally.
+  --frame-interval-seconds <n>     Local sampling interval (default 1); use a smaller
+                                 interval for fast action or brief subtitles.
+  --cloud           Use only after inspecting the contact sheet when important
+                    spoken content needed for the answer is not covered by subtitles.
+                    Reuse the returned local video to avoid collecting it again.
+                    Local sheets are prepared before cloud upload as well.
+  Cloud PostPlus analysis uses one fixed prompt for the full original audiovisual
+  timeline. Custom prompts and cropped/range-based cloud analysis are unsupported.
   --video-seconds <n>  Optional duration hint. Validated local/Google media metadata
                     takes precedence; omit this hint when duration is unknown.
-  The command polls the same durable run until completion or timeout by default;
-  --wait remains accepted for scripts written against the earlier preview.
+  Cloud analysis polls the same durable run until completion or timeout; use the
+  returned poll/resume action for any existing task, including pre-update tasks.
   Runner-managed (minted by the CLI; never in the body): operationId
 
   Examples:
     postplus ${domain} ${verb} ${targetKey} --video ./reference.mp4 --json
-    postplus ${domain} schema --endpoint ${targetKey} --json
+    postplus ${domain} ${verb} ${targetKey} --video ./reference.mp4 --start-seconds 4 --end-seconds 5 --frame-interval-seconds 0.1 --json
+    postplus ${domain} ${verb} ${targetKey} --video ./reference.mp4 --cloud --output ./analysis.md
 
   Next:
-    Review the returned analysis or follow its resume action if still running.
+    Inspect the returned contact sheets. Resolve visual gaps locally; cloud is
+    for important speech that subtitles cannot establish, not a local-error fallback.
 `);
     return;
   }
