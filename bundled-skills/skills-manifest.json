@@ -10,7 +10,7 @@
     {
       "name": "audio-transcription",
       "path": "skills/40-creative/audio-transcription/SKILL.md",
-      "contentHash": "1ac6dbf1a1115d27aa3693cd05ad88227bc87f93fcdea0775bef2368041c1ee0"
+      "contentHash": "e299ca80baa5b77147dee66de7c91b06c7714f3966637a461fadadc4feff9527"
     },
     {
       "name": "authority-ad",
@@ -50,17 +50,17 @@
     {
       "name": "facebook-research",
       "path": "skills/20-research/facebook-research/SKILL.md",
-      "contentHash": "f308818da095142cafc7d935e2e72d001e9237e19e5b59498658d3b746509347"
+      "contentHash": "8f72225161b173937f7882c78bf23ebcdba123d0236440f4003a71782e4d02df"
     },
     {
       "name": "google-trends-research",
       "path": "skills/20-research/google-trends-research/SKILL.md",
-      "contentHash": "87ec6a77a8520406ab228387a21a90df3b809630d2209219382561b1a5a30f44"
+      "contentHash": "6a8b9f0e5afde9b8f3b1f502c99595bea095ca1663185bf8f791432b8b38b87c"
     },
     {
       "name": "image-batch-runner",
       "path": "skills/40-creative/image-batch-runner/SKILL.md",
-      "contentHash": "6926ce8bd6676149fa3c6f14c71c60f98689b5a6f6acfba157464aabc02a0e17"
+      "contentHash": "1fe8cffe802c285f36471421cba5827113794132fd1b5de6ee31741226f8f958"
     },
     {
       "name": "image-generation",
@@ -70,7 +70,7 @@
     {
       "name": "instagram-research",
       "path": "skills/20-research/instagram-research/SKILL.md",
-      "contentHash": "15fc8782cf0a1d9e275e6c12fdae69d6be28d71b3ad553b591eba0381ccc6df0"
+      "contentHash": "2bc9d511c40c2a91871e06dbc72bff3a5246eafbd7c9a3ba7f803dabb36edff1"
     },
     {
       "name": "lifestyle-ad",
@@ -85,12 +85,12 @@
     {
       "name": "media-analysis",
       "path": "skills/40-creative/media-analysis/SKILL.md",
-      "contentHash": "7f35e64173f13be32c951b5c9da9a8a2346ae254d5f72a165c6d4132c94f5b48"
+      "contentHash": "ba66fc0e235643c7f79002cf2b416037b5eaa83e65508a3faed8752c945570e1"
     },
     {
       "name": "pinterest-search",
       "path": "skills/20-research/pinterest-search/SKILL.md",
-      "contentHash": "34e358165fe63a929ed16914ff301b12901ce542db469fd41786f73ca0f2f128"
+      "contentHash": "09f42c5ecb8226e34b35ebb676ca73873c1f84101160257e0e04fe3778b89656"
     },
     {
       "name": "postplus-workspace",
@@ -100,7 +100,7 @@
     {
       "name": "reddit-search",
       "path": "skills/20-research/reddit-search/SKILL.md",
-      "contentHash": "77b4c9ffd43eb5c384dce3ba9ccfb55a7c7456970359903ff3a9c75b49a83757"
+      "contentHash": "b273277575930e02ddc1a28a211104cff9ef718799d18a3f1a23e2d2a41e8e42"
     },
     {
       "name": "reference-decode",
@@ -120,7 +120,7 @@
     {
       "name": "tiktok-research",
       "path": "skills/20-research/tiktok-research/SKILL.md",
-      "contentHash": "44369bb22632045dadea46749587dd7d9f5ecad666d6b5cbe60a06be1ce91c25"
+      "contentHash": "9f050076a881af4463169db0ed19e200eb8475b3fc7a26325aecb06a752ae7ef"
     },
     {
       "name": "ugc-ad",
@@ -130,22 +130,22 @@
     {
       "name": "video-batch-runner",
       "path": "skills/40-creative/video-batch-runner/SKILL.md",
-      "contentHash": "99852a3917495a5089cdee3fcfc47447bb3c323aae47c2417622121d7df35308"
+      "contentHash": "f752784d9809c86dc06421f080e8ef264f5561e56a3d962040486af2c5747637"
     },
     {
       "name": "video-transcription",
       "path": "skills/40-creative/video-transcription/SKILL.md",
-      "contentHash": "66d11b687c15456b1250a08d044a5c241915fd3b402d2c6a94136de75561b0a8"
+      "contentHash": "dd5e4989016184e93606c8bbf79fb2cd6cc9bb2cf27fce6c408e292832f28fbc"
     },
     {
       "name": "x-research",
       "path": "skills/20-research/x-research/SKILL.md",
-      "contentHash": "50b020f5a61bfe1607660d7ae162a70456eba974d1b5487765574c8a87f6d287"
+      "contentHash": "27fe547d20bbe5b643909d221cf58bc39b7222671dbfd1d2e96e4c8d6d9add81"
     },
     {
       "name": "youtube-research",
       "path": "skills/20-research/youtube-research/SKILL.md",
-      "contentHash": "8ba25d8d89efeb5ebc8b93abd02326aa2206f30178736b00116676c15de9976a"
+      "contentHash": "55843a9be003a1ed02e92ddf8b84fb9e1605e4d095cffefd9757145651694291"
     }
   ]
 }
