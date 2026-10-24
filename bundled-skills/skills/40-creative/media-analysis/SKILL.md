@@ -34,8 +34,9 @@ postplus media analyze video-analysis \
 ```
 
 Follow the CLI's structured result and reported next action; do not infer recovery from free-text messages.
-Wait for explicit user approval when requested; an action does not authorize spending, publishing, or overwriting.
-Resume the same operation through its returned checkpoint or action; never resubmit uncertain work, repeat exhausted recovery, or switch providers to bypass failure.
+Use existing PostPlus credits for requested work within existing authorization; estimate-only requests do not execute. Do not recharge, buy subscriptions, publish or change external advertising spend without applicable authorization. An initial reservation is not a final price or a hard cost cap.
+Correct definite pre-submission field or format errors without changing the requested intent, mode or output constraints. After submission or an unknown outcome, resume the same operation through its returned checkpoint or action; never resubmit uncertain work, repeat exhausted recovery, or switch providers to bypass failure.
+Keep raw results, operation identifiers and recovery commands in execution records. In ordinary chat, give the result, meaningful limitations, known cost and any necessary user decision; do not narrate uploads, polling, internal identifiers or JSON. When asked how media was made, provide the actual model, submitted prompt in the user language and references actually submitted with their roles.
 <!-- END GENERATED EXECUTION EXAMPLE -->
 
 `video-analysis` is the CLI capability key, not another skill. With MCP, submit
@@ -67,10 +68,12 @@ exhausted recovery, or switch providers to bypass failure.
 
 For a clear local parameter rejection before submission, use command help for
 one correction. For readiness failures, use `postplus doctor --skill media-analysis`.
-Honor quote challenges using existing explicit cost authorization when sufficient;
-otherwise ask for approval and use the returned confirmation/retry action.
+Use existing PostPlus credits within the requested scope and existing spending
+authorization. Estimates do not guarantee a final maximum; do not execute an
+explicit hard final-cost limit that the server cannot enforce.
 Do not purchase a redo for wording or perceived content quality.
 
-On terminal failure, report stage, reason, operation id, known cost status and
-the returned next action. An unknown result or missing usage does not mean no
+On terminal failure, explain the affected analysis, reason, known cost status
+and necessary user action. Save the operation id and technical recovery action
+in execution records. An unknown result or missing usage does not mean no
 charge. Do not claim unseen or unheard material was analyzed.

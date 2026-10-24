@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "releaseId": "skills-2026-10-24.staging.4",
+  "releaseId": "skills-2026-10-24.staging.5",
   "productBrief": {
     "schemaVersion": 1,
     "paragraphs": [
@@ -15,13 +15,13 @@
   },
   "releaseNotes": {
     "schemaVersion": 1,
-    "releaseId": "skills-2026-10-24.staging.4",
-    "title": "Meta Ads basic operations on staging",
-    "summary": "Revise and copy paused Meta drafts, upload local videos and inspect complete inventories through both agent entry paths.",
+    "releaseId": "skills-2026-10-24.staging.5",
+    "title": "Clear results and safer task recovery",
+    "summary": "Staging candidate: agents handle routine technical steps and report useful results while preserving original-task recovery.",
     "highlights": [
-      "Upload local video through the existing owned-file path, then create a video creative and paused ad.",
-      "Revise paused draft copy/assets/audiences/schedules and make verified native paused copies.",
-      "Use complete paginated discovery and separate ordinary budget changes from shared-budget validation."
+      "Keep internal identifiers and recovery mechanics in execution records; explain results, limits and known cost in chat.",
+      "Reuse existing authorization and preserve user intent when correcting definite pre-submission input errors.",
+      "Recover interrupted research by its saved original identity; preserve already submitted batch results."
     ]
   },
   "source": "PostPlusAI/postplus-skills",

@@ -106,11 +106,11 @@ Keep each shot concrete enough for still generation, video prompting, filming, o
 
 ### 4. Ask For Approval
 
-Ask one concise approval question in the user's language. English default:
+If production authorization is missing, ask one concise approval question in the user's language. English default:
 
 `Does this authority-ad direction feel right? If yes, I will hand it directly to production.`
 
-Stop before production until the user approves.
+Reuse explicit authorization that already covers the creative direction and production scope; continue directly when it does. Ask before production only when that authorization is missing or a material direction or output constraint would change.
 
 ### 5. Handoff On Approval
 
@@ -135,3 +135,5 @@ Do not output a separate production brief and do not ask a second generation con
 - Do not copy creator identity, voice, credentials, character design, exact set, exact dialogue, brand marks, proprietary UI, signature scenes, or recognizable story devices.
 - Do not prompt for a living creator's style or imply a real professional endorsement without approval.
 - Translate references into generic production attributes: speaker role, authority basis, framing, lighting, camera behavior, edit rhythm, evidence structure, sound intent, and proof logic.
+
+Keep grammar plans, rubrics and continuity checks as working context. Present the requested script or assets and decisions that affect the result; do not require a separate handoff file or repeated approval when the same agent can continue within existing authorization.

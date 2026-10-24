@@ -91,11 +91,11 @@ After the table, provide:
 
 ### 5. Ask For Approval
 
-Ask one concise question:
+If production authorization is missing, ask one concise question:
 
 `Does this commercial direction feel right? If yes, I will hand it directly to production.`
 
-Stop before production until the user approves.
+Reuse explicit authorization that already covers the creative direction and production scope; continue directly when it does. Ask before production only when that authorization is missing or a material direction or output constraint would change.
 
 ### 6. Handoff On Approval
 
@@ -136,3 +136,5 @@ Do not treat fictional spectacle as literal product proof.
 - Do not copy exact scenes, characters, brand marks, package designs, slogans, action devices, or recognizable effect choreography.
 - Translate references into generic mechanism, object behavior, camera path, framing, palette logic, edit rhythm, sound structure, proof type, and payoff.
 - Do not prompt for a named filmmaker, studio, campaign, or living creator's style.
+
+Keep grammar plans, rubrics and continuity checks as working context. Present the requested script or assets and decisions that affect the result; do not require a separate handoff file or repeated approval when the same agent can continue within existing authorization.

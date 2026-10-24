@@ -6361,6 +6361,67 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('saves research identity before the first POST and recovers a lost response without another submit', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-research-first-response-'));
+    tempDirs.push(requestDir);
+    const checkpointPath = resolve(requestDir, 'result.json');
+    await setLocalSession({ accountId: 'account_1', accountName: 'Account', apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token', sessionExpiresAt: null, userEmail: 'agent@example.com', userId: 'user_1' });
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    let originalOperation: unknown;
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      if ('input' in body) {
+        const saved = JSON.parse(await readFile(checkpointPath, 'utf8'));
+        assert.equal(saved.researchRecovery.operationId, body.operationId);
+        assert.equal(saved.researchRecovery.accountId, 'account_1');
+        originalOperation = body.operationId;
+        throw new TypeError('first response lost after acceptance');
+      }
+      assert.deepEqual(body, {routeKey: 'google-trends-fast', sourceOperationId: originalOperation});
+      return new Response(JSON.stringify({routeKey: 'google-trends-fast', operationId: originalOperation, status: 'completed', output: {items: [{query: 'portable blender'}]}}), {headers: {'content-type': 'application/json'}});
+    };
+    try {
+      await assert.rejects(() => runHostedDomainCommand('research', ['run', 'google-trends-fast', '--query', 'portable blender', '--output', checkpointPath]));
+      const saved = JSON.parse(await readFile(checkpointPath, 'utf8'));
+      assert.equal(saved.status, 'submission_unknown');
+      // Another environment cannot consume this private recovery identity.
+      await writeFile(checkpointPath, JSON.stringify({...saved, researchRecovery: {...saved.researchRecovery, apiOrigin: 'https://other.test'}}));
+      await assert.rejects(() => runHostedDomainCommand('research', ['run', '--resume-from', checkpointPath, '--wait-seconds', '0']), /another account or environment/);
+      assert.equal(bodies.length, 1);
+      await writeFile(checkpointPath, JSON.stringify(saved));
+      assert.equal(await runHostedDomainCommand('research', ['run', '--resume-from', checkpointPath, '--wait-seconds', '0']), 0);
+      assert.equal(bodies.length, 2);
+      assert.equal(bodies.filter(body => 'input' in body).length, 1);
+      assert.equal(JSON.parse(await readFile(checkpointPath, 'utf8')).status, 'completed');
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  it('research admits the saved exact request only after typed absence and never after a failed lookup', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-research-admission-'));
+    tempDirs.push(requestDir);
+    const checkpointPath = resolve(requestDir, 'result.json');
+    await setLocalSession({ accountId: 'account_1', accountName: 'Account', apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token', sessionExpiresAt: null, userEmail: 'agent@example.com', userId: 'user_1' });
+    const saved = {routeKey: 'google-trends-fast', status: 'submission_unknown', researchRecovery: {schemaVersion: 1, accountId: 'account_1', apiOrigin: 'https://postplus.test', operationId: 'same-research-operation', skillName: 'google-trends-research', input: {query: 'portable blender'}}};
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const missing of [false, true]) {
+        await writeFile(checkpointPath, JSON.stringify(saved));
+        const bodies: Array<Record<string, unknown>> = [];
+        globalThis.fetch = async (_input, init) => {
+          const body = JSON.parse(String(init?.body)); bodies.push(body);
+          if (body.sourceOperationId) return Response.json({code: missing ? 'postplus_cli_hosted_async_run_not_found' : 'postplus_cli_hosted_provider_upstream_failed', message: 'lookup unavailable'}, {status: missing ? 404 : 503});
+          assert.deepEqual(body, {routeKey: 'google-trends-fast', operationId: 'same-research-operation', input: {query: 'portable blender'}});
+          return Response.json({routeKey: 'google-trends-fast', status: 'completed', operationId: body.operationId, output: {items: []}});
+        };
+        assert.equal(await runHostedDomainCommand('research', ['run', '--resume-from', checkpointPath, '--wait-seconds', '0']), missing ? 0 : 1);
+        assert.equal(bodies.length, missing ? 2 : 1);
+        if (!missing) assert.deepEqual(JSON.parse(await readFile(checkpointPath, 'utf8')), saved);
+      }
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   it('resumes a Research checkpoint in a new invocation without submitting again', async () => {
     const requestDir = await mkdtemp(
       resolve(tmpdir(), 'postplus-research-resume-'),
@@ -9332,6 +9393,17 @@ globalThis.fetch=async(url,init)=>{
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('returns a confirmed unknown media submission without spending the whole wait budget or resubmitting', async () => {
+    await setLocalSession({ accountId: 'account_1', accountName: 'Account', apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token', sessionExpiresAt: null, userEmail: 'agent@example.com', userId: 'user_1' });
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; return Response.json({operationId: 'original', output: {data: {id: 'original-run', status: 'processing', error: {submissionOutcome: 'unknown', retryable: false, userAction: 'Do not submit a replacement.'}}}}); };
+    try {
+      assert.equal(await runHostedDomainCommand('media', ['poll', '--handle', 'original-run', '--capability', 'media-generation', '--wait-seconds', '600']), 0);
+      assert.equal(calls, 1);
+    } finally { globalThis.fetch = originalFetch; }
   });
 
   it('treats failed HTTP 200 media results as failures and preserves typed recovery advice', async () => {

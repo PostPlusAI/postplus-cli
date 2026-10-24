@@ -8,7 +8,6 @@ metadata:
 ---
 
 # Street Interview Ad
-
 ## Purpose
 
 Create or audit ads that use a believable public conversation to move from curiosity or skepticism to grounded explanation, proof, and an optional CTA.
@@ -108,11 +107,11 @@ Keep one dominant action and one conversational job per row. Write all spoken li
 
 ### 4. Ask For Approval
 
-Ask one concise approval question in the user's language. English default:
+If production authorization is missing, ask one concise approval question in the user's language. English default:
 
 `Does this street-interview direction feel right? If yes, I will hand it directly to production.`
 
-Stop before production until the user approves.
+Reuse explicit authorization that already covers the creative direction and production scope; continue directly when it does. Ask before production only when that authorization is missing or a material direction or output constraint would change.
 
 ### 5. Handoff On Approval
 
@@ -138,3 +137,4 @@ Do not output a separate production brief and do not ask a second generation con
 - Do not claim that an actor is a random passerby, customer, expert, or independent reviewer.
 - Do not invent medical, financial, comparative, rapid-result, performance, scarcity, discount, review, or guarantee claims.
 - Keep critical text out of generated frames and translate references into generic camera, movement, sound, state, proof, and edit attributes.
+Keep grammar plans, rubrics and continuity checks as working context. Present the requested script or assets and decisions that affect the result; do not require a separate handoff file or repeated approval when the same agent can continue within existing authorization.

@@ -140,7 +140,7 @@ test('a hosted product failure after recovery stops without a second action or J
   const config=await mkdtemp(join(tmpdir(),'postplus-recovery-product-'));
   t.after(()=>rm(config,{recursive:true,force:true}));
   const mock=join(config,'mock.mjs');
-  await writeFile(join(config,'config.json'),JSON.stringify({cliSessionToken:'fixture',apiBaseUrl:'https://postplus.test'}),{mode:0o600});
+  await writeFile(join(config,'config.json'),JSON.stringify({accountId:'fixture-account',userId:'fixture-user',cliSessionToken:'fixture',apiBaseUrl:'https://postplus.test'}),{mode:0o600});
   await writeFile(mock, `globalThis.fetch=async()=>Response.json({code:'postplus_cli_fixture_failed',error:'Task failed.',userAction:'Run postplus update.',operationId:'original-operation'},{status:400});`);
   for (const json of [true,false]) {
     await assert.rejects(promisify(execFile)(process.execPath,['--import',mock,'build/index.js','research','run','google-trends-fast','--query','fixture','--country','US','--time-range','today 12-m','--output',join(config,'result.json'),...(json?['--json']:[])],{
@@ -152,7 +152,8 @@ test('a hosted product failure after recovery stops without a second action or J
         assert.equal(failure.code,'postplus_cli_fixture_failed');
         assert.equal(failure.operationId,'original-operation');
         assert.equal(failure.recovery.exhausted,true);
-        assert.equal(failure.recovery.nextActionAfterUserResolution,'Run postplus update.');
+        assert.match(failure.recovery.nextActionAfterUserResolution,/postplus research run --resume-from/);
+        assert.doesNotMatch(failure.recovery.nextActionAfterUserResolution,/Run postplus update/);
         assert.equal(failure.userAction,undefined);
         assert.doesNotMatch(failure.action,/Run postplus/);
       } else {

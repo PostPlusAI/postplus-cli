@@ -92,6 +92,8 @@ export type HostedProductError = {
   runId?: string;
   sourceSubmissionRejected?: true;
   analysisSubmissionRejected?: true;
+  billing?: Record<string, unknown>;
+  submissionOutcome?: string;
 };
 
 export class HostedProductRequestError extends Error {
@@ -257,7 +259,8 @@ async function runHostedCommand(input: {
       return 1;
     }
 
-    if (shouldPreserveHostedOutput(input.preserveOutputOnProductError)) {
+    if (shouldPreserveHostedOutput(input.preserveOutputOnProductError) &&
+        !(error instanceof PostPlusClientUpgradeRequiredError)) {
       writePreservedOutputRecovery(input.preservedOutputRecovery);
     }
 
@@ -706,15 +709,36 @@ export function assertSuccessfulMediaTerminal(payload: unknown) {
   const retryable = run.error?.retryable === true;
   const productError: HostedProductError = {
     ...readHostedProductError(payload),
-    message: `The media task ended with status ${status}.`,
+    message: typeof run.error?.message === 'string'
+      ? sanitizeMediaFailureMessage(run.error.message)
+      : `The media task ended with status ${status}.`,
     code,
     stage,
     userAction,
     retryable,
     ...(run.id ? { runId: run.id } : {}),
+    ...(run.error?.submissionOutcome ? { submissionOutcome: String(run.error.submissionOutcome) } : {}),
+    ...(readMediaBilling(payload) ? { billing: readMediaBilling(payload)! } : {}),
   };
 
   throw new HostedProductRequestError(productError);
+}
+
+function sanitizeMediaFailureMessage(value: string) {
+  // Keep the actual reason without forwarding signed media query strings.
+  return value.replace(/https?:\/\/[^\s<>"']+/gu, raw => {
+    try { const url = new URL(raw); url.search = ''; url.hash = ''; url.username = ''; url.password = ''; return url.toString(); }
+    catch { return '[media URL]'; }
+  });
+}
+
+function readMediaBilling(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object' || !('billing' in payload) || !payload.billing || typeof payload.billing !== 'object') return null;
+  const source = payload.billing as Record<string, unknown>;
+  // Public price/settlement facts only, never provider cost evidence.
+  return Object.fromEntries(Object.entries(source).filter(([key, value]) =>
+    ['billingUnit', 'charged', 'estimatedCredits', 'estimatedMillicredits', 'estimatedOnly', 'finalizedCredits', 'finalizedMillicredits', 'reservedCredits', 'reservedMillicredits', 'credits', 'status'].includes(key) &&
+    ['string', 'number', 'boolean'].includes(typeof value)));
 }
 
 // Read the `{ id, status }` run projection out of a media-generation payload

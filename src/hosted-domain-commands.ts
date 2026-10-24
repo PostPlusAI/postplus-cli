@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { resolveFreshRemoteAuth } from './auth-session.js';
+import { PostPlusClientUpgradeRequiredError } from './client-compatibility.js';
 import { readLocalConfig } from './local-state.js';
 
 import { HOSTED_MEDIA_REFERENCE_URI_PREFIX } from './generated/hosted-field-validation-core.generated.js';
@@ -17,6 +18,7 @@ import {
   postHostedJson,
   readHostedUploadOutput,
   readMediaPollRun,
+  readMediaRunResult,
   shellQuoteArg,
   writeResult,
 } from './hosted-command-runtime.js';
@@ -1231,7 +1233,8 @@ async function submitMediaGenerationRequest(params: {
         const run = readMediaPollRun(submitted);
         accepted = run.id !== null;
         await acknowledgeMediaRunCheckpoint(checkpoint, run.id);
-        if (!params.wait || !run.status || isTerminalRunStatus(run.status)) {
+        if (!params.wait || !run.status || isTerminalRunStatus(run.status) ||
+            readMediaRunResult(submitted).error?.submissionOutcome === 'unknown') {
           return assertSuccessfulMediaTerminal(submitted);
         }
         if (!run.id) {
@@ -1257,6 +1260,7 @@ async function submitMediaGenerationRequest(params: {
                 context: params.context,
               }),
             readStatus: (payload) => readMediaPollRun(payload).status,
+            stopWaiting: payload => readMediaRunResult(payload).error?.submissionOutcome === 'unknown',
             waitBudgetMs: params.wait.waitBudgetMs,
           }),
         );
@@ -1447,6 +1451,7 @@ async function runMediaPoll(
           pollIntervalMs,
           pollOnce,
           readStatus: (payload) => readMediaPollRun(payload).status,
+            stopWaiting: payload => readMediaRunResult(payload).error?.submissionOutcome === 'unknown',
           waitBudgetMs,
         });
         const status = readMediaPollRun(settled).status;
@@ -1544,7 +1549,9 @@ async function resolveResearchResumeInput(input: {
   outputPath: string | null;
   preserveCheckpointOnError: boolean;
   routeKey: string;
-  runHandle: string;
+  runHandle?: string;
+  sourceOperationId?: string;
+  recoveryRequest?: { input: Record<string, unknown>; skillName: string };
 }> {
   const allowedKeys = new Set([
     'json',
@@ -1602,6 +1609,23 @@ async function resolveResearchResumeInput(input: {
     throw new Error(
       `Research ${input.verb} checkpoint is already terminal (${status}).`,
     );
+  }
+  const recovery = checkpoint && typeof checkpoint === 'object' && !Array.isArray(checkpoint)
+    ? (checkpoint as Record<string, unknown>).researchRecovery
+    : null;
+  if (!runHandle && recovery && typeof recovery === 'object' && !Array.isArray(recovery)) {
+    const saved = recovery as Record<string, unknown>;
+    const auth = await resolveFreshRemoteAuth();
+    const config = await readLocalConfig();
+    if (saved.schemaVersion !== 1 || !routeKey ||
+        typeof saved.operationId !== 'string' || !saved.operationId ||
+        typeof saved.skillName !== 'string' || !saved.skillName ||
+        !saved.input || typeof saved.input !== 'object' || Array.isArray(saved.input) ||
+        saved.apiOrigin !== new URL(auth.apiBaseUrl).origin ||
+        saved.accountId !== (config?.accountId ?? config?.userId)) {
+      throw new Error('This research checkpoint is invalid or belongs to another account or environment. Resume in its original account/environment.');
+    }
+    return { outputPath: checkpointPath, preserveCheckpointOnError: true, routeKey, sourceOperationId: saved.operationId, recoveryRequest: {input: saved.input as Record<string, unknown>, skillName: saved.skillName} };
   }
   if (!runHandle) {
     throw new Error(
@@ -2030,6 +2054,8 @@ async function runResearchRun(
       preserveCheckpointOnError,
       routeKey: resumeRouteKey,
       runHandle,
+      sourceOperationId,
+      recoveryRequest,
     } = await resolveResearchResumeInput({
       context,
       flags,
@@ -2038,6 +2064,8 @@ async function runResearchRun(
     });
     assertKnownResearchRoute(targets, resumeRouteKey);
     const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
+    let currentHandle = runHandle;
+    let admissionAttempted = false;
 
     return dispatchHostedCommand(
       {
@@ -2046,13 +2074,24 @@ async function runResearchRun(
             pollIntervalMs,
             initialPollIntervalMs: flags.values.has('poll-interval-seconds') ? undefined : 2_000,
             pollOnce: async () => {
-              const payload = await postHostedJson({
-                body: { routeKey: resumeRouteKey, runHandle },
+              let payload: unknown;
+              try { payload = await postHostedJson({
+                body: { routeKey: resumeRouteKey, ...(currentHandle ? {runHandle: currentHandle} : {sourceOperationId}) },
                 pathName: '/api/postplus-cli/hosted/research',
                 skillName: null,
                 context,
-              });
+              }); } catch (error) {
+                if (currentHandle || admissionAttempted || !sourceOperationId || !recoveryRequest ||
+                    !(error instanceof HostedProductRequestError) || error.httpStatus !== 404 ||
+                    error.productError.code !== 'postplus_cli_hosted_async_run_not_found') throw error;
+                // Typed absence only. The durable unique row admits at most
+                // one dispatch even if the delayed original races this call.
+                admissionAttempted = true;
+                payload = await postHostedJson({body: {routeKey: resumeRouteKey, operationId: sourceOperationId, input: recoveryRequest.input}, pathName: '/api/postplus-cli/hosted/research', skillName: recoveryRequest.skillName, context});
+              }
               assertResearchResumePayload(payload, verb);
+              currentHandle = readResearchRun(payload).runHandle ?? currentHandle;
+              if (outputPath) await writeResult(payload, outputPath, false);
               return payload;
             },
             readStatus: readResearchRunStatus,
@@ -2130,7 +2169,19 @@ async function runResearchRun(
   return dispatchHostedCommand(
     {
       request: async () => {
-        const submitted = await postHostedJson({
+        if (!context && outputPath) {
+          const auth = await resolveFreshRemoteAuth();
+          const config = await readLocalConfig();
+          const accountId = config?.accountId ?? config?.userId;
+          if (!accountId) throw new Error('Sign in before submitting research.');
+          await writeResult({
+            routeKey, operationId, status: 'submission_unknown',
+            researchRecovery: { schemaVersion: 1, accountId, apiOrigin: new URL(auth.apiBaseUrl).origin, operationId, input, skillName },
+          }, outputPath, false);
+          checkpointWritten = true;
+        }
+        let submitted: unknown;
+        try { submitted = await postHostedJson({
           body: {
             routeKey,
             input,
@@ -2139,7 +2190,12 @@ async function runResearchRun(
           pathName: '/api/postplus-cli/hosted/research',
           skillName,
           context,
-        });
+        }); } catch (error) {
+          if (error instanceof PostPlusClientUpgradeRequiredError && checkpointWritten && outputPath) {
+            error.recoveryArgs = ['research', 'run', '--resume-from', path.resolve(outputPath), ...(flags.booleans.has('json') ? ['--json'] : [])];
+          }
+          throw error;
+        }
         assertResearchResumePayload(submitted, verb);
         if (!wait) {
           return submitted;
@@ -2178,7 +2234,7 @@ async function runResearchRun(
       preservedOutputRecovery: () =>
         checkpointWritten && outputPath
           ? [
-              'Research run was submitted, but status polling failed.',
+              'Research submission or progress could not be confirmed. Query the original operation; do not resubmit.',
               `Checkpoint preserved at ${path.resolve(outputPath)}.`,
               `Resume: postplus research ${verb} --resume-from ${shellQuoteArg(
                 path.resolve(outputPath),

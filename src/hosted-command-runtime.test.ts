@@ -111,3 +111,19 @@ test('short research polling observes completion inside a budget shorter than th
   assert.deepEqual(result, { status: 'completed' });
   assert.equal(calls, 2);
 });
+
+
+test('terminal media preserves the actual sanitized cause, cost facts and original identity', () => {
+  const payload = { operationId: 'original-operation', billing: { credits: 0, status: 'released', providerCostUsd: 10 }, output: { data: {
+    id: 'original-run', status: 'failed', error: { code: 'invalid_request', message: 'Video input https://cdn.example.com/a.mp4?secret=private failed validation', retryable: false, submissionOutcome: 'rejected' },
+  } } };
+  assert.throws(() => assertSuccessfulMediaTerminal(payload), (error: unknown) => {
+    assert.ok(error instanceof HostedProductRequestError);
+    assert.match(error.productError.message, /failed validation/);
+    assert.ok(!error.productError.message.includes('secret'));
+    assert.equal(error.productError.operationId, 'original-operation');
+    assert.equal(error.productError.submissionOutcome, 'rejected');
+    assert.deepEqual(error.productError.billing, { credits: 0, status: 'released' });
+    return true;
+  });
+});
