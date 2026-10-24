@@ -23,6 +23,12 @@ export type MediaRunCheckpoint = {
   capability: 'video-analysis' | 'media-generation';
   operationId: string;
   handle?: string;
+  generationRequest?: {
+    endpointKey: string;
+    input: Record<string, unknown>;
+    skillName: string;
+  };
+  generationSubmissionAttempted?: true;
   videoRequest?: {
     source: string;
     prompt?: string;
@@ -85,6 +91,7 @@ export async function prepareMediaRunCheckpoint(
   operationId: string,
   outputPath: string | null,
   context: HostedRequestContext | undefined,
+  generationRequest?: MediaRunCheckpoint['generationRequest'],
 ): Promise<PreparedMediaCheckpoint | null> {
   // Library callers already own the operation id and must not touch disk.
   if (context) return null;
@@ -95,6 +102,7 @@ export async function prepareMediaRunCheckpoint(
     capability,
     operationId,
   };
+  // Identity hashing stays independent of the private input snapshot.
   const key = createHash('sha256').update(JSON.stringify(record)).digest('hex');
   const filePath = path.join(
     getPostPlusConfigDir(),
@@ -107,6 +115,7 @@ export async function prepareMediaRunCheckpoint(
     );
   }
   // Preserve a previously prepared operation, including any uncertain submit.
+  let shouldSave = false;
   try {
     const existing = await readMediaRunCheckpoint(filePath, context);
     if (
@@ -125,8 +134,18 @@ export async function prepareMediaRunCheckpoint(
       )
     )
       throw error;
-    await writeResult(record, filePath, false);
+    // The first durable checkpoint includes the full generation intent below.
+    shouldSave = true;
   }
+  if (generationRequest) {
+    if (record.generationRequest && JSON.stringify(record.generationRequest) !== JSON.stringify(generationRequest))
+      throw new Error('The saved media generation request differs from this submission. Resume its original checkpoint.');
+    if (!record.generationRequest) shouldSave = true;
+    record.generationRequest = generationRequest;
+  }
+  if (Buffer.byteLength(JSON.stringify(record)) > 8 * 1024 * 1024)
+    throw new Error('The saved media request exceeds the recovery checkpoint limit. No task was submitted.');
+  if (shouldSave) await writeResult(record, filePath, false);
   const resumeCommand = buildCheckpointResume(filePath, outputPath);
   process.stderr.write(
     `Media operation prepared: operationId=${operationId}\nResume: ${resumeCommand}\n`,
@@ -157,7 +176,7 @@ export async function readMediaRunCheckpoint(
       '--resume-from is CLI-only; library callers query the original operation id directly.',
     );
   const info = await stat(filePath);
-  if (!info.isFile() || info.size > 65536)
+  if (!info.isFile() || info.size > 8 * 1024 * 1024)
     throw new Error('Invalid media recovery checkpoint.');
   // Read errors retain their filesystem identity, especially ENOENT used by
   // first preparation. Invalid JSON must never be treated as an absent record.
@@ -201,6 +220,8 @@ export async function readMediaRunCheckpoint(
           'capability',
           'operationId',
           'handle',
+          'generationRequest',
+          'generationSubmissionAttempted',
           'videoRequest',
           'videoTransfer',
           'analysisSubmissionAttempted',
@@ -208,6 +229,18 @@ export async function readMediaRunCheckpoint(
     )
   )
     throw new Error('Invalid media recovery checkpoint.');
+  if (data.generationRequest !== undefined) {
+    const request = data.generationRequest as Record<string, unknown> | null;
+    if (data.capability !== 'media-generation' || !request || typeof request !== 'object' ||
+        Array.isArray(request) || typeof request.endpointKey !== 'string' || !request.endpointKey ||
+        typeof request.skillName !== 'string' || !request.skillName ||
+        !request.input || typeof request.input !== 'object' || Array.isArray(request.input) ||
+        Object.keys(request).some(key => !['endpointKey', 'input', 'skillName'].includes(key)))
+      throw new Error('Invalid saved media generation request.');
+  }
+  if (data.generationSubmissionAttempted !== undefined &&
+      (data.generationSubmissionAttempted !== true || !data.generationRequest))
+    throw new Error('Invalid media generation submission checkpoint.');
   if (data.videoRequest !== undefined) {
     const request = data.videoRequest;
     if (
