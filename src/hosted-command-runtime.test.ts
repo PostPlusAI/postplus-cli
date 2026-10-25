@@ -1,5 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { toFailureFact } from './failure-contract.js';
+
+test('pre-dispatch staging failure retains typed operation, retry and next action in outer JSON', () => {
+  const failure = toFailureFact(new HostedProductRequestError({ code: 'postplus_cli_hosted_storage_upload_pending', layer: 'hosted_storage_invalid_request', message: 'Original upload pending.', operationId: 'original-upload', userMessageRule: 'generic_retry', retryable: true, userAction: 'Verify the original upload; do not replace it.' }, 409));
+  assert.equal(failure.code, 'postplus_cli_hosted_storage_upload_pending');
+  assert.equal(failure.correlationId, 'original-upload');
+  assert.equal(failure.operationId, 'original-upload');
+  assert.equal(failure.httpStatus, 409);
+  assert.equal(failure.retryable, true);
+  assert.equal(failure.action, 'Verify the original upload; do not replace it.');
+});
 
 import {
   HostedProductRequestError,

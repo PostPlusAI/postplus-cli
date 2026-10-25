@@ -754,6 +754,8 @@ async function runMediaFileUpload(
           context,
         });
         const output = readHostedUploadOutput(payload);
+        const completedReference = readCompletedUploadReference(output, fingerprint.sizeBytes);
+        if (completedReference) return buildDurableUploadResult(payload, completedReference);
         const signedUpload = readSignedUpload(output);
         const mediaReference = readMediaReferenceValue(output);
         const transfer = await uploadHostedMediaFile({
@@ -1078,6 +1080,8 @@ async function stageHostedMediaFile(input: {
     skillName: input.skillName,
   });
   const output = readHostedUploadOutput(payload);
+  const completedReference = readCompletedUploadReference(output, input.file.sizeBytes);
+  if (completedReference) return completedReference;
   const transfer = await uploadHostedMediaFile({
     mediaReference: readMediaReferenceValue(output),
     owner,
@@ -1098,6 +1102,12 @@ async function stageHostedMediaFile(input: {
   }
   if (transfer.reusedCompleted) process.stderr.write('The original upload is already complete; no bytes transferred.\n');
   return transfer.mediaReference;
+}
+
+function readCompletedUploadReference(output: Record<string, unknown>, sizeBytes: number): string | null {
+  if (output.status !== 'complete') return null;
+  if (output.signedUpload !== undefined || output.sizeBytes !== sizeBytes) throw new Error('Verified upload response does not match the original file.');
+  return readMediaReferenceValue(output);
 }
 
 async function verifyCompletedMediaReference(input: {

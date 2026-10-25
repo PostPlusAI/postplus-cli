@@ -104,6 +104,17 @@ export class HostedProductRequestError extends Error {
   ) {
     super(formatHostedProductErrorMessage(productError));
     this.name = 'HostedProductRequestError';
+    // Staging can fail before the command dispatcher. Keep the same typed facts
+    // when the outer CLI failure formatter handles that exception.
+    Object.assign(this, {
+      code: productError.code,
+      stage: productError.stage ?? productError.layer,
+      service: 'postplus-cloud',
+      correlationId: productError.operationId,
+      operationId: productError.operationId,
+      retryable: productError.retryable ?? false,
+      ...(typeof productError.userAction === 'string' ? { action: productError.userAction } : {}),
+    });
   }
 }
 

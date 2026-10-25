@@ -432,11 +432,17 @@ export async function assertLocalConfigWritable(): Promise<void> {
 // This scope contains only local configuration writes, never child processes.
 // A dead owner therefore has no installer descendants that could keep writing.
 async function withConfigWriteLock<T>(operation: () => Promise<T>): Promise<T> {
+  return withLocalStateLock('config', operation, 5_000);
+}
+
+/** Only in-process work: a dead owner has no child writer to retain this lock. */
+export async function withLocalStateLock<T>(name: string, operation: () => Promise<T>, timeoutMs = 5 * 60_000): Promise<T> {
+  if (!/^[a-z0-9-]+$/u.test(name)) throw new Error('Invalid local state lock name.');
   const directory = getPostPlusConfigDir();
-  const lockPath = join(directory, 'config.lock');
+  const lockPath = join(directory, `${name}.lock`);
   const ownerFile = `owner-${randomUUID()}.json`;
-  const candidatePath = join(directory, `.config-${ownerFile}`);
-  const deadline = Date.now() + 5_000;
+  const candidatePath = join(directory, `.${name}-${ownerFile}`);
+  const deadline = Date.now() + timeoutMs;
   await mkdir(directory, { recursive: true });
   await mkdir(candidatePath, { mode: 0o700 });
   try {
@@ -471,8 +477,8 @@ async function withConfigWriteLock<T>(operation: () => Promise<T>): Promise<T> {
           }
         } catch { /* Preserve unknown ownership; the bounded wait reports it. */ }
         if (deadOwner) await removePostPlusUpdateLockOwner(lockPath, deadOwner);
-        if (Date.now() >= deadline) throw new PostPlusFailure('PostPlus configuration is locked by another writer.', {
-          code: 'postplus_config_busy', stage: 'config-write', service: 'local-state', retryable: false,
+        if (Date.now() >= deadline) throw new PostPlusFailure('Another PostPlus command still owns this local state.', {
+          code: name === 'config' ? 'postplus_config_busy' : 'postplus_media_staging_busy', stage: name === 'config' ? 'config-write' : 'media-staging', service: 'local-state', retryable: false,
           action: 'Wait for the other CLI command to finish; if the lock remains, inspect the interrupted writer before retrying.',
         });
         await new Promise((resolve) => setTimeout(resolve, 25));
