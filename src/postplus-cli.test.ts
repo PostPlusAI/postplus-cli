@@ -9172,6 +9172,8 @@ globalThis.fetch=async(url,init)=>{
               'accountId',
               'apiOrigin',
               'capability',
+              'generationRequest',
+              'generationSubmissionAttempted',
               'operationId',
               'schemaVersion',
             ]);

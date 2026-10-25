@@ -704,6 +704,8 @@ async function runMediaFileUpload(
           context,
         });
         const output = readHostedUploadOutput(payload);
+        const completedReference = readCompletedUploadReference(output, fingerprint.sizeBytes);
+        if (completedReference) return buildDurableUploadResult(payload, completedReference);
         const signedUpload = readSignedUpload(output);
         const mediaReference = readMediaReferenceValue(output);
         const transfer = await uploadHostedMediaFile({
@@ -1028,6 +1030,8 @@ async function stageHostedMediaFile(input: {
     skillName: input.skillName,
   });
   const output = readHostedUploadOutput(payload);
+  const completedReference = readCompletedUploadReference(output, input.file.sizeBytes);
+  if (completedReference) return completedReference;
   const transfer = await uploadHostedMediaFile({
     mediaReference: readMediaReferenceValue(output),
     owner,
@@ -1048,6 +1052,12 @@ async function stageHostedMediaFile(input: {
   }
   if (transfer.reusedCompleted) process.stderr.write('The original upload is already complete; no bytes transferred.\n');
   return transfer.mediaReference;
+}
+
+function readCompletedUploadReference(output: Record<string, unknown>, sizeBytes: number): string | null {
+  if (output.status !== 'complete') return null;
+  if (output.signedUpload !== undefined || output.sizeBytes !== sizeBytes) throw new Error('Verified upload response does not match the original file.');
+  return readMediaReferenceValue(output);
 }
 
 async function verifyCompletedMediaReference(input: {
@@ -1210,12 +1220,17 @@ async function submitMediaGenerationRequest(params: {
     params.operationId,
     params.outputPath,
     params.context,
+    { endpointKey: params.endpointKey, input: params.input, skillName: params.skillName },
   );
   let accepted = false;
 
   return dispatchHostedCommand(
     {
       request: async () => {
+        if (checkpoint) {
+          checkpoint.record.generationSubmissionAttempted = true;
+          await writeResult(checkpoint.record, checkpoint.filePath, false);
+        }
         const submitted = await postHostedJson({
           body,
           pathName: '/api/postplus-cli/hosted/capability',
@@ -1324,7 +1339,7 @@ async function runMediaPoll(
   const checkpoint = resumePath
     ? await readMediaRunCheckpoint(resumePath, context)
     : null;
-  const handle =
+  let handle =
     checkpoint?.handle ?? (checkpoint ? null : requireFlag(flags, 'handle'));
   const capability =
     checkpoint?.capability ??
@@ -1381,8 +1396,10 @@ async function runMediaPoll(
   }
   let terminalObserved = false;
 
-  const pollOnce = (timeoutMs?: number) =>
-    postHostedJson({
+  let resumedSubmission = false;
+  const pollOnce = async (timeoutMs?: number): Promise<unknown> => {
+    try {
+      const payload = await postHostedJson({
       timeoutMs,
       body: {
         capability,
@@ -1396,7 +1413,41 @@ async function runMediaPoll(
       skillName: null,
       context,
       debug: flags.booleans.has('debug'),
-    });
+      });
+      const recoveredHandle = readMediaPollRun(payload).id;
+      if (recoveredHandle && checkpoint && resumePath && checkpoint.handle !== recoveredHandle) {
+        handle = recoveredHandle;
+        await acknowledgeMediaRunCheckpoint({ record: checkpoint, filePath: resumePath,
+          resumeCommand: buildCheckpointResume(resumePath, outputPath) }, recoveredHandle);
+      }
+      return payload;
+    } catch (error) {
+      // A missing handle alone never authorizes replay. Only a typed absence
+      // from the original account/environment, with the saved request, can
+      // continue admission through the server's account/operation unique key.
+      if (handle || resumedSubmission || !checkpoint?.generationRequest || !resumePath ||
+          !(error instanceof HostedProductRequestError) || error.httpStatus !== 404 ||
+          error.productError.code !== 'postplus_cli_hosted_async_run_not_found') throw error;
+      resumedSubmission = true;
+      checkpoint.generationSubmissionAttempted = true;
+      await writeResult(checkpoint, resumePath, false);
+      const saved = checkpoint.generationRequest;
+      const payload = await postHostedJson({
+        body: { capability: 'media-generation', operation: 'request',
+          operationId: checkpoint.operationId, endpointKey: saved.endpointKey, input: saved.input },
+        pathName: '/api/postplus-cli/hosted/capability', skillName: saved.skillName, context,
+        timeoutMs: HOSTED_MEDIA_CREATE_REQUEST_TIMEOUT_MS,
+        debug: flags.booleans.has('debug'),
+      });
+      const recoveredHandle = readMediaPollRun(payload).id;
+      if (recoveredHandle) {
+        handle = recoveredHandle;
+        await acknowledgeMediaRunCheckpoint({ record: checkpoint, filePath: resumePath,
+          resumeCommand: buildCheckpointResume(resumePath, outputPath) }, recoveredHandle);
+      }
+      return payload;
+    }
+  };
 
   return dispatchHostedCommand(
     {

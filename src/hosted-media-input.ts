@@ -18,6 +18,7 @@ import {
   getPostPlusConfigDir,
   readLocalConfig,
   resolveApiBaseUrlState,
+  withLocalStateLock,
 } from './local-state.js';
 
 const MEDIA_REFERENCE_PREFIXES = [
@@ -152,10 +153,20 @@ export async function resolveManifestMediaInputs(input: {
 
       let staged = inCommand.get(cacheKey);
       if (!staged) {
-        staged = input.stage({
-          field,
-          file: local,
-          operationId: `postplus-cli:media-file:stage:${cacheKey}`,
+        const stage = input.stage;
+        staged = withLocalStateLock(`media-stage-${cacheKey}`, async () => {
+          // Another CLI process may have finished while this one waited.
+          const current = (await readMediaCache()).entries[cacheKey];
+          if (current && current.expiresAt > Date.now() && current.mediaReference.startsWith('postplus-media://')) return current.mediaReference;
+          const reference = await stage({ field, file: local, operationId: `postplus-cli:media-file:stage:${cacheKey}` });
+          if (!reference.startsWith('postplus-media://')) throw new Error(`Hosted media staging for ${field.name} did not return a persistent PostPlus media reference.`);
+          // Merge each completed edge under its own brief cache-write lock.
+          await withLocalStateLock('media-cache', async () => {
+            const latest = await readMediaCache();
+            latest.entries[cacheKey] = { expiresAt: Date.now() + MEDIA_CACHE_TTL_MS, mediaReference: reference };
+            await writeMediaCache(latest);
+          });
+          return reference;
         });
         inCommand.set(cacheKey, staged);
       }
@@ -169,10 +180,6 @@ export async function resolveManifestMediaInputs(input: {
         expiresAt: Date.now() + MEDIA_CACHE_TTL_MS,
         mediaReference,
       };
-      // Persist each completed staging edge immediately. If a later item in the
-      // same multi-media request fails, a retry reuses every successful object
-      // and resumes at the first missing input without any provider submit.
-      await writeMediaCache(cache);
       next.push(mediaReference);
     }
 

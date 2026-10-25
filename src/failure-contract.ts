@@ -4,6 +4,7 @@ export type FailureFact = {
   stage: string;
   service: string;
   correlationId: string | null;
+  operationId?: string;
   retryable: boolean;
   message: string;
   action: string;
@@ -161,6 +162,7 @@ export function toFailureFact(
     stage: sanitizeFailureText(string(source.stage) ?? context.stage ?? "command"),
     service: sanitizeFailureText(string(source.service) ?? context.service ?? (transport ? "network" : "cli")),
     correlationId: string(source.correlationId) ? sanitizeFailureText(String(source.correlationId)) : null,
+    ...(string(source.operationId) ? { operationId: sanitizeFailureText(String(source.operationId)) } : {}),
     retryable:
       typeof source.retryable === "boolean"
         ? source.retryable
