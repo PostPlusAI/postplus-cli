@@ -33,6 +33,7 @@ import {
   uploadHostedMediaFile,
 } from './hosted-media-transfer.js';
 import { setLocalSession } from './local-state.js';
+import { toFailureFact } from './failure-contract.js';
 
 let directory: string;
 let originalConfig: string | undefined;
@@ -46,6 +47,51 @@ const signedUpload = {
   expiresInSeconds: 3600,
 };
 const ref = 'postplus-media://uploads/account/input.bin';
+
+test('an estimate signing failure reaches the outer CLI with its original typed upload identity', async () => {
+  const file = path.join(directory, 'pending.png');
+  await writeFile(file, 'png-bytes');
+  let requests = 0, operationId = '';
+  globalThis.fetch = async (_url, init) => {
+    requests++;
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.operation, 'create-upload-url');
+    operationId = body.operationId;
+    return Response.json({ code: 'postplus_cli_hosted_storage_upload_pending', error: 'Original upload pending.', operationId, layer: 'hosted_storage_invalid_request', stage: 'preparing_upload', retryable: true, userAction: 'Retry the original command with the unchanged file and operation.' }, { status: 409 });
+  };
+  await assert.rejects(runHostedDomainCommand('media', ['estimate', 'image-gpt-image-2-edit', '--prompt', 'test', '--reference-image', file]), (error: unknown) => {
+    const failure = toFailureFact(error);
+    assert.equal(failure.code, 'postplus_cli_hosted_storage_upload_pending');
+    assert.equal(failure.operationId, operationId);
+    assert.equal(failure.retryable, true);
+    assert.equal(failure.httpStatus, 409);
+    assert.match(failure.action, /unchanged file and operation/);
+    return true;
+  });
+  assert.equal(requests, 1);
+});
+
+test('a server-verified completed upload is reused by standalone upload and estimate without transferring bytes', async () => {
+  const file = path.join(directory, 'verified.png');
+  await writeFile(file, 'png-bytes');
+  let signRequests = 0, estimates = 0;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(init?.method, 'POST');
+    const body = JSON.parse(String(init?.body));
+    if (body.operation === 'create-upload-url') {
+      signRequests++;
+      return Response.json({ output: { status: 'complete', mediaReference: ref, sizeBytes: 9 } });
+    }
+    assert.match(String(url), /hosted\/estimate$/);
+    assert.deepEqual(body.input.images, [ref]);
+    estimates++;
+    return Response.json({ estimateOnly: true });
+  };
+  assert.equal(await runMediaFileCommand(['upload', '--input-file', file, '--output', path.join(directory, 'upload.json')]), 0);
+  assert.equal(await runHostedDomainCommand('media', ['estimate', 'image-gpt-image-2-edit', '--prompt', 'test', '--reference-image', file, '--output', path.join(directory, 'estimate.json')]), 0);
+  assert.equal(signRequests, 2);
+  assert.equal(estimates, 1);
+});
 beforeEach(async () => {
   directory = await mkdtemp(path.join(tmpdir(), 'postplus-transfer-contract-'));
   originalConfig = process.env.POSTPLUS_CONFIG_DIR;
