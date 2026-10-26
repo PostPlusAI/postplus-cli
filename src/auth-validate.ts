@@ -1,3 +1,4 @@
+import { readCloudJsonResponse, responseFailure, withResponseMetadata } from './failure-contract.js';
 import { formatAccountBindingLines } from './account-binding-display.js';
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
@@ -25,21 +26,19 @@ export async function validateRemoteAuth(): Promise<AuthValidateReport> {
     retryOn401: () => resolveFreshRemoteAuth({ forceRefresh: true }),
   });
 
-  const payload = (await response.json()) as Record<string, unknown>;
+  const payload = (await readCloudJsonResponse(response, 'authentication-validate')) as Record<string, unknown>;
 
   if (!response.ok) {
     const compatibilityError = readPostPlusCompatibilityError(payload);
 
     if (compatibilityError) {
-      throw compatibilityError;
+      throw withResponseMetadata(compatibilityError, response);
     }
 
-    throw new Error(
-      'error' in payload && typeof payload.error === 'string'
-        ? payload.error
-        : 'Failed to validate remote PostPlus auth.',
-    );
+    throw responseFailure(payload, response, { stage: 'authentication-validate', message: 'Failed to validate remote PostPlus auth.' });
   }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw responseFailure(null, response, { stage: 'authentication-validate', message: 'Invalid PostPlus auth response.' });
 
   const hasSubscriptionStatus = Object.prototype.hasOwnProperty.call(
     payload,

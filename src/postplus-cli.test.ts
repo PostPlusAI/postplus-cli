@@ -12134,6 +12134,8 @@ globalThis.fetch=async(url,init)=>{
         message: 'Media generation timed out while calling the provider.',
         operationId: 'op-from-web-123',
         userMessageRule: 'retry_later',
+        httpStatus: 504,
+        correlationId: null,
       });
     } finally {
       globalThis.fetch = originalFetch;

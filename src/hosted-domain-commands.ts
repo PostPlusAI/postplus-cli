@@ -1,3 +1,4 @@
+import { toFailureFact, PostPlusFailure } from './failure-contract.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -1123,9 +1124,10 @@ async function verifyCompletedMediaReference(input: {
       },
       { label: 'media-completed-validation', redirectPolicy: 'error' },
     );
-  } catch {
+  } catch (cause) {
     throw new Error(
       'Completed media reference could not be verified with a read-only HEAD request because of a network or timeout failure. This check can be retried; confirm the original upload before starting another operation.',
+      { cause },
     );
   }
   if (!response.ok) {
@@ -1420,6 +1422,20 @@ async function runMediaPoll(
           pollOnce,
           readStatus: (payload) => readMediaPollRun(payload).status,
           waitBudgetMs,
+        }).catch((error: unknown) => {
+          // A failed read says nothing about the generation outcome. Retain its
+          // original identity and existing recovery policy in both output modes.
+          if (!(error instanceof Error) || !('code' in error) || error.code !== 'postplus_cli_cloud_transport_failed') throw error;
+          const fact = toFailureFact(error);
+          throw new PostPlusFailure(error.message, {
+            ...fact,
+            stage: 'media-poll',
+            ...(handle ? { runId: handle } : {}),
+            ...(checkpoint ? { sourceOperationId: checkpoint.operationId } : {}),
+            action: `Check the same operation; do not resubmit. ${fact.action} Then ${resumePath
+              ? buildCheckpointResume(resumePath, outputPath)
+              : `postplus media poll --capability ${capability} --handle ${shellQuoteArg(handle!)}`}`,
+          }, { cause: error });
         });
         const status = readMediaPollRun(settled).status;
         terminalObserved = status !== null && isTerminalRunStatus(status);
@@ -1432,7 +1448,7 @@ async function runMediaPoll(
       preservedOutputRecovery: resumePath
         ? () =>
             `${terminalObserved ? 'Task record' : 'Check the same operation; do not resubmit'}: ${buildCheckpointResume(resumePath, outputPath)}`
-        : undefined,
+        : () => `${terminalObserved ? 'Task record' : 'Check the same operation; do not resubmit'}: postplus media poll --capability ${capability} --handle ${shellQuoteArg(handle!)}`,
     },
     context,
   );

@@ -1,4 +1,4 @@
-import { PostPlusFailure, withResponseMetadata } from './failure-contract.js';
+import { PostPlusFailure, withResponseMetadata, readCloudJsonResponse, responseFailure } from './failure-contract.js';
 import { diagnosticFetch } from './network-diagnostics.js';
 import { spawn } from 'node:child_process';
 
@@ -327,14 +327,15 @@ export async function validateCliSession(input: {
     auth: input,
     pathName: '/api/postplus-cli/auth/whoami',
   });
-  const payload = (await response.json()) as
+  const payload = (await readCloudJsonResponse(response, 'authentication-validate')) as
     | SessionWhoAmIErrorPayload
     | ValidatedCliSession;
 
   if (!response.ok) {
-    throw new Error(
-      formatCliSessionAuthError(payload as SessionWhoAmIErrorPayload),
-    );
+    throw responseFailure(payload, response, { stage: 'authentication-validate',
+      message: formatCliSessionAuthError((payload ?? {}) as SessionWhoAmIErrorPayload),
+      messageOverride: payload && typeof payload === 'object' && 'code' in payload && payload.code === 'postplus_cli_auth_not_initialized'
+        ? formatCliSessionAuthError(payload as SessionWhoAmIErrorPayload) : undefined });
   }
 
   if (!isValidatedCliSessionPayload(payload)) {
