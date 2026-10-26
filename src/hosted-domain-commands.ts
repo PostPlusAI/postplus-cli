@@ -694,6 +694,15 @@ async function runMediaFileUpload(
         if (!context) {
           const recovered = await resumeHostedMediaUpload({ owner, absolutePath, fingerprint, operationId: body.operationId, options: { onProgress: createTransferProgressReporter() } });
           if (recovered) {
+            if (recovered.reusedCompleted) {
+              await verifyCompletedMediaReference({
+                mediaReference: recovered.mediaReference,
+                fingerprint,
+                operationId: body.operationId,
+                skillName: flags.values.get('skill') ?? null,
+                context,
+              });
+            }
             process.stderr.write(recovered.reusedCompleted ? 'The original upload is already complete; no bytes transferred.\n' : 'The original upload session was recovered without requesting a new signature.\n');
             return buildDurableUploadResult({ output: {} }, recovered.mediaReference);
           }
@@ -729,7 +738,16 @@ async function runMediaFileUpload(
           throw error;
         });
 
-        if (transfer.reusedCompleted && !context) process.stderr.write('The original upload is already complete; no bytes transferred.\n');
+        if (transfer.reusedCompleted) {
+          await verifyCompletedMediaReference({
+            mediaReference: transfer.mediaReference,
+            fingerprint,
+            operationId: body.operationId,
+            skillName: flags.values.get('skill') ?? null,
+            context,
+          });
+          if (!context) process.stderr.write('The original upload is already complete; no bytes transferred.\n');
+        }
         return buildDurableUploadResult(payload, transfer.mediaReference);
       },
       errorInputLabel: inputFile,
@@ -993,6 +1011,14 @@ async function stageHostedMediaFile(input: {
   const owner = await resolveTransferOwner(undefined);
   const recovered = await resumeHostedMediaUpload({ owner, absolutePath: input.file.absolutePath, fingerprint: toMediaFileFingerprint(input.file), operationId: input.operationId, options: { onProgress: createTransferProgressReporter() } });
   if (recovered) {
+    if (recovered.reusedCompleted) {
+      await verifyCompletedMediaReference({
+        mediaReference: recovered.mediaReference,
+        fingerprint: toMediaFileFingerprint(input.file),
+        operationId: input.operationId,
+        skillName: input.skillName,
+      });
+    }
     process.stderr.write(recovered.reusedCompleted ? 'The original upload is already complete; no bytes transferred.\n' : 'The original upload session was recovered without requesting a new signature.\n');
     return recovered.mediaReference;
   }
@@ -1023,8 +1049,99 @@ async function stageHostedMediaFile(input: {
     options: { onProgress: createTransferProgressReporter() },
     signedUpload: readSignedUpload(output),
   });
+  if (transfer.reusedCompleted) {
+    await verifyCompletedMediaReference({
+      mediaReference: transfer.mediaReference,
+      fingerprint: toMediaFileFingerprint(input.file),
+      operationId: input.operationId,
+      skillName: input.skillName,
+    });
+  }
   if (transfer.reusedCompleted) process.stderr.write('The original upload is already complete; no bytes transferred.\n');
   return transfer.mediaReference;
+}
+
+async function verifyCompletedMediaReference(input: {
+  mediaReference: string;
+  fingerprint: MediaFileFingerprint;
+  operationId: string;
+  skillName: string | null;
+  context?: HostedRequestContext;
+}): Promise<void> {
+  const result = await postHostedJson({
+    body: {
+      capability: 'media-file',
+      operation: 'create-read-url',
+      file: { mediaReference: input.mediaReference },
+      operationId: `postplus-cli:media-file:verify-completed:${input.operationId}`,
+    },
+    pathName: '/api/postplus-cli/hosted/capability',
+    skillName: input.skillName,
+    context: input.context,
+  });
+  const output = readHostedUploadOutput(result);
+  const signedUrl = output.signedUrl;
+  if (output.mediaReference !== input.mediaReference) {
+    throw new Error(
+      'Completed media reference validation failed: create-read-url returned a different media reference. Retry after confirming the original upload.',
+    );
+  }
+  if (typeof signedUrl !== 'string' || !signedUrl.trim()) {
+    throw new Error(
+      'Completed media reference validation failed: create-read-url returned no signed URL. Retry after confirming the original upload.',
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(signedUrl);
+  } catch {
+    throw new Error(
+      'Completed media reference validation failed: create-read-url returned an invalid URL. Retry after confirming the original upload.',
+    );
+  }
+  const loopback =
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
+    url.hostname === '[::1]';
+  if (
+    (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) ||
+    url.username ||
+    url.password ||
+    url.hash
+  ) {
+    throw new Error(
+      'Completed media reference validation failed: the signed URL must use HTTPS (or loopback HTTP) without credentials or a fragment. Retry after confirming the original upload.',
+    );
+  }
+  let response: Response;
+  try {
+    response = await fetchWithNetworkDiagnostics(
+      url,
+      {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(10_000),
+      },
+      { label: 'media-completed-validation', redirectPolicy: 'error' },
+    );
+  } catch {
+    throw new Error(
+      'Completed media reference could not be verified with a read-only HEAD request because of a network or timeout failure. This check can be retried; confirm the original upload before starting another operation.',
+    );
+  }
+  if (!response.ok) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error(
+      `Completed media reference validation failed: HEAD returned HTTP ${response.status}. Retry after confirming the original upload.`,
+    );
+  }
+  const contentLength = response.headers.get('content-length');
+  if (contentLength !== null && Number(contentLength) !== input.fingerprint.sizeBytes) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error(
+      `Completed media reference validation failed: remote size ${contentLength} does not match local size ${input.fingerprint.sizeBytes}. Retry after confirming the original upload.`,
+    );
+  }
+  void response.body?.cancel().catch(() => {});
 }
 
 function buildDurableUploadResult(
