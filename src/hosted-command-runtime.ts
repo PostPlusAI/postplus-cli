@@ -115,6 +115,7 @@ export type HostedProductError = {
 };
 
 export class HostedProductRequestError extends Error {
+  readonly correlationId: string | null;
   constructor(
     readonly productError: HostedProductError,
     readonly httpStatus?: number,
@@ -122,6 +123,7 @@ export class HostedProductRequestError extends Error {
   ) {
     super(formatHostedProductErrorMessage(productError));
     this.name = 'HostedProductRequestError';
+    this.correlationId = productError.correlationId ?? null;
   }
 }
 
@@ -181,12 +183,12 @@ export async function postHostedJson(input: {
           error.name === 'AbortError' ||
           error.name === 'TimeoutError')
       ) {
-        throw new PostPlusNetworkRequestError({
+        throw withResponseMetadata(new PostPlusNetworkRequestError({
           cause: signal?.aborted ? signal.reason : error,
           method: 'POST',
           targetUrl: auth.apiBaseUrl,
           detail: 'The status response stream was interrupted.',
-        });
+        }), response);
       }
       throw error instanceof Error ? withResponseMetadata(error, response) : error;
     }

@@ -163,3 +163,24 @@ test('account correlation from the payload is retained when the response has no 
     return true;
   });
 });
+
+test('hosted wrapper keeps payload correlation in its shared failure fact without a header', async () => {
+  globalThis.fetch = async () => Response.json({ code: 'read_failed', message: 'Read failed', correlationId: 'hosted-payload-correlation' }, { status: 503 });
+  await assert.rejects(() => postHostedJson({ body: {}, pathName: '/api/postplus-cli/hosted/capability', skillName: null, context: { auth } }), error => {
+    assert.ok(error instanceof HostedProductRequestError);
+    assert.equal(error.productError.correlationId, 'hosted-payload-correlation');
+    assert.equal(toFailureFact(error).correlationId, 'hosted-payload-correlation');
+    return true;
+  });
+});
+
+test('interrupted hosted status body retains its known response status and correlation', async () => {
+  globalThis.fetch = async () => new Response(new ReadableStream({ start(controller) { controller.error(new TypeError('body disconnected')); } }), { status: 200, headers: { 'x-request-id': 'body-request' } });
+  await assert.rejects(() => postHostedJson({ body: { capability: 'media-generation', operation: 'status', handle: 'original' }, pathName: '/api/postplus-cli/hosted/capability', skillName: null, context: { auth } }), error => {
+    const fact = toFailureFact(error);
+    assert.equal(fact.httpStatus, 200);
+    assert.equal(fact.correlationId, 'body-request');
+    assert.equal(fact.code, 'postplus_cli_cloud_transport_failed');
+    return true;
+  });
+});
