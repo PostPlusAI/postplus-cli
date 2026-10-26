@@ -17,10 +17,6 @@ import {
   isPostPlusClientUpgradePayload,
 } from './client-compatibility.js';
 import { PostPlusNetworkRequestError } from './network-diagnostics.js';
-import {
-  type LargeCreditQuoteConfirmationChallenge,
-  readLargeCreditQuoteConfirmationChallenge,
-} from './quote-confirmation.js';
 import { clearUpdateCheckCache, POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV } from './update-check.js';
 
 // In-process execution context for the hosted-lib path (src/hosted-lib.ts). When
@@ -61,16 +57,6 @@ export function isHostedCompatibilityRequestError(
 ): error is HostedCompatibilityRequestError | PostPlusClientUpgradeRequiredError {
   return error instanceof HostedCompatibilityRequestError ||
     error instanceof PostPlusClientUpgradeRequiredError;
-}
-
-export class HostedQuoteConfirmationRequiredError extends Error {
-  constructor(
-    message: string,
-    readonly challenge: LargeCreditQuoteConfirmationChallenge,
-  ) {
-    super(message);
-    this.name = 'HostedQuoteConfirmationRequiredError';
-  }
 }
 
 // Structured hosted product error as returned by the Web boundary. The CLI is a
@@ -201,14 +187,6 @@ export async function postHostedJson(input: {
   }
   if (!response.ok) {
     const productError = readHostedProductError(payload);
-    const challenge = readLargeCreditQuoteConfirmationChallenge(payload);
-    if (challenge) {
-      throw new HostedQuoteConfirmationRequiredError(
-        productError.message,
-        challenge,
-      );
-    }
-
     if (isPostPlusClientUpgradePayload(payload)) {
       await clearUpdateCheckCache();
       throw withResponseMetadata(new PostPlusClientUpgradeRequiredError(payload), response);
@@ -242,8 +220,7 @@ export async function postHostedJson(input: {
 }
 
 // Single exit path for the BIN hosted command: success writes the result and
-// returns 0; a quote challenge writes the challenge file and rethrows actionable
-// guidance; a structured product error writes the full error envelope to the
+// returns 0; a structured product error writes the full error envelope to the
 // result JSON and surfaces code/layer/operationId on the terminal, exiting 1.
 async function runHostedCommand(input: {
   request: () => Promise<unknown>;
@@ -266,27 +243,6 @@ async function runHostedCommand(input: {
   try {
     payload = await input.request();
   } catch (error) {
-    if (error instanceof HostedQuoteConfirmationRequiredError) {
-      const challengePath = await writeQuoteConfirmationChallenge(error, {
-        errorInputLabel: input.errorInputLabel,
-        outputPath: input.outputPath,
-      });
-      throw new Error(
-        [
-          error.message,
-          `Quote confirmation challenge: ${challengePath}`,
-          `Confirm: postplus quote confirm --json --challenge-file "${challengePath}"`,
-          // The confirmation token is server-signed against the challenged
-          // operation id. Re-running without --hosted-operation-id mints a fresh
-          // random operation id (see the operationId flag default), so the token
-          // would no longer match and the confirmation fails. The rerun MUST pin
-          // the same operation id the token is bound to.
-          'Then rerun the hosted command with the same operation id the token is bound to:',
-          `  --hosted-operation-id ${error.challenge.operationId} --quote-confirmation-token <token>`,
-        ].join('\n'),
-      );
-    }
-
     if (error instanceof HostedProductRequestError) {
       const subscription = ['subscription_required', 'postplus_cli_subscription_required'].includes(error.productError.code ?? '');
       const exhausted = process.env[POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV] === '1' && !subscription;
@@ -338,7 +294,7 @@ async function runHostedCommand(input: {
 // builds the SAME `request` closure (resolve verb -> build envelope -> POST) and
 // hands it here. The bin path (no `context`) keeps stdout/file/exit-code behavior
 // via runHostedCommand. The lib path (with `context`) returns the parsed payload
-// and rethrows the structured HostedProductRequestError / quote-confirmation error
+// and rethrows the structured HostedProductRequestError
 // VERBATIM — no stdout, no file writes, no exit code — so the in-process caller
 // surfaces the structured JSON and fails honestly. Because the closure is shared,
 // the wire request (URL + body + headers) is byte-identical across both paths.
@@ -523,28 +479,6 @@ function isRetryableHostedStatusError(error: unknown): boolean {
     cause.name === 'TimeoutError' ||
     cause.name === 'AbortError'
   );
-}
-
-async function writeQuoteConfirmationChallenge(
-  error: HostedQuoteConfirmationRequiredError,
-  input: { errorInputLabel: string; outputPath: string | null },
-): Promise<string> {
-  const challengePath = path.resolve(
-    input.outputPath
-      ? `${input.outputPath}.quote-confirmation.json`
-      : `${input.errorInputLabel}.quote-confirmation.json`,
-  );
-  await mkdir(path.dirname(challengePath), { recursive: true });
-  await writeFile(
-    challengePath,
-    `${JSON.stringify(error.challenge, null, 2)}\n`,
-    {
-      encoding: 'utf8',
-      mode: 0o600,
-    },
-  );
-
-  return challengePath;
 }
 
 async function readJsonResponse(response: Response): Promise<unknown> {

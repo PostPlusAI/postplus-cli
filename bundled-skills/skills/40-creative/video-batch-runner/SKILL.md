@@ -51,10 +51,10 @@ architect, preflight report, reference contract, or model-specific submitter.
 8. When a local final file is needed, download the completed output with
    `postplus media-file download --url <fresh-output-url> --output-file <path>
    --skill video-batch-runner`.
-9. Return the actual result, downloaded media or result path, endpoint, prompt,
-   submitted media roles, and run handle. Send the finished render to
-   `media-analysis` only when deeper final-media inspection is requested;
-   otherwise check the render against the approved brief yourself.
+9. On successful generation, deliver the raw result, actual model/endpoint,
+   submitted prompt and reference roles, and original run information. Inspect
+   the finished clip only when the user asks for that check. Generation delivery
+   does not wait for transcription, frame extraction or editing.
 
 ## Execution Rules
 
@@ -64,9 +64,9 @@ architect, preflight report, reference contract, or model-specific submitter.
   invent private fields, or create a service-specific submitter skill.
 - Keep private request/result files under the active work folder's `.postplus/`
   state; do not manufacture contract or planning artifacts for handoff.
-- If the CLI returns a quote-confirmation challenge, show it to the user, run
-  `postplus quote confirm --json --challenge-file <challenge.json>` only after
-  approval, then retry the exact operation with the returned token.
+- Requested tasks use existing PostPlus credits after the current price and balance are checked.
+  Estimate-only requests do not execute. Stop on insufficient credits; do not
+  recharge, buy a subscription, or repeat an uncertain paid operation.
 - On an auth, transport, quota, malformed-request, capability, or execution
   failure, report the typed error and stop. Do not switch endpoints, rewrite the
   request, or claim a local plan is an executed render.

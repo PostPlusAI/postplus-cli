@@ -6,7 +6,6 @@ import { HOSTED_MEDIA_REFERENCE_URI_PREFIX } from './generated/hosted-field-vali
 import {
   isHostedCompatibilityRequestError,
   HostedProductRequestError,
-  HostedQuoteConfirmationRequiredError,
   type HostedRequestContext,
   assertSuccessfulMediaTerminal,
   dispatchHostedCommand,
@@ -36,7 +35,6 @@ import {
   prepareVideoAnalysisInput,
 } from './media-video-transfer.js';
 import { formatNetworkErrorChain } from './network-diagnostics.js';
-import { readLargeCreditQuoteConfirmationChallenge } from './quote-confirmation.js';
 
 const videoTransferErrors = {
   isSourceSubmissionRejected: (error: unknown) =>
@@ -47,8 +45,7 @@ const videoTransferErrors = {
     isHostedCompatibilityRequestError(error),
   isHostedRequestError: (error: unknown) =>
     isHostedCompatibilityRequestError(error) ||
-    error instanceof HostedProductRequestError ||
-    error instanceof HostedQuoteConfirmationRequiredError,
+    error instanceof HostedProductRequestError,
   sourceFailureError: (failure: VideoSourceFailure) =>
     new HostedProductRequestError({
       code:
@@ -68,41 +65,6 @@ const videoTransferErrors = {
     }),
 };
 
-// A paused existing run is not a rejected submission. Keep its durable identity.
-async function assertVideoQuoteNotRequired(
-  payload: unknown,
-  checkpoint?: Pick<PreparedMediaCheckpoint, 'record' | 'filePath'> | null,
-) {
-  const run = readMediaRunResult(payload);
-  if (run.error?.code !== 'postplus_cli_quote_confirmation_required') return;
-  const challenge = readLargeCreditQuoteConfirmationChallenge(run.error);
-  if (
-    !challenge ||
-    !run.id ||
-    (checkpoint && challenge.operationId !== checkpoint.record.operationId)
-  )
-    throw new Error(
-      'Video task returned an invalid quote confirmation challenge. Query the same operation.',
-    );
-  if (checkpoint) {
-    checkpoint.record.handle = run.id;
-    checkpoint.record.analysisSubmissionAttempted = true;
-    checkpoint.record.analysisQuoteRequired = true;
-    await writeResult(checkpoint.record, checkpoint.filePath, false);
-  }
-  throw Object.assign(
-    new HostedQuoteConfirmationRequiredError(
-      'Video analysis is paused pending quote confirmation. Confirm and rerun the original input with the same operation id.',
-      challenge,
-    ),
-    {
-      capability: 'video-analysis',
-      handle: run.id,
-      operationId: challenge.operationId,
-    },
-  );
-}
-
 export async function executeVideoAnalysis(input: {
   body: {
     capability: string;
@@ -111,10 +73,8 @@ export async function executeVideoAnalysis(input: {
     input: Record<string, unknown>;
     estimatedUsage?: { videoSeconds: number };
     operationId: string;
-    quoteConfirmationToken?: string;
   };
   originalSource: string;
-  prompt?: string;
   skillName: string;
   outputPath: string | null;
   json: boolean;
@@ -126,7 +86,6 @@ export async function executeVideoAnalysis(input: {
   const {
     body,
     originalSource,
-    prompt,
     skillName,
     outputPath,
     json,
@@ -144,7 +103,6 @@ export async function executeVideoAnalysis(input: {
   if (checkpoint) {
     const videoRequest = {
       source: originalSource,
-      ...(prompt !== undefined ? { prompt } : {}),
       skill: skillName,
       ...(estimatedUsage ? { videoSeconds: estimatedUsage.videoSeconds } : {}),
     };
@@ -170,25 +128,6 @@ export async function executeVideoAnalysis(input: {
       request: async () => {
         const submissionAttempted =
           checkpoint?.record.analysisSubmissionAttempted === true;
-        const confirmingExistingRun =
-          submissionAttempted &&
-          checkpoint?.record.analysisQuoteRequired === true &&
-          Boolean(body.quoteConfirmationToken);
-        if (confirmingExistingRun) {
-          const transfer = checkpoint!.record.videoTransfer;
-          if (
-            !transfer?.uploadToken ||
-            !transfer.fileName ||
-            !transfer.metadata
-          )
-            throw new Error(
-              'The original uploaded video reference is missing. Query the same operation.',
-            );
-          body.input.video = `postplus-video://${transfer.uploadToken}/${transfer.fileName}`;
-          body.estimatedUsage = {
-            videoSeconds: transfer.metadata.durationSeconds,
-          };
-        }
         if (checkpoint && !submissionAttempted) {
           const prepared = await prepareVideoAnalysisInput({
             ...videoTransferErrors,
@@ -227,7 +166,7 @@ export async function executeVideoAnalysis(input: {
         try {
           submitted = await postHostedJson({
             body:
-              submissionAttempted && !confirmingExistingRun
+              submissionAttempted
                 ? {
                     capability: 'video-analysis',
                     operation: 'status',
@@ -237,18 +176,17 @@ export async function executeVideoAnalysis(input: {
                 : body,
             pathName: '/api/postplus-cli/hosted/capability',
             skillName:
-              submissionAttempted && !confirmingExistingRun ? null : skillName,
+              submissionAttempted ? null : skillName,
             context,
           });
         } catch (error) {
-          // Compatibility and synchronous quote gates reject before execution.
+          // Compatibility gates reject before execution.
           // A failed read-only input count also proves no analysis was created.
           // Unknown transport failures must retain the submission marker.
           if (
             checkpoint &&
             !submissionAttempted &&
             (isHostedCompatibilityRequestError(error) ||
-              error instanceof HostedQuoteConfirmationRequiredError ||
               (error instanceof HostedProductRequestError &&
                 (error.productError.analysisSubmissionRejected === true ||
                   error.productError.code ===
@@ -258,11 +196,6 @@ export async function executeVideoAnalysis(input: {
             await writeResult(checkpoint.record, checkpoint.filePath, false);
           }
           throw error;
-        }
-        await assertVideoQuoteNotRequired(submitted, checkpoint);
-        if (confirmingExistingRun && checkpoint) {
-          delete checkpoint.record.analysisQuoteRequired;
-          await writeResult(checkpoint.record, checkpoint.filePath, false);
         }
         emitVideoAnalysisProgress(submitted, (stage) => {
           if (stage === lastStage) return false;
@@ -322,7 +255,6 @@ export async function executeVideoAnalysis(input: {
                 skillName: null,
                 context,
               });
-              await assertVideoQuoteNotRequired(payload, checkpoint);
               return payload;
             },
             readStatus: (payload) => {
@@ -611,12 +543,6 @@ export async function pollVideoAnalysis(input: {
       context,
       debug,
     });
-    await assertVideoQuoteNotRequired(
-      payload,
-      checkpoint && resumePath
-        ? { record: checkpoint, filePath: resumePath }
-        : null,
-    );
     return payload;
   };
 

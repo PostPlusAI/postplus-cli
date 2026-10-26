@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-10-18.2",
+  "releaseId": "skills-2026-10-22.2",
   "skills": [
     {
       "name": "ads",
@@ -10,7 +10,7 @@
     {
       "name": "audio-transcription",
       "path": "skills/40-creative/audio-transcription/SKILL.md",
-      "contentHash": "be42c0206d900a3bfd805ca2eb45b210506885cf686891600c6977bfe2b0aca0"
+      "contentHash": "8b685d239b5d0bd83d298ab81a6b23047796d4e8dccee78ca05c82bb305949fd"
     },
     {
       "name": "authority-ad",
@@ -50,27 +50,27 @@
     {
       "name": "facebook-research",
       "path": "skills/20-research/facebook-research/SKILL.md",
-      "contentHash": "ccd934e0bf7c6488e326b62161f3ee1281e5b60c95c0362aed368a6ae0e08e41"
+      "contentHash": "6a36e2e1b55495ca86775ae4ecfd0d34aa4045742f329e7369c19861771760c2"
     },
     {
       "name": "google-trends-research",
       "path": "skills/20-research/google-trends-research/SKILL.md",
-      "contentHash": "749e7063d231a01ed489d9f47c53f91692f9a37040022e9b878ff57b66fb5b01"
+      "contentHash": "d629623986b677e0684281f423ad04e71a17a1fc8564d0fe858200064f7bb961"
     },
     {
       "name": "image-batch-runner",
       "path": "skills/40-creative/image-batch-runner/SKILL.md",
-      "contentHash": "c4b1665aaea5cf4176c74f0ee4fc5c21c6ca5c8b66c643853ae75c2f76fb7b6f"
+      "contentHash": "1dbc353fcd207e734b5de3fd1786d3bb821d5cf7189edbd19fae056364d5bae7"
     },
     {
       "name": "image-generation",
       "path": "skills/10-routing/image-generation/SKILL.md",
-      "contentHash": "e095ec0cb8c5a041ddc7b532a82d0f51d7f0e1b7db603225248064735b0ec73d"
+      "contentHash": "9c979927b7951d3e1290dda9b22ef929474af90bc88aa98ed4fa2eee81f830e1"
     },
     {
       "name": "instagram-research",
       "path": "skills/20-research/instagram-research/SKILL.md",
-      "contentHash": "239a3fafe0fe42232797a2b4e9e514b34483733555c9b6c5f443ff10bae12550"
+      "contentHash": "8b3e4dbc51f749aa7f383436b69460eb6a65613c65bd1a9a5baa0e9bea7cbd17"
     },
     {
       "name": "lifestyle-ad",
@@ -85,27 +85,27 @@
     {
       "name": "media-analysis",
       "path": "skills/40-creative/media-analysis/SKILL.md",
-      "contentHash": "c5547bcd8df06693a4a7d941f1a183d557dd1dd0e518a90218f869fc03860195"
+      "contentHash": "dc865e2f063bb4aa7fb95b68400a240dfe6612d1c9bdf8013e03703463c187a1"
     },
     {
       "name": "pinterest-search",
       "path": "skills/20-research/pinterest-search/SKILL.md",
-      "contentHash": "f24488e1189002bfa7cda7ec47fb11b467da73ea708c0d41b959dbe507c1bc8a"
+      "contentHash": "9d9fe1116e0e122b24691620ed31cdbcc70dc35655ccacf91a24d1f34839a4f6"
     },
     {
       "name": "postplus-workspace",
       "path": "skills/00-shared/postplus-workspace/SKILL.md",
-      "contentHash": "e7457342ebe784a1d6b9765b88167146be64373505f1e944135a5cd922f7d305"
+      "contentHash": "90184406edd8140ca5bb9a979e72fd67696a7b4269dff549ea6e36eaeb4bb2a1"
     },
     {
       "name": "reddit-search",
       "path": "skills/20-research/reddit-search/SKILL.md",
-      "contentHash": "7909987b77044273c2b406b572e4caa0b89b5da5d70e9bfba5a3d87ad7ceac0a"
+      "contentHash": "4aa4015a43aa0055cebae7873075df2d8d50b0d6964322a34143dd21f2f24b31"
     },
     {
       "name": "reference-decode",
       "path": "skills/10-routing/reference-decode/SKILL.md",
-      "contentHash": "18c14aeb7575a6de1ce5ee1229f71eb1c7fa67f40914534f372848061305fead"
+      "contentHash": "f8f5925fac1ddc1cf509147b56e5265d603aac34dc038aa5bf2c48d58534ab8b"
     },
     {
       "name": "social",
@@ -120,7 +120,7 @@
     {
       "name": "tiktok-research",
       "path": "skills/20-research/tiktok-research/SKILL.md",
-      "contentHash": "52cdb71dd94fa5e52e3393101105ef46fbbe44b963324d07b70c2329fac92f36"
+      "contentHash": "f49c39a76560e49ead4dcb4dcc0fc09cc1c8f5ce7ce6754e4fa2562143d09305"
     },
     {
       "name": "ugc-ad",
@@ -130,22 +130,22 @@
     {
       "name": "video-batch-runner",
       "path": "skills/40-creative/video-batch-runner/SKILL.md",
-      "contentHash": "8ebd691093726caae8a3bed8550d44f26d703c908dacaec02b7d78daf92c573e"
+      "contentHash": "6ecedb25362ccfcc6001c9b6cea95a491389d4618679bc1068853bbf190c3ae9"
     },
     {
       "name": "video-transcription",
       "path": "skills/40-creative/video-transcription/SKILL.md",
-      "contentHash": "4762064ba149c0a81df6f107e0cc54cd66ca76c3578d78c78223f453eafc8f9d"
+      "contentHash": "0d9b9cd58bcb94b529a2f1ce9d9654616b4145e00379f1fb846f33d580033fe0"
     },
     {
       "name": "x-research",
       "path": "skills/20-research/x-research/SKILL.md",
-      "contentHash": "03931bdfe464a811c2b08fd3b27dc95a967941070b8928db0bb09f3e9f9500ff"
+      "contentHash": "190375f371b084df244ef6f26e512a4185194e87a0f44a04a1a69862ca598185"
     },
     {
       "name": "youtube-research",
       "path": "skills/20-research/youtube-research/SKILL.md",
-      "contentHash": "2fc96614bc0fc7ea5eaca91977ba1de82b5a6f40d0bf36648aab12d433ae36ea"
+      "contentHash": "908d2b249244abd55deceefefeef20776055ab19e4d610d96b4a76a98e99dc0a"
     }
   ]
 }

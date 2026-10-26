@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
+  adTimingSignal,
   normalizeAdReport,
   renderAdReport,
   reportCreativeGroupKey,
@@ -441,4 +442,20 @@ test('stored videos use only their matching thumbnail and reject unsafe poster U
   assert.ok(!html.includes('javascript:'));
   payload.items[0]!.media[5]!.url = 'javascript:alert(1)';
   assert.throws(() => renderAdReport(inputs), /Unsafe report URL/);
+});
+
+
+test('timing research signal uses observation time and never equates elapsed time with profitability', () => {
+  const base = { start: '2026-10-01T00:00:00Z', end: '', observed: '2026-10-08T00:00:00Z', status: 'active' };
+  assert.deepEqual(adTimingSignal(base), { elapsedDays: 7, reportedSpanDays: null, prioritize: false });
+  assert.equal(adTimingSignal({ ...base, observed: '2026-10-09T00:00:00Z' })?.prioritize, true);
+  for (const status of ['inactive', 'unknown']) assert.equal(adTimingSignal({ ...base, status, observed: '2026-10-19' })?.prioritize, false);
+  assert.equal(adTimingSignal({ ...base, observed: '' }), null);
+  assert.equal(adTimingSignal({ ...base, start: '2026-11-01' }), null);
+  assert.equal(adTimingSignal({ ...base, start: '' }), null);
+  assert.equal(adTimingSignal({ ...base, status: 'inactive', end: '2026-10-04' })?.reportedSpanDays, 3);
+  assert.equal(adTimingSignal({ ...base, status: 'inactive', end: '2026-12-01' })?.reportedSpanDays, null);
+  const html = renderAdReport([input([{ ...ad(), start_date: Date.parse('2026-10-01') / 1000 }])]);
+  assert.match(html, /Elapsed since reported start: 11 days at observation/);
+  assert.match(html, /does not establish uninterrupted delivery, learning-phase completion, or positive ROAS/);
 });
