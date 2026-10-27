@@ -1,4 +1,4 @@
-import { toFailureFact, stopAutomaticRecovery, formatFailure } from './failure-contract.js';
+import { toFailureFact, stopAutomaticRecovery, formatFailure, withResponseMetadata, sanitizeFailureText } from './failure-contract.js';
 // Existing hosted HTTP, product errors, output persistence and bounded status waits.
 // This module owns no command routing or provider submission policy.
 import { randomUUID } from 'node:crypto';
@@ -80,11 +80,17 @@ function readProviderDiagnostic(value: unknown) {
 }
 
 export type HostedProductError = {
+  httpStatus?: number;
+  correlationId?: string | null;
+  service?: string;
+  cause?: ReturnType<typeof toFailureFact>['cause'];
   diagnostic?: NonNullable<ReturnType<typeof readProviderDiagnostic>>;
   message: string;
   code: string | null;
   layer: string | null;
   operationId: string | null;
+  sourceOperationId?: string;
+  checkpointId?: string;
   userMessageRule: string | null;
   stage?: string;
   retryable?: boolean;
@@ -97,6 +103,7 @@ export type HostedProductError = {
 };
 
 export class HostedProductRequestError extends Error {
+  readonly correlationId: string | null;
   constructor(
     readonly productError: HostedProductError,
     readonly httpStatus?: number,
@@ -110,11 +117,11 @@ export class HostedProductRequestError extends Error {
       code: productError.code,
       stage: productError.stage ?? productError.layer,
       service: 'postplus-cloud',
-      correlationId: productError.operationId,
       operationId: productError.operationId,
       retryable: productError.retryable ?? false,
       ...(typeof productError.userAction === 'string' ? { action: productError.userAction } : {}),
     });
+    this.correlationId = productError.correlationId ?? productError.operationId ?? null;
   }
 }
 
@@ -174,14 +181,14 @@ export async function postHostedJson(input: {
           error.name === 'AbortError' ||
           error.name === 'TimeoutError')
       ) {
-        throw new PostPlusNetworkRequestError({
+        throw withResponseMetadata(new PostPlusNetworkRequestError({
           cause: signal?.aborted ? signal.reason : error,
           method: 'POST',
           targetUrl: auth.apiBaseUrl,
           detail: 'The status response stream was interrupted.',
-        });
+        }), response);
       }
-      throw error;
+      throw error instanceof Error ? withResponseMetadata(error, response) : error;
     }
     // A gateway may return HTML or a truncated error body. Keep the HTTP
     // classification without exposing that ungoverned body to the user.
@@ -194,17 +201,19 @@ export async function postHostedJson(input: {
     const productError = readHostedProductError(payload);
     if (isPostPlusClientUpgradePayload(payload)) {
       await clearUpdateCheckCache();
-      throw new PostPlusClientUpgradeRequiredError(payload);
+      throw withResponseMetadata(new PostPlusClientUpgradeRequiredError(payload), response);
     }
 
     const compatibilityError = formatPostPlusCompatibilityError(payload);
     if (compatibilityError) {
       await clearUpdateCheckCache();
-      throw new HostedCompatibilityRequestError(
+      throw withResponseMetadata(new HostedCompatibilityRequestError(
         compatibilityError,
         productError.code,
-      );
+      ), response);
     }
+    productError.httpStatus = response.status;
+    productError.correlationId = sanitizeFailureText(response.headers.get('x-correlation-id') ?? response.headers.get('x-request-id') ?? productError.correlationId ?? '') || null;
     const retryAfter = response.headers.get('retry-after');
     const retryAfterMs =
       retryAfter && /^\d+$/.test(retryAfter)
@@ -212,11 +221,11 @@ export async function postHostedJson(input: {
         : retryAfter
           ? Date.parse(retryAfter) - Date.now()
           : 0;
-    throw new HostedProductRequestError(
+    throw withResponseMetadata(new HostedProductRequestError(
       productError,
       response.status,
       Number.isFinite(retryAfterMs) ? Math.max(0, retryAfterMs) : 0,
-    );
+    ), response);
   }
 
   return payload;
@@ -498,22 +507,25 @@ async function readJsonResponse(response: Response): Promise<unknown> {
 }
 
 export function readHostedProductError(payload: unknown): HostedProductError {
-  const record =
+  const outer =
     payload && typeof payload === 'object' && !Array.isArray(payload)
       ? (payload as Record<string, unknown>)
       : {};
-
-  const userAction = typeof record.userAction === 'string'
-    ? record.userAction
+  const record = outer.error && typeof outer.error === 'object' && !Array.isArray(outer.error)
+    ? { ...outer, ...(outer.error as Record<string, unknown>) } : outer;
+  const userAction = typeof (record.userAction ?? record.action) === 'string'
+    ? sanitizeFailureText(String(record.userAction ?? record.action))
     : readHostedProductErrorUserAction(record.userAction);
 
+  const safeString = (value: unknown) => { const text = normalizeString(value); return text ? sanitizeFailureText(text) : null; };
   return {
-    message:
-      normalizeString(record.error) ??
-      normalizeString(record.message) ??
-      'PostPlus hosted capability request failed.',
+    message: sanitizeFailureText(
+      normalizeString(record.error) ?? normalizeString(record.message) ??
+      'PostPlus hosted capability request failed.'),
+    ...(typeof record.service === 'string' ? { service: sanitizeFailureText(record.service) } : {}),
+    ...(record.cause ? { cause: toFailureFact({ ...record, message: normalizeString(record.message) ?? normalizeString(record.error) ?? 'Hosted request failed.' }).cause } : {}),
     code:
-      normalizeString(record.code) ?? normalizeString(record.productErrorCode),
+      safeString(record.code) ?? safeString(record.productErrorCode),
     ...(record.analysisSubmissionRejected === true
       ? { analysisSubmissionRejected: true as const }
       : {}),
@@ -521,10 +533,14 @@ export function readHostedProductError(payload: unknown): HostedProductError {
       ? { sourceSubmissionRejected: true as const }
       : {}),
     ...(readProviderDiagnostic(record.diagnostic) ? { diagnostic: readProviderDiagnostic(record.diagnostic) } : {}),
-    layer: normalizeString(record.layer),
-    operationId: normalizeString(record.operationId),
-    userMessageRule: normalizeString(record.userMessageRule),
-    ...(typeof record.stage === 'string' ? { stage: record.stage } : {}),
+    ...(safeString(record.correlationId) ? { correlationId: safeString(record.correlationId) } : {}),
+    ...(safeString(record.sourceOperationId) ? { sourceOperationId: safeString(record.sourceOperationId)! } : {}),
+    ...(safeString(record.runId) ? { runId: safeString(record.runId)! } : {}),
+    ...(safeString(record.checkpointId) ? { checkpointId: safeString(record.checkpointId)! } : {}),
+    layer: safeString(record.layer),
+    operationId: safeString(record.operationId),
+    userMessageRule: safeString(record.userMessageRule),
+    ...(typeof record.stage === 'string' ? { stage: sanitizeFailureText(record.stage) } : {}),
     ...(typeof record.retryable === 'boolean'
       ? { retryable: record.retryable }
       : {}),
@@ -574,6 +590,8 @@ export function formatHostedProductErrorMessage(
   }
   const locator = [
     productError.code ? `code=${productError.code}` : null,
+    productError.httpStatus !== undefined ? `httpStatus=${productError.httpStatus}` : null,
+    productError.correlationId ? `correlationId=${productError.correlationId}` : null,
     productError.diagnostic ? `providerCode=${productError.diagnostic.code}` : null,
     productError.diagnostic?.httpStatus ? `providerHttpStatus=${productError.diagnostic.httpStatus}` : null,
     productError.diagnostic?.providerLogId ? `providerLogId=${productError.diagnostic.providerLogId}` : null,
@@ -581,6 +599,10 @@ export function formatHostedProductErrorMessage(
     productError.operationId ? `operationId=${productError.operationId}` : null,
     productError.runId ? `runId=${productError.runId}` : null,
     productError.stage ? `stage=${productError.stage}` : null,
+    productError.service ? `service=${productError.service}` : null,
+    productError.sourceOperationId ? `sourceOperationId=${productError.sourceOperationId}` : null,
+    productError.checkpointId ? `checkpointId=${productError.checkpointId}` : null,
+    ...(productError.cause ?? []).slice(-2).map(cause => `${cause.code ?? cause.name}: ${cause.message.slice(0, 400)}`),
     productError.retryable === undefined
       ? null
       : `retryable=${productError.retryable}`,

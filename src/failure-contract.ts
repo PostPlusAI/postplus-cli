@@ -4,7 +4,6 @@ export type FailureFact = {
   stage: string;
   service: string;
   correlationId: string | null;
-  operationId?: string;
   retryable: boolean;
   message: string;
   action: string;
@@ -23,6 +22,9 @@ export type FailureFact = {
   targetHost?: string;
   method?: string;
   httpStatus?: number;
+  operationId?: string;
+  sourceOperationId?: string;
+  runId?: string;
   checkpointId?: string;
   resumeAvailable?: boolean;
   compatibilityReason?: string;
@@ -197,7 +199,7 @@ export function toFailureFact(
                 : "Resolve the reported problem, then retry the command."),
     ),
     cause,
-    ...Object.fromEntries(['failureStage', 'currentVersion', 'targetVersion', 'component', 'operation', 'version', 'platform'].flatMap(key =>
+    ...Object.fromEntries(['failureStage', 'currentVersion', 'targetVersion', 'component', 'operation', 'version', 'platform', 'operationId', 'sourceOperationId', 'runId'].flatMap(key =>
       string(source[key]) ? [[key, sanitizeFailureText(String(source[key]))]] : [])),
     ...(source.originalUrl ? { originalUrl: safeUrl(source.originalUrl) } : {}),
     ...(source.failureUrl ? { failureUrl: safeUrl(source.failureUrl) } : {}),
@@ -239,7 +241,20 @@ export function formatFailure(fact: FailureFact): string {
     ...(fact.timeoutMs !== undefined ? [`timeoutMs=${fact.timeoutMs}`] : []),
     `code=${fact.code}`,
     ...fact.cause.map(cause => `${cause.name}${cause.code ? ` code=${cause.code}` : ''}: ${cause.message}`),
-  ].join('; ') : '';
+  ].join('; ') : [
+    `code=${fact.code}`, `stage=${fact.stage}`, `service=${fact.service}`,
+    ...(fact.method ? [`method=${fact.method}`] : []),
+    ...(fact.targetHost ? [`host=${fact.targetHost}`] : []),
+    ...(fact.httpStatus !== undefined ? [`httpStatus=${fact.httpStatus}`] : []),
+    ...(fact.correlationId ? [`correlationId=${fact.correlationId}`] : []),
+    ...(fact.operationId ? [`operationId=${fact.operationId}`] : []),
+    ...(fact.sourceOperationId ? [`sourceOperationId=${fact.sourceOperationId}`] : []),
+    ...(fact.runId ? [`runId=${fact.runId}`] : []),
+    ...(fact.checkpointId ? [`checkpointId=${fact.checkpointId}`] : []),
+    `retryable=${fact.retryable}`,
+    ...fact.cause.filter(cause => cause.message !== fact.message).slice(-2)
+      .map(cause => `${cause.name}${cause.code ? ` code=${cause.code}` : ''}: ${cause.message.slice(0, 400)}`),
+  ].join('; ');
   return `${fact.message}${evidence ? `\nDiagnostics: ${evidence}` : ''}\nNext: ${fact.action}`;
 }
 
@@ -270,10 +285,49 @@ export function withResponseMetadata<T extends Error>(
 ): T {
   const correlationId =
     response.headers.get("x-correlation-id") ??
-    response.headers.get("x-request-id");
+    response.headers.get("x-request-id") ??
+    string(record(error).correlationId);
   Object.assign(error, {
     correlationId: correlationId ? sanitizeFailureText(correlationId) : null,
     httpStatus: response.status,
   });
   return error;
+}
+
+/** Project a public response through the existing whitelist; never attach raw payloads. */
+export function responseFailure(
+  payload: unknown,
+  response: Response,
+  context: { stage: string; service?: string; message?: string; messageOverride?: string },
+): Error {
+  const outer = record(payload);
+  const nested = record(outer.error);
+  const source = { ...outer, ...nested };
+  const message = context.messageOverride ?? string(nested.message) ?? string(nested.error) ?? string(outer.error) ??
+    string(outer.message) ?? (typeof payload === 'string' ? payload : undefined) ??
+    context.message ?? 'PostPlus Cloud request failed (no recognized error details).';
+  const fact = toFailureFact({ ...source, message }, { ...context, service: context.service ?? 'postplus-cloud' });
+  const error = Object.assign(new Error(fact.message), fact);
+  return withResponseMetadata(error, response);
+}
+
+/** Do not expose invalid response bodies or JSON parser excerpts. */
+export async function readCloudJsonResponse(response: Response, stage: string): Promise<unknown> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (cause) {
+    throw withResponseMetadata(new PostPlusFailure('PostPlus Cloud response body was interrupted.', {
+      code: 'postplus_cli_cloud_transport_failed', stage, service: 'postplus-cloud',
+      action: 'Check the connection; resume the original task if work has already started.',
+    }, { cause }), response);
+  }
+  if (!text.trim()) return null;
+  try { return JSON.parse(text) as unknown; }
+  catch {
+    throw withResponseMetadata(new PostPlusFailure('PostPlus Cloud returned invalid JSON.', {
+      code: 'postplus_cli_invalid_response', stage, service: 'postplus-cloud', retryable: false,
+      action: 'Report the HTTP status and correlation ID; keep any existing task checkpoint.',
+    }), response);
+  }
 }

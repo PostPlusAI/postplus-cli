@@ -1,4 +1,4 @@
-import { PostPlusFailure } from './failure-contract.js';
+import { PostPlusFailure, readCloudJsonResponse, responseFailure, withResponseMetadata } from './failure-contract.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
 import {
   readPostPlusCompatibilityError,
@@ -140,21 +140,17 @@ export async function refreshRemoteAuthSession(input?: {
     pathName: '/api/postplus-cli/auth/refresh',
     signal: input?.signal,
   });
-  const payload = (await response.json()) as RemoteAuthRefreshPayload;
+  const payload = (await readCloudJsonResponse(response, 'authentication-refresh')) as RemoteAuthRefreshPayload;
 
   if (!response.ok) {
     const compatibilityError = readPostPlusCompatibilityError(payload);
 
     if (compatibilityError) {
       await clearUpdateCheckCache();
-      throw compatibilityError;
+      throw withResponseMetadata(compatibilityError, response);
     }
 
-    throw new Error(
-      'error' in payload && typeof payload.error === 'string'
-        ? payload.error
-        : 'Failed to refresh remote PostPlus auth.',
-    );
+    throw responseFailure(payload, response, { stage: 'authentication-refresh', message: 'Failed to refresh remote PostPlus auth.' });
   }
 
   if (!isRemoteAuthRefreshSuccessPayload(payload)) {

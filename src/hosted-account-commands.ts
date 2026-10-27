@@ -1,3 +1,4 @@
+import { readCloudJsonResponse, responseFailure, withResponseMetadata } from './failure-contract.js';
 import { resolveFreshRemoteAuth } from './auth-session.js';
 import { sendAuthedCloudRequest } from './authed-cloud-request.js';
 import { readPostPlusCompatibilityError } from './client-compatibility.js';
@@ -32,43 +33,18 @@ async function getAuthedJson(pathName: string): Promise<unknown> {
     timeoutMs: ACCOUNT_DIAGNOSTICS_REQUEST_TIMEOUT_MS,
   });
 
-  const payload = await readJsonResponse(response);
+  const payload = await readCloudJsonResponse(response, 'account-read');
 
   if (!response.ok) {
     const compatibilityError = readPostPlusCompatibilityError(payload);
     if (compatibilityError) {
       await clearUpdateCheckCache();
-      throw compatibilityError;
+      throw withResponseMetadata(compatibilityError, response);
     }
-    throw new Error(readErrorMessage(payload));
+    throw responseFailure(payload, response, { stage: 'account-read' });
   }
 
   return payload;
-}
-
-async function readJsonResponse(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text.trim()) {
-    return null;
-  }
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw new Error('PostPlus Cloud returned invalid JSON.');
-  }
-}
-
-function readErrorMessage(payload: unknown): string {
-  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    const record = payload as Record<string, unknown>;
-    if (typeof record.error === 'string' && record.error.trim()) {
-      return record.error.trim();
-    }
-    if (typeof record.message === 'string' && record.message.trim()) {
-      return record.message.trim();
-    }
-  }
-  return 'PostPlus Cloud request failed.';
 }
 
 function writeJson(value: unknown): void {

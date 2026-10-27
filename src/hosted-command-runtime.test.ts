@@ -138,3 +138,15 @@ test('terminal media preserves the actual sanitized cause, cost facts and origin
     return true;
   });
 });
+
+
+test('pre-dispatch failure preserves distinct request and operation identities', () => {
+  const failure = toFailureFact(new HostedProductRequestError({
+    code: 'upload_failed', layer: 'hosted_storage_invalid_request', message: 'Upload failed.',
+    correlationId: 'request-original', operationId: 'operation-original',
+    userMessageRule: 'generic_retry', retryable: true,
+  }, 503));
+  assert.equal(failure.correlationId, 'request-original');
+  assert.equal(failure.operationId, 'operation-original');
+  assert.equal(failure.httpStatus, 503);
+});

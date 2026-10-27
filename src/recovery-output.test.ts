@@ -158,7 +158,9 @@ test('a hosted product failure after recovery stops without a second action or J
         assert.doesNotMatch(failure.action,/Run postplus/);
       } else {
         assert.equal(error.stdout,'');
-        assert.equal(error.stderr.trim().split('\n').length,2);
+        assert.equal(error.stderr.trim().split('\n').length,3);
+        assert.match(error.stderr,/Diagnostics:/);
+        assert.equal((error.stderr.match(/Next:/g) ?? []).length,1);
         assert.match(error.stderr,/Stop automatic recovery/);
       }
       return true;

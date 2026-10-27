@@ -37,7 +37,8 @@ test("failure diagnostics retain bounded causes and redact credentials", () => {
     JSON.stringify(failure),
     /private|Bearer secret|user:pass|sig=secret/,
   );
-  assert.equal(formatFailure(failure).split("\n").length, 2);
+  assert.match(formatFailure(failure), /ENOTFOUND/);
+  assert.match(formatFailure(failure), /service=postplus-cloud/);
   assert.doesNotMatch(failure.action, /retry the command/);
 });
 
@@ -204,4 +205,19 @@ test('child failure envelopes fail closed when required fields are missing or ma
   }
   assert.equal(readFailureOutput(JSON.stringify({ok:false,error:{...error,cause:'unexpected'}})), undefined);
   assert.equal(readFailureOutput(JSON.stringify({ok:false,error:{...error,retryable:'true'}})), undefined);
+});
+
+test('ordinary transport diagnostics distinguish known DNS TLS timeout and unknown causes', () => {
+  for (const [code, message] of [['ENOTFOUND', 'DNS lookup failed'], ['CERT_HAS_EXPIRED', 'certificate expired'], ['ETIMEDOUT', 'connection timed out'], [undefined, 'unknown transport error']] as const) {
+    const cause = Object.assign(new Error(message), code ? { code } : {});
+    const error = new PostPlusNetworkRequestError({ cause, method: 'POST', targetUrl: 'https://postplus.test/api?secret=private' });
+    const fact = toFailureFact(error);
+    const human = formatFailure(fact);
+    assert.ok(human.includes(message));
+    if (code) assert.ok(human.includes(code));
+    else assert.doesNotMatch(human, /ENOTFOUND|CERT_HAS_EXPIRED|ETIMEDOUT/);
+    assert.equal(fact.retryable, code !== 'CERT_HAS_EXPIRED');
+    assert.equal(fact.correlationId, null);
+    assert.doesNotMatch(human + JSON.stringify(fact), /secret=private/);
+  }
 });

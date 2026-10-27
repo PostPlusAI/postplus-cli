@@ -1,4 +1,4 @@
-import { PostPlusFailure } from './failure-contract.js';
+import { PostPlusFailure, readCloudJsonResponse, responseFailure, withResponseMetadata } from './failure-contract.js';
 import { formatAccountBindingLines } from './account-binding-display.js';
 import { refreshRemoteAuthSession } from './auth-session.js';
 import { clearAuthState, generateAuthStatusReport } from './auth.js';
@@ -64,7 +64,7 @@ export async function revokeRemoteAuth() {
     method: 'POST',
     pathName: '/api/postplus-cli/auth/revoke',
   });
-  const payload = (await response.json()) as
+  const payload = (await readCloudJsonResponse(response, 'authentication-revoke')) as
     | {
         ok: boolean;
       }
@@ -76,14 +76,10 @@ export async function revokeRemoteAuth() {
     const compatibilityError = readPostPlusCompatibilityError(payload);
 
     if (compatibilityError) {
-      throw compatibilityError;
+      throw withResponseMetadata(compatibilityError, response);
     }
 
-    throw new Error(
-      'error' in payload && typeof payload.error === 'string'
-        ? payload.error
-        : 'Failed to revoke remote PostPlus auth.',
-    );
+    throw responseFailure(payload, response, { stage: 'authentication-revoke', message: 'Failed to revoke remote PostPlus auth.' });
   }
 
   return clearAuthState();
