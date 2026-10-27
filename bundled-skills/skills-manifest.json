@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-10-24.staging.7",
+  "releaseId": "skills-2026-10-27.1",
   "skills": [
     {
       "name": "ads",
@@ -13,11 +13,6 @@
       "contentHash": "e299ca80baa5b77147dee66de7c91b06c7714f3966637a461fadadc4feff9527"
     },
     {
-      "name": "authority-ad",
-      "path": "skills/40-creative/authority-ad/SKILL.md",
-      "contentHash": "7ef0af10c0705675979f9931a0f6f40d7fa03128f321e067efc72e509c9f271c"
-    },
-    {
       "name": "before-after-ad",
       "path": "skills/40-creative/before-after-ad/SKILL.md",
       "contentHash": "254c4947bed67523a2beb8990a71508bf6c44a35c94f58e57b23d719498b5bc8"
@@ -28,19 +23,9 @@
       "contentHash": "6b78ae85a982fed00e569f03f2fa7f08040ecbda2759c61e8d6ec5491978b6c3"
     },
     {
-      "name": "cartoon-ad",
-      "path": "skills/40-creative/cartoon-ad/SKILL.md",
-      "contentHash": "5f25d491f801cd86d3daea04886003252ad05105d346ef433e5cf078e5740b8e"
-    },
-    {
       "name": "channel-messaging",
       "path": "skills/50-publishing/channel-messaging/SKILL.md",
       "contentHash": "dc040584cdba8917cb08ef7af5db2caa0f585afa93ebfa313e83c1738ff291ab"
-    },
-    {
-      "name": "commercial-ad",
-      "path": "skills/40-creative/commercial-ad/SKILL.md",
-      "contentHash": "3dad78d4ddb3756d018580d7cddda42a3daac2648e5282fd1f06c9696d9f1f92"
     },
     {
       "name": "educational-ad",
@@ -111,11 +96,6 @@
       "name": "social",
       "path": "skills/50-publishing/social/SKILL.md",
       "contentHash": "d01d0a7f9e736a9d5438ca77c1a3d45515207d3d87c1481ce9d9d7231a470352"
-    },
-    {
-      "name": "street-interview-ad",
-      "path": "skills/40-creative/street-interview-ad/SKILL.md",
-      "contentHash": "fa85d37feb5a815199fe1c839c74725b10a6db3cbbbf6708807850e074bf4876"
     },
     {
       "name": "tiktok-research",
