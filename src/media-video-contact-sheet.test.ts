@@ -17,7 +17,10 @@ async function fixture(t: TestContext, shifted = false) {
     path.join(tmpdir(), "postplus video's evidence-"),
   );
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const filePath = path.join(directory, "source's clip.mp4");
+  const filePath = path.join(
+    directory,
+    shifted ? "source's clip.mkv" : "source's clip.mp4",
+  );
   await exec('ffmpeg', [
     '-hide_banner',
     '-loglevel',
@@ -33,9 +36,8 @@ async function fixture(t: TestContext, shifted = false) {
     '-fps_mode',
     'passthrough',
     '-c:v',
-    'libx264',
-    '-pix_fmt',
-    'yuv420p',
+    shifted ? 'ffv1' : 'libx264',
+    ...(shifted ? [] : ['-pix_fmt', 'yuv420p']),
     filePath,
   ]);
   return { directory, filePath };
