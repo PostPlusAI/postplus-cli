@@ -10,6 +10,98 @@ Examples use synthetic IDs and dates. Replace them with verified account data;
 example keywords, budgets and ads are not recommendations for a real account.
 The current tool schema and availability returned by `show` govern execution.
 
+## Plan keywords, build paused Search campaigns, and configure goals
+
+Read the current tool schema before preparing each request. Keyword discovery
+uses `GOOGLEADS_GENERATE_KEYWORD_IDEAS`; historical volume, competition and bid
+metrics use `GOOGLEADS_GENERATE_KEYWORD_HISTORICAL_METRICS`; hypothetical clicks,
+cost and conversions use `GOOGLEADS_GENERATE_KEYWORD_FORECAST_METRICS`.
+Resolve one seed form, language, geography, network and forecast dates. Continue
+returned page tokens within the same scope. Planning does not create an ad;
+forecasts are estimates rather than promised traffic or revenue. Use
+`GOOGLEADS_SEARCH_GOOGLE_ADS_FIELDS` to check current field compatibility when
+constructing a report, rather than guessing fields from an older API version.
+
+For an authorized new Search build, use `GOOGLEADS_BATCH_MUTATE` with the
+selected advertising `customer_id`, `partial_failure:false`, and reviewed
+budget, campaign, ad group, keyword/negative, ad and asset operation families.
+Use unique negative temporary resource IDs and put parents before children.
+Set every delivery object to PAUSED; campaign and ad-group/ad tools have their
+own status enum casing. Explicitly create independent budgets with
+`explicitly_shared:false` and the matching `period`; do not derive a daily
+budget from a lifetime budget. Budget amounts are positive integer strings in
+micros of the verified account currency, with no exchange or silent rounding.
+Existing budget amount changes must run alone, including through the batch
+tool; do not combine an amount edit with sharing, period or campaign attachment
+changes. Do not use alternate field spelling to bypass an amount check.
+
+A validation request uses `validate_only:true`; it creates no objects. A later
+real submission uses a new operation ID because its inputs differ. Atomic batch
+execution means all operations must be valid, not that a lost-response request
+can safely be submitted twice. After submission, read the exact returned
+resources with GAQL and compare status, parent IDs, budget, keywords/match
+rules, copy, destination, geography, language and goal against the approved
+plan. Show differences; do not silently rewrite the plan or enable delivery.
+
+Before selecting conversion goals, read
+`customer.conversion_tracking_setting.google_ads_conversion_customer`,
+`campaign_conversion_goal` and `conversion_goal_campaign_config` for the exact
+campaign. Creating a conversion action or setting `primary_for_goal` does not
+select that action for this campaign. `GOOGLEADS_BATCH_MUTATE` supports
+`campaign_conversion_goal_operation`,
+`conversion_goal_campaign_config_operation`, `customer_conversion_goal_operation`
+and `custom_conversion_goal_operation`. The first three system-generated
+resources support update only. Custom goals can be created, updated or removed.
+Read their current schemas and use explicit update masks with
+`partial_failure:false`. Campaign/config resources belong to the advertising
+customer; account/custom goals and conversion actions belong to the verified
+conversion customer. If those customers differ, use separate correctly scoped
+requests rather than moving ownership or inventing another account ID. Goal
+updates are independently read back; a mismatch remains an unknown write.
+Installing website tags and verifying real event receipt remain separate tasks.
+
+## Recover created Google resources without submitting again
+
+The original operation receipt retains minimal `createdResources` identities
+for Google resource mutate/batch creates, callouts, experiments/arms and created
+customer clients when their provider response includes valid resource names.
+Read them from the receipt output, or its error when later schema, partial
+failure, bookkeeping or receipt persistence failed. They contain resource name,
+kind, customer and operation index, not ad copy or the complete response. A
+created client also records its parent customer. Validation-only requests do
+not retain created identities. Other audience/Data Manager creation shapes do
+not have this same resource-name recovery guarantee; preserve their first
+result's actual list identity.
+
+Keep the original operation ID and inspect each recorded resource with the
+matching account. Verify its configured state and continue confirmed steps.
+Unknown means unfinished; an atomic write with an entirely lost response may
+still have created the complete hierarchy. Never retry that write under a new
+ID. No returned identity means inspect the original operation/provider evidence
+before deciding what exists. A retained ID is not proof of policy approval,
+delivery, or verified settings; readback and the user's delivery authorization
+remain distinct.
+
+## Other Google tool families
+
+Discover current schemas for asset groups/assets, shared negative lists,
+audiences, customer management and experiments from the same channel catalog.
+Asset-group operations alone do not establish a complete PMax launch; use the
+batch tool when linked assets must be created together and verify all required
+assets and campaign settings. Scheduling or ending an experiment can affect
+live delivery and requires authorization for that exact experiment.
+
+For new offline conversion integrations, prefer the supported Data Manager
+`GOOGLEADS_INGEST_CONVERSION_EVENTS` path. The older
+`GOOGLEADS_UPLOAD_CLICK_CONVERSIONS` tool is restricted to existing allowlisted
+upload integrations. Ingestion, adjustments and audience changes require the
+actual authorized data and scope. An accepted asynchronous ingestion returns a
+`request_id`, not a completed conversion import. Preserve that ID and use
+`GOOGLEADS_GET_CONVERSION_INGESTION_STATUS`, respecting returned
+`polling_guidance`; inspect each destination's terminal status, errors and
+warnings. Never re-ingest the same batch to obtain a status or treat partial
+success as complete. Do not install a recurring monitor unless requested.
+
 ## Strategy field lookup
 
 Use [strategy execution](strategy-execution.md) for formulas and rule evaluation.
@@ -26,11 +118,11 @@ Tool schema validation cannot validate a GAQL string's field compatibility.
 | Impressions; platform clicks | `GOOGLEADS_SEARCH_STREAM_GAQL` | `metrics.impressions`, `metrics.clicks` → corresponding `B.results[].metrics` keys. |
 | All CTR; link CTR; link CPC; CPM | `GOOGLEADS_SEARCH_STREAM_GAQL` | Platform-click CTR/CPC and CPM use those totals. Meta all-click/link-click distinctions have no automatic equivalent; require the chosen click definition before evaluating those labels. |
 | Event count; event value; event cost; ROAS | `GOOGLEADS_SEARCH_STREAM_GAQL` | `metrics.conversions`, `metrics.conversions_value` → `metrics.conversions`, `metrics.conversionsValue` in each row. Value is account currency, count may be fractional. Verify conversion action and campaign goal below; do not relabel mixed conversions as purchases/leads. Join event-specific counts/value to separately queried spend without duplicating spend. |
-| Frequency | `GOOGLEADS_SEARCH_STREAM_GAQL` | `metrics.average_impression_frequency_per_user` → `metrics.averageImpressionFrequencyPerUser`; campaign-level Display/Video/Discovery/App only, ≤92 days, non-additive. Unsupported scope is unknown. [Field definition](https://developers.google.com/google-ads/api/fields/v23/metrics#metrics.average_impression_frequency_per_user). |
+| Frequency | `GOOGLEADS_SEARCH_STREAM_GAQL` | `metrics.average_impression_frequency_per_user` → `metrics.averageImpressionFrequencyPerUser`; campaign-level Display/Video/Discovery/App only, ≤92 days, non-additive. Unsupported scope is unknown. [Field definition](https://developers.google.com/google-ads/api/fields/v26/metrics#metrics.average_impression_frequency_per_user). |
 | Daily budget | `GOOGLEADS_SEARCH_STREAM_GAQL` | Query the linked `campaign_budget`: `amount_micros`, `period`, `reference_count`, `resource_name` → `B.results[].campaignBudget.{amountMicros,period,referenceCount,resourceName}`. `amountMicros` is daily only for `DAILY`; `totalAmountMicros` is a different period. Convert micros; retain resource identity. |
-| Bid amount | `GOOGLEADS_SEARCH_STREAM_GAQL` | For applicable Manual CPC, `ad_group.cpc_bid_micros` → `B.results[].adGroup.cpcBidMicros`, in micros. Confirm bidding strategy; this is not every campaign's effective bid. [Ad-group fields](https://developers.google.com/google-ads/api/fields/v23/ad_group). |
+| Bid amount | `GOOGLEADS_SEARCH_STREAM_GAQL` | For applicable Manual CPC, `ad_group.cpc_bid_micros` → `B.results[].adGroup.cpcBidMicros`, in micros. Confirm bidding strategy; this is not every campaign's effective bid. [Ad-group fields](https://developers.google.com/google-ads/api/fields/v26/ad_group). |
 | Age | User creation evidence | Unknown without a verified creation timestamp; a campaign start date is not its creation time. |
-| Active child counts | `GOOGLEADS_SEARCH_STREAM_GAQL` | Read unsegmented `ad_group.id/status/campaign` or `ad_group_ad.resource_name/status/ad_group`; returned objects are `adGroup`/`adGroupAd`. Verify parent and agreed active state, deduplicate complete results; configured `ENABLED` alone does not establish delivery. [Ad fields](https://developers.google.com/google-ads/api/fields/v23/ad_group_ad). |
+| Active child counts | `GOOGLEADS_SEARCH_STREAM_GAQL` | Read unsegmented `ad_group.id/status/campaign` or `ad_group_ad.resource_name/status/ad_group`; returned objects are `adGroup`/`adGroupAd`. Verify parent and agreed active state, deduplicate complete results; configured `ENABLED` alone does not establish delivery. [Ad fields](https://developers.google.com/google-ads/api/fields/v26/ad_group_ad). |
 | CAC/CPL/Target CPA; custom conversion rate | User configuration | User business targets/formula; a platform bidding target is not automatically the business limit. |
 
 Keep one customer timezone, currency and conversion definition across comparisons.
@@ -107,7 +199,7 @@ and `defaultCurrencyCode`, plus
 `conversionAction.attributionModelSettings.attributionModel`. A configured
 default value is not observed order revenue; when defaults are only a fallback,
 the actual supplied event values still need separate evidence. These fields
-are selectable in the [Google conversion-action field reference](https://developers.google.com/google-ads/api/fields/v23/conversion_action);
+are selectable in the [Google conversion-action field reference](https://developers.google.com/google-ads/api/fields/v26/conversion_action);
 the query still needs a successful response for this account.
 `primaryForGoal` alone cannot establish campaign goal selection when custom
 goals are involved. `metrics.conversions` and `metrics.all_conversions` are not
