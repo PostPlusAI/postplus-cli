@@ -252,7 +252,7 @@ test("an existing installation without a baseline summarizes once, then verifies
   await runPostPlusSkillUpdate(dependencies);
   assert.match(messages.join("\n"), /PostPlus Skills updated/);
   assert.equal(messages.length, 1);
-  assert.match(messages[0]!, /ready on disk.*Start a new agent session/);
+  assert.match(messages[0]!, /ready on disk.*Read the updated Skill/);
   assert.doesNotMatch(
     messages.join("\n"),
     /FIRST-INSTALL-BRIEF|Official release notes|PostPlus is ready/,

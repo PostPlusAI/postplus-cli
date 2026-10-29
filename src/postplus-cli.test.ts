@@ -1239,7 +1239,7 @@ describe('doctor and status', () => {
       assert.equal(status.ok, false);
       assert.equal(compatibilityCheck?.label, 'Client compatibility');
       assert.match(formatted, /postplus update/);
-      assert.match(formatted, /restart your agent session/i);
+      assert.doesNotMatch(formatted, /restart your agent session/i);
       assert.doesNotMatch(formatted, /npm install -g @postplus\/cli/);
       assert.doesNotMatch(formatted, /postplus auth login/);
     } finally {
@@ -3375,7 +3375,7 @@ describe('update checks', () => {
     });
 
     assert.match(formatted, /Run: postplus update\./);
-    assert.match(formatted, /restart your agent session/);
+    assert.doesNotMatch(formatted, /restart your agent session/);
     assert.doesNotMatch(formatted, /npm install -g/);
   });
 
@@ -3638,7 +3638,6 @@ describe('update checks', () => {
     assert.deepEqual(result, {
       attempted: true,
       exitCode: 0,
-      restartAgentSessionRequired: false,
       updateExitCode: 0,
     });
     assert.ok(calls.every(call => call.command === process.execPath));
@@ -3690,7 +3689,7 @@ describe('update checks', () => {
     assert.equal(result.exitCode, 0);
   });
 
-  it('updates but does not replay when the compatibility change requires a new agent session', async () => {
+  it('updates and continues the original task despite an old server session-restart hint', async () => {
     const calls: string[][] = [];
     const errors: string[] = [];
     const result = await runPostPlusClientUpgradeRecovery(
@@ -3718,14 +3717,16 @@ describe('update checks', () => {
     );
 
     assert.equal(calls[0]?.[0], process.execPath);
-    assert.deepEqual(calls.map(call=>call.slice(4)), [['update', '--json']]);
+    assert.deepEqual(calls.map(call=>call.slice(4)), [
+      ['update', '--json'],
+      ['media', 'create', 'voice-design', '--text', 'hello', '--voice-description', 'warm'],
+    ]);
     assert.deepEqual(result, {
       attempted: true,
-      exitCode: 1,
-      restartAgentSessionRequired: true,
+      exitCode: 0,
       updateExitCode: 0,
     });
-    assert.match(errors.join(''), /requires a new agent session/u);
+    assert.equal(errors.join(''), '');
   });
 
   it('stops a second compatibility recovery attempt without looping', async () => {
@@ -3752,7 +3753,6 @@ describe('update checks', () => {
     assert.deepEqual(result, {
       attempted: false,
       exitCode: 1,
-      restartAgentSessionRequired: false,
       updateExitCode: null,
     });
     assert.equal(commandCalled, false);
@@ -3781,7 +3781,6 @@ describe('update checks', () => {
     assert.deepEqual(result, {
       attempted: true,
       exitCode: 23,
-      restartAgentSessionRequired: false,
       updateExitCode: 23,
     });
   });
@@ -4487,7 +4486,7 @@ describe('skill management commands', () => {
       assert.equal((await readManagedSkillBaseline())?.releaseId, 'skills-2026-09-02.1');
       assert.equal(config?.cliVersion, CURRENT_CLI_VERSION);
       assert.deepEqual(successMessages, [
-        'PostPlus Skills updated: 2 current, 1 retired removed (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.\n\nFewer interruptions\nRoutine recoverable errors no longer stop the task.\n- PostPlus retries once after a compatible update.\n- Safe local usage errors can be corrected before submission.',
+        'PostPlus Skills updated: 2 current, 1 retired removed (global). Skills are ready on disk. Read the updated Skill and references needed for the current task, then continue the original task in this conversation. Preserve existing authorization and original operation IDs; do not ask the user to open another conversation or repeat the request.\n\nFewer interruptions\nRoutine recoverable errors no longer stop the task.\n- PostPlus retries once after a compatible update.\n- Safe local usage errors can be corrected before submission.',
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -4533,7 +4532,7 @@ describe('skill management commands', () => {
       assert.equal(exitCode, 0);
       assert.equal(installCalls.length, 1);
       assert.deepEqual(successMessages, [
-        'PostPlus is ready: 1 official Skills installed and verified (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.',
+        'PostPlus is ready: 1 official Skills installed and verified (global). Skills are ready on disk. Read the updated Skill and references needed for the current task, then continue the original task in this conversation. Preserve existing authorization and original operation IDs; do not ask the user to open another conversation or repeat the request.',
       ]);
       assert.doesNotMatch(successMessages.join('\n'), /PostPlus update/u);
     } finally {
@@ -4668,7 +4667,7 @@ describe('skill management commands', () => {
 
       assert.equal(exitCode, 0);
       assert.deepEqual(successMessages, [
-        'PostPlus Skills updated: 1 current, 0 retired removed (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.\n\nFewer interruptions\nRoutine recoverable errors no longer stop the task.\n- PostPlus retries once after a compatible update.',
+        'PostPlus Skills updated: 1 current, 0 retired removed (global). Skills are ready on disk. Read the updated Skill and references needed for the current task, then continue the original task in this conversation. Preserve existing authorization and original operation IDs; do not ask the user to open another conversation or repeat the request.\n\nFewer interruptions\nRoutine recoverable errors no longer stop the task.\n- PostPlus retries once after a compatible update.',
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -6562,7 +6561,12 @@ describe('hosted domain commands', () => {
         assert.equal(await readFile(outputPath, 'utf8'), different);
         assert.equal(bodies.length, 0);
       }
-      await writeFile(outputPath, JSON.stringify(legacy));
+      const foreignLegacy = JSON.stringify({ ...legacy, accountId: 'other' });
+      await writeFile(outputPath, foreignLegacy);
+      await assert.rejects(runHostedDomainCommand('research', ['run', '--resume-from', outputPath]), /another account/);
+      assert.equal(bodies.length, 0);
+      assert.equal(await readFile(outputPath, 'utf8'), foreignLegacy);
+      await writeFile(outputPath, JSON.stringify({ ...legacy, accountId: 'account_1' }));
       assert.equal(await runHostedDomainCommand('research', ['run', '--resume-from', outputPath, '--poll-interval-seconds', '0.001']), 0);
       assert.deepEqual(bodies, [{ routeKey: legacy.routeKey, sourceOperationId: legacy.operationId }, { routeKey: legacy.routeKey, sourceOperationId: legacy.operationId }]);
       const saved = JSON.parse(await readFile(outputPath, 'utf8'));

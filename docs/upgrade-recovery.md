@@ -6,6 +6,14 @@ errors. The CLI entry owns the one-update limit and continuation. Diagnostics
 report compatibility separately; accepted or uncertain writes retain their
 original operation and are never blindly submitted again.
 
+A verified update continues the original command in the same conversation, even
+when the old server response requests a session restart. The CLI launches the
+updated executable, retaining the original operation/checkpoint and the existing
+one-update/one-retry guard. Installation, repair and update completion instruct
+the agent to read the updated Skill and references needed for the current task;
+they do not claim to refresh the host’s loaded context or require the user to
+move the task to a new conversation.
+
 `src/channel-upgrade-recovery.test.ts` runs compiled commands through rejection,
 update and continuation, including failed updates, repeated rejection and accepted
 write polling. Keep this coverage when adding a new request path. Run

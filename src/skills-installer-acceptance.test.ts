@@ -67,13 +67,14 @@ for (const scope of ['global', 'project'] as const) {
       assert.match(first.stdout, /Try PostPlus with your agent:/);
       assert.match(first.stdout, /Create media/);
       assert.match(first.stdout, /Make an image for my campaign/);
-      assert.match(first.stdout, /ready on disk.*Start a new agent session/);
+      assert.match(first.stdout, /ready on disk.*Read the updated Skill/);
     } else {
       const result = JSON.parse(first.stdout);
       assert.equal(result.ok, true);
       assert.equal(result.changed, true);
       assert.equal(result.diskReady, true);
-      assert.equal(result.session.newSessionRequired, true);
+      assert.equal(result.session.newSessionRequired, false);
+      assert.match(result.session.action, /Read the updated Skill/);
       assert.equal('backup' in result, false);
     }
     let directories = (await list()).find((entry) => entry.name === 'demo')!.directories;
@@ -118,7 +119,7 @@ for (const scope of ['global', 'project'] as const) {
     const overwritten = await install();
     assert.equal(overwritten.code, 0, overwritten.stdout + overwritten.stderr);
     assert.equal(overwritten.stderr, '');
-    assert.equal(JSON.parse(overwritten.stdout).session.newSessionRequired, true);
+    assert.equal(JSON.parse(overwritten.stdout).session.newSessionRequired, false);
     const backupRoot = join(config, 'skill-backups');
     await assert.rejects(readdir(backupRoot), {code:'ENOENT'});
     // Old clients may have no fingerprints. Metadata and old release naming do not block repair.
@@ -168,7 +169,7 @@ for (const scope of ['global', 'project'] as const) {
     const repaired = await install();
     assert.equal(repaired.code, 0, repaired.stdout + repaired.stderr);
     assert.equal(repaired.stderr, '');
-    assert.equal(JSON.parse(repaired.stdout).session.newSessionRequired, true);
+    assert.equal(JSON.parse(repaired.stdout).session.newSessionRequired, false);
     assert.equal(JSON.parse(repaired.stdout).outcome, 'repaired');
     assert.equal(await hashSkillDirectory(missing.path), contentHash);
     assert.deepEqual(await snapshotCorrectDirectories(), correctBeforeRepair,
@@ -185,7 +186,7 @@ for (const scope of ['global', 'project'] as const) {
     assert.equal(updated.code, 0, updated.stdout + updated.stderr);
     assert.equal(updated.stderr, '');
     assert.equal(JSON.parse(updated.stdout).outcome, 'updated');
-    assert.equal(JSON.parse(updated.stdout).session.newSessionRequired, true);
+    assert.equal(JSON.parse(updated.stdout).session.newSessionRequired, false);
     assert.equal(await hashSkillDirectory(missing.path), newHash);
     // A partial installation never advances the release; the same command repairs it.
     const baselineBeforeFailure = await readFile(baselinePath, 'utf8');

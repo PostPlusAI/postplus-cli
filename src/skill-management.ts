@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { writeCurrentCliVersionToLocalConfig } from './client-compatibility.js';
+import { POSTPLUS_SKILLS_CONTINUATION_ACTION, writeCurrentCliVersionToLocalConfig } from './client-compatibility.js';
 import { CommandInterruptedError, CommandTimeoutError, runCommand, runInteractiveCommand } from './command-runner.js';
 import {
   clearManagedSkillBaseline,
@@ -28,8 +28,6 @@ import {
 } from './skill-installation.js';
 
 import { hashSkillDirectory, SkillsBundleError, UnsupportedSkillEntryError } from './skills-bundle.js';
-
-export const POSTPLUS_SKILLS_SESSION_ACTION = 'Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.';
 
 export const SKILLS_INSTALLER_ENTRY = fileURLToPath(new URL('../vendor/skills-runtime/cli.mjs', import.meta.url));
 const SKILLS_INSTALLER_ARGS = [SKILLS_INSTALLER_ENTRY];
@@ -254,8 +252,8 @@ function reportPostPlusSkillReconcileSuccess(input: {
   skillCount: number;
   changed: boolean;
 }): void {
-  const session = { newSessionRequired: input.changed,
-    action: input.changed ? POSTPLUS_SKILLS_SESSION_ACTION : null };
+  const session = { newSessionRequired: false,
+    action: input.changed ? POSTPLUS_SKILLS_CONTINUATION_ACTION : null };
   const introduction = input.firstInstall && input.outcome === 'ready' && input.options.command === 'install'
     ? { paragraphs: input.catalog.productBrief?.paragraphs ?? [],
         capabilities: Object.entries(input.catalog.categories ?? {}).filter(([id]) => id !== 'workspace').flatMap(([id, category]) => {
@@ -363,7 +361,7 @@ async function uninstallPostPlusSkills(
   await clearUpdateCheckCache();
   if (options.json) process.stdout.write(`${JSON.stringify({ ok: true, outcome: 'uninstalled', scope: options.scope })}\n`);
   else dependencies.reportSuccess?.(
-    `PostPlus skills uninstalled: ${allKnownSkillNames.length} managed skills removed (${options.scope}). Restart active agent sessions to refresh skill discovery.`,
+    `PostPlus skills uninstalled: ${allKnownSkillNames.length} managed skills removed (${options.scope}). Continue in the current conversation; do not use the removed Skills.`,
   );
 
   return 0;
