@@ -15,7 +15,8 @@ for the current session, then continues your original task. New shells use the
 registered `postplus` command.
 
 The CLI includes its matching skills and verifies actual installed content.
-Follow the completion message for session reload and continuing your task.
+After a change, your agent reads the updated instructions needed for your task
+and continues in the current conversation. You do not need to open a new chat.
 Correct installations are reused; do not run a separate skills installer.
 Use `postplus install --current-directory` for a project-only installation.
 
@@ -30,8 +31,9 @@ your original task rather than repeating this introduction.
 
 Cloud tasks require a connected account. Run `postplus auth login` when the CLI
 requests it, and approve the real browser connection yourself. Never share
-credentials with the agent. Quotes, publishing, and replacing business content
-require the applicable user approval.
+credentials with the agent. Requested work uses existing PostPlus credits within your authorization.
+Estimate-only requests do not execute. Publishing, replacing business content,
+new subscriptions and external advertising spend require applicable authorization.
 
 ## Connect a marketing channel
 
@@ -73,8 +75,8 @@ You can also run `postplus update` to update the CLI and its matching skills.
 Official skill names are managed by PostPlus: local changes are overwritten and
 retired skills are removed without prompts or backups. Keep custom skills under
 separate names. Correct installations are reused.
-Follow the reported action only if an update fails or a new agent session is required;
-do not repeat maintenance blindly.
+After a successful update, continue the original task in the current conversation.
+If the update fails, follow its reported action; do not repeat maintenance blindly.
 
 ```bash
 postplus status

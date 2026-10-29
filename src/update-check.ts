@@ -17,6 +17,7 @@ import {
   POSTPLUS_CLI_UPDATE_COMMAND,
   POSTPLUS_UPDATE_COMMAND,
   POSTPLUS_UPDATE_INTRODUCTION_GUIDANCE,
+  POSTPLUS_SKILLS_CONTINUATION_ACTION,
   type PostPlusClientUpgradePayload,
   readCurrentCliVersion,
 } from './client-compatibility.js';
@@ -101,7 +102,6 @@ export type CliSelfUpdateResult = {
 export type ClientUpgradeRecoveryResult = {
   attempted: boolean;
   exitCode: number;
-  restartAgentSessionRequired: boolean;
   updateExitCode: number | null;
 };
 
@@ -149,7 +149,6 @@ export async function runPostPlusClientUpgradeRecovery(
     return {
       attempted: false,
       exitCode: 1,
-      restartAgentSessionRequired: false,
       updateExitCode: null,
     };
   }
@@ -197,12 +196,10 @@ export async function runPostPlusClientUpgradeRecovery(
     return {
       attempted: true,
       exitCode: updateExitCode,
-      restartAgentSessionRequired: false,
       updateExitCode,
     };
   }
 
-  let session: { newSessionRequired: boolean; action: string | null } | undefined;
   try {
     const result = JSON.parse(updateOutput);
     if (result?.ok !== true) throw new Error('Expected a successful update envelope.');
@@ -218,7 +215,11 @@ export async function runPostPlusClientUpgradeRecovery(
     if (result.session !== undefined) {
       if (!result.session || typeof result.session.newSessionRequired !== 'boolean' ||
           (result.session.newSessionRequired ? typeof result.session.action !== 'string' : result.session.action !== null && typeof result.session.action !== 'string')) throw new Error('Invalid update session metadata.');
-      session = result.session;
+    }
+    if (result.changed === true || result.session?.action) {
+      // The child may return an obsolete restart action. Use the current
+      // continuation contract and leave business stdout machine-readable.
+      writeError(`${POSTPLUS_SKILLS_CONTINUATION_ACTION}\n`);
     }
   } catch {
     throw new PostPlusFailure('PostPlus update returned an invalid success response.', {
@@ -226,18 +227,9 @@ export async function runPostPlusClientUpgradeRecovery(
       action: 'Stop automatic recovery and report this response error; do not run another update or resubmit the task.',
     });
   }
-  if (input.payload.compatibility?.upgrade?.restartAgentSession === true) {
-    writeError(
-      'PostPlus updated successfully, but this compatibility change requires a new agent session. The original command was not retried.\n',
-    );
-    return {
-      attempted: true,
-      exitCode: 1,
-      restartAgentSessionRequired: true,
-      updateExitCode,
-    };
-  }
-
+  // A server restart hint describes the old installation. The verified update
+  // is executed in a fresh CLI process; continuation remains in the same chat.
+  // Replaying still passes through current validation and the one-retry guard.
   // The updater may have selected a new Node as well as a new CLI. Resolve
   // the active record again instead of retrying through this old process.
   const retry = environment.POSTPLUS_INSTALL_ROOT
@@ -252,7 +244,6 @@ export async function runPostPlusClientUpgradeRecovery(
   return {
     attempted: true,
     exitCode: retryExitCode,
-    restartAgentSessionRequired: false,
     updateExitCode,
   };
 }

@@ -8,7 +8,8 @@ import {
 export const POSTPLUS_CLIENT_CONTRACT_VERSION = 5;
 export const POSTPLUS_CLIENT_RUNTIME = 'postplus-cli';
 export const POSTPLUS_UPDATE_COMMAND = 'postplus update';
-export const POSTPLUS_UPDATE_INTRODUCTION_GUIDANCE = 'After a successful update, briefly explain the official release notes to the user in their language, including relevant account restrictions, then follow the returned session action and continue their original task. Do not repeat the full product introduction or invent changes when no release notes are returned.';
+export const POSTPLUS_SKILLS_CONTINUATION_ACTION = 'Read the updated Skill and references needed for the current task, then continue the original task in this conversation. Preserve existing authorization and original operation IDs; do not ask the user to open another conversation or repeat the request.';
+export const POSTPLUS_UPDATE_INTRODUCTION_GUIDANCE = 'After a successful update, briefly explain the official release notes to the user in their language, including relevant account restrictions, then read the updated Skill and references needed for the task and continue their original task in this conversation. Do not ask the user to open another conversation or repeat the request. Do not repeat the full product introduction or invent changes when no release notes are returned.';
 // Single source for the low-level npm self-update command. It lives beside the
 // compatibility commands so update-check.ts can import both without a cycle.
 export const POSTPLUS_CLI_UPDATE_COMMAND =
@@ -150,9 +151,6 @@ export function formatPostPlusClientUpgradeError(payload: unknown) {
       : {};
   const updateCommand =
     record.compatibility?.upgrade?.command?.trim() || POSTPLUS_UPDATE_COMMAND;
-  const restart = record.compatibility?.upgrade?.restartAgentSession
-    ? ' Then restart your agent session.'
-    : '';
 
   return [
     typeof record.error === 'string' && record.error.trim().length > 0
@@ -160,7 +158,6 @@ export function formatPostPlusClientUpgradeError(payload: unknown) {
       : 'Your PostPlus CLI or PostPlus skills are out of date.',
     `Run: ${updateCommand}.`,
     POSTPLUS_UPDATE_INTRODUCTION_GUIDANCE,
-    restart.trim(),
   ]
     .filter(Boolean)
     .join(' ');

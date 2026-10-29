@@ -44,7 +44,6 @@ import {
   loadPublicSkillCatalog,
 } from './skill-catalog.js';
 import {
-  POSTPLUS_SKILLS_SESSION_ACTION,
   formatSkillBaselineVerifyReport,
   runPostPlusSkillUninstall,
   runPostPlusSkillUpdate,
@@ -613,11 +612,11 @@ async function runMainWithRecovery(): Promise<void> {
         originalArgs: error.recoveryArgs ?? process.argv.slice(2),
         payload: error.payload,
       });
-      if (recovery.exitCode !== 0 && (!recovery.attempted || recovery.updateExitCode !== 0 || recovery.restartAgentSessionRequired)) {
-        throw new PostPlusFailure(recovery.restartAgentSessionRequired ? 'PostPlus updated; this task needs a new agent session.' : 'PostPlus could not complete the required update.', {
-          code: recovery.restartAgentSessionRequired ? 'postplus_agent_restart_required' : 'postplus_client_upgrade_failed',
+      if (recovery.exitCode !== 0 && (!recovery.attempted || recovery.updateExitCode !== 0)) {
+        throw new PostPlusFailure('PostPlus could not complete the required update.', {
+          code: 'postplus_client_upgrade_failed',
           stage: 'compatibility-recovery', service: 'cli', retryable: false,
-          action: recovery.restartAgentSessionRequired ? POSTPLUS_SKILLS_SESSION_ACTION : 'Stop automatic recovery and report this failure; do not run another update or resubmit the task.',
+          action: 'Stop automatic recovery and report this failure; do not run another update or resubmit the task.',
         }, { cause: error });
       }
       process.exitCode = recovery.exitCode === 0 ? 0 : 1;
@@ -650,8 +649,8 @@ function printSkillMutationHelp(command: string, json: boolean): number {
       : command === 'update' ? 'Update PostPlus CLI and its matching skills.' : 'Remove installed PostPlus skills.',
     examples: [`postplus ${command}`, `postplus ${command} --current-directory`],
     next: command === 'uninstall'
-      ? 'Same-name PostPlus skills are removed without backups, including local edits. Start a new agent session to refresh skill discovery.'
-      : 'Same-name skills are replaced with official content without prompts or backups. Correct content is reused. Continue the original task after a successful compatible update. Start a new agent session only if the completion result requests it.',
+      ? 'Same-name PostPlus skills are removed without backups, including local edits. Continue in the current conversation; do not use the removed Skills.'
+      : 'Same-name skills are replaced with official content without prompts or backups. Correct content is reused. Read the updated Skill and required references after a successful update. Continue the original task in this conversation.',
     command: `postplus ${command}`,
     usage: `postplus ${command} [--current-directory] [--json]`,
     options: { '--current-directory': 'Target this project.', '--json': 'Return machine-readable output.' },
