@@ -363,15 +363,39 @@ export function isTerminalRunStatus(status: string): boolean {
   return TERMINAL_RUN_STATUSES.has(status.toLowerCase());
 }
 
-/** Business completion does not finish an explicitly pending credit settlement. */
+/** Waiting includes saving the existing result; a permanent gap stops the wait. */
 export function isHostedRunSettled(payload: unknown, status: string): boolean {
   if (!isTerminalRunStatus(status)) return false;
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return true;
-  const record = payload as Record<string, unknown>;
-  if (record.settlement_pending === true) return false;
-  const output = record.output;
-  return !output || typeof output !== 'object' || Array.isArray(output) ||
-    (output as Record<string, unknown>).settlement_pending !== true;
+  function pending(value: unknown, depth = 0): boolean {
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      depth > 8
+    )
+      return false;
+    const record = value as Record<string, unknown>;
+    if (record.settlement_pending === true) return true;
+    const preservation = record.media_preservation;
+    if (
+      preservation &&
+      typeof preservation === 'object' &&
+      !Array.isArray(preservation)
+    ) {
+      const media = preservation as Record<string, unknown>;
+      const error = media.error as { retryable?: boolean } | undefined;
+      if (
+        ['saving', 'pending'].includes(String(media.state)) ||
+        (['incomplete', 'failed'].includes(String(media.state)) &&
+          (media.retryable === true || error?.retryable === true))
+      )
+        return true;
+    }
+    return ['result', 'output', 'data'].some((key) =>
+      pending(record[key], depth + 1),
+    );
+  }
+  return !pending(payload);
 }
 
 // Shell-escape an argument value for a copy-pasteable command snippet: wrap in

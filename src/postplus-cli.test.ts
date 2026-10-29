@@ -6539,6 +6539,51 @@ describe('hosted domain commands', () => {
     } finally { globalThis.fetch = originalFetch; }
   });
 
+  it('reopens a completed legacy research checkpoint with status-only reads and saves the same original result', async () => {
+    const dir = await mkdtemp(resolve(tmpdir(), 'postplus-legacy-research-save-')); tempDirs.push(dir);
+    const outputPath = resolve(dir, 'result.json');
+    await setLocalSession({ accountId: 'account_1', accountName: 'Account', apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token', sessionExpiresAt: null, userEmail: 'agent@example.com', userId: 'user_1' });
+    const originalFetch = globalThis.fetch; const bodies: Array<Record<string, unknown>> = [];
+    const legacy = { routeKey: 'facebook-ads-library', operationId: 'original-legacy-result', runHandle: null, status: 'completed', settlement_pending: false, output: { items: [] }, billing: { finalizedCredits: 3 } };
+    await writeFile(outputPath, JSON.stringify(legacy));
+    globalThis.fetch = async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json({ ...legacy, output: { items: [], media_preservation: { state: bodies.length === 1 ? 'saving' : 'complete', savedCount: bodies.length, totalCount: 2, artifacts: [{ mediaReference: 'postplus-media://results/owner/original.mp4' }] } } });
+    };
+    try {
+      for (const metadata of [
+        { schemaVersion: 1, accountId: 'other', apiOrigin: 'https://postplus.test' },
+        { schemaVersion: 1, accountId: 'account_1', apiOrigin: 'https://other.postplus.test' },
+      ]) {
+        const different = JSON.stringify({ ...legacy, researchRecovery: metadata });
+        await writeFile(outputPath, different);
+        await assert.rejects(runHostedDomainCommand('research', ['run', '--resume-from', outputPath]), /another account or environment/);
+        assert.equal(await readFile(outputPath, 'utf8'), different);
+        assert.equal(bodies.length, 0);
+      }
+      const foreignLegacy = JSON.stringify({ ...legacy, accountId: 'other' });
+      await writeFile(outputPath, foreignLegacy);
+      await assert.rejects(runHostedDomainCommand('research', ['run', '--resume-from', outputPath]), /another account/);
+      assert.equal(bodies.length, 0);
+      assert.equal(await readFile(outputPath, 'utf8'), foreignLegacy);
+      await writeFile(outputPath, JSON.stringify({ ...legacy, accountId: 'account_1' }));
+      assert.equal(await runHostedDomainCommand('research', ['run', '--resume-from', outputPath, '--poll-interval-seconds', '0.001']), 0);
+      assert.deepEqual(bodies, [{ routeKey: legacy.routeKey, sourceOperationId: legacy.operationId }, { routeKey: legacy.routeKey, sourceOperationId: legacy.operationId }]);
+      const saved = JSON.parse(await readFile(outputPath, 'utf8'));
+      assert.equal(saved.output.media_preservation.state, 'complete'); assert.equal(saved.billing.finalizedCredits, 3);
+      await writeFile(outputPath, JSON.stringify(legacy));
+      const beforeMissing = await readFile(outputPath, 'utf8');
+      const missingCalls: unknown[] = [];
+      globalThis.fetch = async (_url, init) => {
+        missingCalls.push(JSON.parse(String(init?.body)));
+        return Response.json({ error: { code: 'postplus_cli_hosted_async_run_not_found', message: 'Original result not found' } }, { status: 404 });
+      };
+      assert.equal(await runHostedDomainCommand('research', ['run', '--resume-from', outputPath]), 1);
+      assert.deepEqual(missingCalls, [{ routeKey: legacy.routeKey, sourceOperationId: legacy.operationId }]);
+      assert.equal(await readFile(outputPath, 'utf8'), beforeMissing);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   it('Research wait can settle the original failed operation when no provider handle exists', async () => {
     const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-research-settlement-operation-'));
     tempDirs.push(requestDir);
@@ -6610,8 +6655,14 @@ describe('hosted domain commands', () => {
           { routeKey: pending.routeKey, sourceOperationId: pending.operationId },
           { routeKey: pending.routeKey, sourceOperationId: pending.operationId },
         ]);
-        await assert.rejects(() => runHostedDomainCommand('research', ['run', '--resume-from', outputPath, '--wait-seconds', '0']), /already terminal/);
-        assert.equal(bodies.length, 3);
+        if (status === 'completed') {
+          assert.equal(await runHostedDomainCommand('research', ['run', '--resume-from', outputPath, '--wait-seconds', '0']), 0);
+          assert.equal(bodies.length, 4);
+          assert.deepEqual(bodies[3], { routeKey: pending.routeKey, sourceOperationId: pending.operationId });
+        } else {
+          await assert.rejects(() => runHostedDomainCommand('research', ['run', '--resume-from', outputPath, '--wait-seconds', '0']), /already terminal/);
+          assert.equal(bodies.length, 3);
+        }
         assert.equal(bodies.filter(body => 'input' in body).length, 1);
       }
     } finally { globalThis.fetch = originalFetch; process.stderr.write = originalStderr; }

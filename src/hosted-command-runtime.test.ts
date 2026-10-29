@@ -197,3 +197,42 @@ test('pre-dispatch failure preserves distinct request and operation identities',
   assert.equal(failure.operationId, 'operation-original');
   assert.equal(failure.httpStatus, 503);
 });
+
+test('wait continues saving the original result after charges settle, and stops on permanent gaps', () => {
+  for (const media_preservation of [
+    { state: 'saving' },
+    { state: 'pending' },
+    { state: 'incomplete', retryable: true },
+    { state: 'failed', error: { retryable: true } },
+  ]) {
+    assert.equal(
+      isHostedRunSettled(
+        {
+          status: 'completed',
+          settlement_pending: false,
+          output: { data: { media_preservation } },
+        },
+        'completed',
+      ),
+      false,
+    );
+  }
+  for (const media_preservation of [
+    { state: 'complete' },
+    { state: 'completed' },
+    { state: 'incomplete', retryable: false },
+    { state: 'failed', error: { retryable: false } },
+  ]) {
+    assert.equal(
+      isHostedRunSettled(
+        {
+          status: 'completed',
+          settlement_pending: false,
+          output: { media_preservation },
+        },
+        'completed',
+      ),
+      true,
+    );
+  }
+});

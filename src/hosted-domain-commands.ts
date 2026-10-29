@@ -1690,6 +1690,30 @@ async function resolveResearchResumeInput(input: {
   const checkpoint = await readJsonFile(checkpointPath);
   const { routeKey, runHandle, operationId, status } = readResearchRun(checkpoint);
   if (status && isHostedRunSettled(checkpoint, status)) {
+    // Explicitly reopening a completed result may finish saving legacy media.
+    // This path carries only original identity: it cannot recover admission or
+    // submit inputs, even when that old run is no longer available.
+    if (status === 'completed' && routeKey && (operationId || runHandle)) {
+      const record = checkpoint as Record<string, unknown>;
+      const saved = record.researchRecovery;
+      if (typeof record.accountId === 'string' || (saved && typeof saved === 'object' && !Array.isArray(saved))) {
+        const config = await readLocalConfig();
+        const currentAccount = config?.accountId ?? config?.userId;
+        if (typeof record.accountId === 'string' && record.accountId !== currentAccount) {
+          throw new Error('This research checkpoint belongs to another account. Resume in its original account/environment.');
+        }
+        if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+          const metadata = saved as Record<string, unknown>;
+          const auth = await resolveFreshRemoteAuth();
+          if (metadata.schemaVersion !== 1 || metadata.accountId !== currentAccount ||
+              metadata.apiOrigin !== new URL(auth.apiBaseUrl).origin) {
+            throw new Error('This research checkpoint is invalid or belongs to another account or environment. Resume in its original account/environment.');
+          }
+        }
+      }
+      return { outputPath: checkpointPath, preserveCheckpointOnError: true, routeKey,
+        ...(operationId ? { sourceOperationId: operationId } : { runHandle: runHandle! }) };
+    }
     throw new Error(
       `Research ${input.verb} checkpoint is already terminal (${status}).`,
     );
