@@ -109,7 +109,7 @@ for (const scenario of ['prepare-upload', 'analyze', 'status', 'unknown', 'corru
         if (body.operation === phase && (!state.rejected || scenario === 'repeat')) {
           state.rejected = true; save();
           return Response.json({ code: 'postplus_client_upgrade_required', error: 'Update required.',
-            compatibility: { upgrade: { cli: { required: true }, restartAgentSession: false } }
+            compatibility: { upgrade: { cli: { required: true }, restartAgentSession: true } }
           }, { status: 426 });
         }
         if (body.operation === 'prepare-upload') {

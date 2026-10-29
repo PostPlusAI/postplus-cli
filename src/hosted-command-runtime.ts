@@ -363,6 +363,17 @@ export function isTerminalRunStatus(status: string): boolean {
   return TERMINAL_RUN_STATUSES.has(status.toLowerCase());
 }
 
+/** Business completion does not finish an explicitly pending credit settlement. */
+export function isHostedRunSettled(payload: unknown, status: string): boolean {
+  if (!isTerminalRunStatus(status)) return false;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return true;
+  const record = payload as Record<string, unknown>;
+  if (record.settlement_pending === true) return false;
+  const output = record.output;
+  return !output || typeof output !== 'object' || Array.isArray(output) ||
+    (output as Record<string, unknown>).settlement_pending !== true;
+}
+
 // Shell-escape an argument value for a copy-pasteable command snippet: wrap in
 // single quotes and escape any embedded single quote, so spaces or shell
 // metacharacters in a run id can't break or unsafely alter a pasted command.
@@ -372,7 +383,7 @@ export function shellQuoteArg(value: string): string {
 
 // Shared bounded wait loop for every resumable hosted run (`media poll
 // --handle`, `research collect/scrape --run-handle`). One invocation re-checks
-// the read-only status boundary until the run is terminal, the payload stops
+// the status boundary until the business and credit settlement are terminal, the payload stops
 // exposing a readable status (fail safe: return it rather than loop blind), or
 // the wait budget is spent — then returns the latest payload as-is. Every check
 // is an independent short HTTP read; nothing holds a connection open.
@@ -437,7 +448,7 @@ export async function pollHostedRunUntilSettled(input: {
     }
     if (input.stopWaiting?.(payload)) return payload;
     const status = input.readStatus(payload);
-    if (!status || isTerminalRunStatus(status)) {
+    if (!status || isHostedRunSettled(payload, status)) {
       return payload;
     }
     latestPending = payload;

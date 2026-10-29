@@ -161,7 +161,8 @@ test('package discovery and maintenance help keep the original task without shar
     const { stdout } = await exec(process.execPath, [cli, command, '--help', '--json']);
     const help = JSON.parse(stdout);
     assert.match(help.next, /Continue the original task/);
-    assert.match(help.next, /new agent session only if/);
+    assert.match(help.next, /Read the updated Skill/);
+    assert.doesNotMatch(help.next, /new agent session|restart/i);
     assert.doesNotMatch(help.next, /Help me get started|postplus-shared/);
   }
 });

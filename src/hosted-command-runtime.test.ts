@@ -17,6 +17,8 @@ import {
   dispatchHostedCommand,
   assertSuccessfulMediaTerminal,
   readMediaRunResult,
+  isHostedRunSettled,
+  pollHostedRunUntilSettled,
 } from './hosted-command-runtime.js';
 
 for (const stage of ['analyzing', undefined]) {
@@ -121,6 +123,51 @@ test('short research polling observes completion inside a budget shorter than th
   });
   assert.deepEqual(result, { status: 'completed' });
   assert.equal(calls, 2);
+});
+
+test('terminal research waits for explicit settlement at either hosted response boundary', async () => {
+  for (const status of ['completed', 'failed', 'canceled']) {
+    for (const nested of [false, true]) {
+      let calls = 0;
+      const record = {
+        status,
+        settlement_pending: true,
+        error: status === 'completed' ? null : { code: 'original_failure', message: 'Original failure reason' },
+        summary: { raw_records: 1, unique_ads: 1 },
+      };
+      const result = await pollHostedRunUntilSettled({
+        pollIntervalMs: 1,
+        waitBudgetMs: 100,
+        pollOnce: async () => {
+          calls++;
+          const output = { ...record, settlement_pending: calls < 3 };
+          return nested ? { output } : output;
+        },
+        readStatus: (payload) => nested ? (payload as { output: { status: string } }).output.status : (payload as { status: string }).status,
+      });
+      assert.equal(calls, 3);
+      const settled = { ...record, settlement_pending: false };
+      assert.deepEqual(result, nested ? { output: settled } : settled);
+    }
+  }
+});
+
+test('single check preserves pending settlement and settled business outcomes finish immediately', async () => {
+  let calls = 0;
+  const pending = { status: 'failed', settlement_pending: true, error: { message: 'Original provider failure' } };
+  const result = await pollHostedRunUntilSettled({
+    pollIntervalMs: 100,
+    waitBudgetMs: 0,
+    pollOnce: async () => { calls++; return pending; },
+    readStatus: (value) => (value as { status: string }).status,
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(result, pending);
+  assert.equal(isHostedRunSettled(pending, pending.status), false);
+  for (const settlement_pending of [false, undefined]) {
+    assert.equal(isHostedRunSettled({ status: 'completed', settlement_pending }, 'completed'), true);
+  }
+  assert.equal(isHostedRunSettled({ settlement_pending: false }, 'processing'), false);
 });
 
 

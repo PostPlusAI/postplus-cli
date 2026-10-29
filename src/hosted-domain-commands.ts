@@ -14,6 +14,7 @@ import {
   type HostedRequestContext,
   assertSuccessfulMediaTerminal,
   dispatchHostedCommand,
+  isHostedRunSettled,
   isTerminalRunStatus,
   pollHostedRunUntilSettled,
   postHostedJson,
@@ -1552,12 +1553,13 @@ type ResearchVerb = 'run';
 type ResearchRunProjection = {
   routeKey: string | null;
   runHandle: string | null;
+  operationId: string | null;
   status: string | null;
 };
 
 function readResearchRunRecord(value: unknown): ResearchRunProjection {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { routeKey: null, runHandle: null, status: null };
+    return { routeKey: null, runHandle: null, operationId: null, status: null };
   }
   const record = value as Record<string, unknown>;
   return {
@@ -1570,6 +1572,10 @@ function readResearchRunRecord(value: unknown): ResearchRunProjection {
     runHandle:
       typeof record.runHandle === 'string' && record.runHandle.trim()
         ? record.runHandle
+        : null,
+    operationId:
+      typeof record.operationId === 'string' && record.operationId.trim()
+        ? record.operationId
         : null,
     status:
       typeof record.status === 'string' && record.status.trim()
@@ -1590,7 +1596,8 @@ function readResearchRun(payload: unknown): ResearchRunProjection {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return topLevel;
   }
-  return readResearchRunRecord((payload as Record<string, unknown>).output);
+  const output = readResearchRunRecord((payload as Record<string, unknown>).output);
+  return { ...output, operationId: output.operationId ?? topLevel.operationId };
 }
 
 function readResearchRunStatus(payload: unknown): string | null {
@@ -1601,11 +1608,12 @@ function assertResearchResumePayload(
   payload: unknown,
   verb: ResearchVerb,
 ): void {
-  const { runHandle, status } = readResearchRun(payload);
+  const { runHandle, operationId, status } = readResearchRun(payload);
   if (status) {
-    if (!isTerminalRunStatus(status) && !runHandle) {
+    if (!isHostedRunSettled(payload, status) && !runHandle &&
+        !(isTerminalRunStatus(status) && operationId)) {
       throw new Error(
-        `Research ${verb} returned non-terminal status without a resumable run handle.`,
+        `Research ${verb} returned unfinished work without a resumable run handle or settlement operation identity.`,
       );
     }
     return;
@@ -1680,11 +1688,16 @@ async function resolveResearchResumeInput(input: {
 
   const checkpointPath = path.resolve(requireFlag(input.flags, 'resume-from'));
   const checkpoint = await readJsonFile(checkpointPath);
-  const { routeKey, runHandle, status } = readResearchRun(checkpoint);
-  if (status && isTerminalRunStatus(status)) {
+  const { routeKey, runHandle, operationId, status } = readResearchRun(checkpoint);
+  if (status && isHostedRunSettled(checkpoint, status)) {
     throw new Error(
       `Research ${input.verb} checkpoint is already terminal (${status}).`,
     );
+  }
+  if (!runHandle && operationId && routeKey && status && isTerminalRunStatus(status)) {
+    // A failed provider can have no handle while release of its original
+    // reserve is pending. This identity permits status recovery only.
+    return { outputPath: checkpointPath, preserveCheckpointOnError: true, routeKey, sourceOperationId: operationId };
   }
   const recovery = checkpoint && typeof checkpoint === 'object' && !Array.isArray(checkpoint)
     ? (checkpoint as Record<string, unknown>).researchRecovery
@@ -2177,6 +2190,7 @@ async function runResearchRun(
         json: flags.booleans.has('json'),
         outputPath,
         preserveOutputOnProductError: preserveCheckpointOnError,
+        asyncResume: (payload) => extractResearchResume(payload, verb, outputPath),
       },
       context,
     );
@@ -2277,28 +2291,34 @@ async function runResearchRun(
           return submitted;
         }
         const run = readResearchRun(submitted);
-        if (!run.status || isTerminalRunStatus(run.status)) {
+        if (!run.status || isHostedRunSettled(submitted, run.status)) {
           return submitted;
         }
-        if (!run.runHandle) {
+        if (!run.runHandle && !run.operationId) {
           throw new Error(
-            `Research run returned non-terminal status ${run.status} without a resumable run handle.`,
+            `Research run returned unfinished status ${run.status} without a resumable run identity.`,
           );
         }
         if (!context && outputPath) {
           await writeResult(submitted, outputPath, false);
           checkpointWritten = true;
         }
+        let currentHandle = run.runHandle;
         return pollHostedRunUntilSettled({
           pollIntervalMs: wait.pollIntervalMs,
           initialPollIntervalMs: flags.values.has('poll-interval-seconds') ? undefined : 2_000,
-          pollOnce: () =>
-            postHostedJson({
-              body: { routeKey, runHandle: run.runHandle },
+          pollOnce: async () => {
+            const payload = await postHostedJson({
+              body: { routeKey, ...(currentHandle ? { runHandle: currentHandle } : { sourceOperationId: run.operationId }) },
               pathName: '/api/postplus-cli/hosted/research',
               skillName: null,
               context,
-            }),
+            });
+            assertResearchResumePayload(payload, verb);
+            currentHandle = readResearchRun(payload).runHandle ?? currentHandle;
+            if (!context && outputPath) await writeResult(payload, outputPath, false);
+            return payload;
+          },
           readStatus: readResearchRunStatus,
           waitBudgetMs: wait.waitBudgetMs,
         });
@@ -2514,11 +2534,11 @@ function extractResearchResume(
   verb: ResearchVerb,
   outputPath: string | null,
 ): string | null {
-  const { runHandle, status } = readResearchRun(payload);
-  if (!runHandle || !outputPath) {
+  const { runHandle, operationId, status } = readResearchRun(payload);
+  if ((!runHandle && !operationId) || !outputPath) {
     return null;
   }
-  if (status && isTerminalRunStatus(status)) {
+  if (status && isHostedRunSettled(payload, status)) {
     return null;
   }
   return `postplus research ${verb} --resume-from ${shellQuoteArg(

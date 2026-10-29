@@ -1239,7 +1239,7 @@ describe('doctor and status', () => {
       assert.equal(status.ok, false);
       assert.equal(compatibilityCheck?.label, 'Client compatibility');
       assert.match(formatted, /postplus update/);
-      assert.match(formatted, /restart your agent session/i);
+      assert.doesNotMatch(formatted, /restart your agent session/i);
       assert.doesNotMatch(formatted, /npm install -g @postplus\/cli/);
       assert.doesNotMatch(formatted, /postplus auth login/);
     } finally {
@@ -3375,7 +3375,7 @@ describe('update checks', () => {
     });
 
     assert.match(formatted, /Run: postplus update\./);
-    assert.match(formatted, /restart your agent session/);
+    assert.doesNotMatch(formatted, /restart your agent session/);
     assert.doesNotMatch(formatted, /npm install -g/);
   });
 
@@ -3638,7 +3638,6 @@ describe('update checks', () => {
     assert.deepEqual(result, {
       attempted: true,
       exitCode: 0,
-      restartAgentSessionRequired: false,
       updateExitCode: 0,
     });
     assert.ok(calls.every(call => call.command === process.execPath));
@@ -3690,7 +3689,7 @@ describe('update checks', () => {
     assert.equal(result.exitCode, 0);
   });
 
-  it('updates but does not replay when the compatibility change requires a new agent session', async () => {
+  it('updates and continues the original task despite an old server session-restart hint', async () => {
     const calls: string[][] = [];
     const errors: string[] = [];
     const result = await runPostPlusClientUpgradeRecovery(
@@ -3718,14 +3717,16 @@ describe('update checks', () => {
     );
 
     assert.equal(calls[0]?.[0], process.execPath);
-    assert.deepEqual(calls.map(call=>call.slice(4)), [['update', '--json']]);
+    assert.deepEqual(calls.map(call=>call.slice(4)), [
+      ['update', '--json'],
+      ['media', 'create', 'voice-design', '--text', 'hello', '--voice-description', 'warm'],
+    ]);
     assert.deepEqual(result, {
       attempted: true,
-      exitCode: 1,
-      restartAgentSessionRequired: true,
+      exitCode: 0,
       updateExitCode: 0,
     });
-    assert.match(errors.join(''), /requires a new agent session/u);
+    assert.equal(errors.join(''), '');
   });
 
   it('stops a second compatibility recovery attempt without looping', async () => {
@@ -3752,7 +3753,6 @@ describe('update checks', () => {
     assert.deepEqual(result, {
       attempted: false,
       exitCode: 1,
-      restartAgentSessionRequired: false,
       updateExitCode: null,
     });
     assert.equal(commandCalled, false);
@@ -3781,7 +3781,6 @@ describe('update checks', () => {
     assert.deepEqual(result, {
       attempted: true,
       exitCode: 23,
-      restartAgentSessionRequired: false,
       updateExitCode: 23,
     });
   });
@@ -4487,7 +4486,7 @@ describe('skill management commands', () => {
       assert.equal((await readManagedSkillBaseline())?.releaseId, 'skills-2026-09-02.1');
       assert.equal(config?.cliVersion, CURRENT_CLI_VERSION);
       assert.deepEqual(successMessages, [
-        'PostPlus Skills updated: 2 current, 1 retired removed (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.\n\nFewer interruptions\nRoutine recoverable errors no longer stop the task.\n- PostPlus retries once after a compatible update.\n- Safe local usage errors can be corrected before submission.',
+        'PostPlus Skills updated: 2 current, 1 retired removed (global). Skills are ready on disk. Read the updated Skill and references needed for the current task, then continue the original task in this conversation. Preserve existing authorization and original operation IDs; do not ask the user to open another conversation or repeat the request.\n\nFewer interruptions\nRoutine recoverable errors no longer stop the task.\n- PostPlus retries once after a compatible update.\n- Safe local usage errors can be corrected before submission.',
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -4533,7 +4532,7 @@ describe('skill management commands', () => {
       assert.equal(exitCode, 0);
       assert.equal(installCalls.length, 1);
       assert.deepEqual(successMessages, [
-        'PostPlus is ready: 1 official Skills installed and verified (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.',
+        'PostPlus is ready: 1 official Skills installed and verified (global). Skills are ready on disk. Read the updated Skill and references needed for the current task, then continue the original task in this conversation. Preserve existing authorization and original operation IDs; do not ask the user to open another conversation or repeat the request.',
       ]);
       assert.doesNotMatch(successMessages.join('\n'), /PostPlus update/u);
     } finally {
@@ -4668,7 +4667,7 @@ describe('skill management commands', () => {
 
       assert.equal(exitCode, 0);
       assert.deepEqual(successMessages, [
-        'PostPlus Skills updated: 1 current, 0 retired removed (global). Skills are ready on disk. Start a new agent session in the same project. If you already have a task, paste the original request and say: "PostPlus is installed or updated; continue this task." Otherwise, describe the task you want to complete.\n\nFewer interruptions\nRoutine recoverable errors no longer stop the task.\n- PostPlus retries once after a compatible update.',
+        'PostPlus Skills updated: 1 current, 0 retired removed (global). Skills are ready on disk. Read the updated Skill and references needed for the current task, then continue the original task in this conversation. Preserve existing authorization and original operation IDs; do not ask the user to open another conversation or repeat the request.\n\nFewer interruptions\nRoutine recoverable errors no longer stop the task.\n- PostPlus retries once after a compatible update.',
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -6499,6 +6498,186 @@ describe('hosted domain commands', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('Research wait keeps the original run until business completion and credit settlement both finish', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-research-settlement-wait-'));
+    tempDirs.push(requestDir);
+    await setLocalSession({ accountId: 'account_1', accountName: 'Account', apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token', sessionExpiresAt: null, userEmail: 'agent@example.com', userId: 'user_1' });
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const status of ['completed', 'failed', 'canceled']) {
+        const outputPath = resolve(requestDir, `${status}.json`);
+        const bodies: Array<Record<string, unknown>> = [];
+        const pending = {
+          routeKey: 'google-trends-fast', operationId: `original-${status}`, runHandle: `sealed-${status}`,
+          status, settlement_pending: true,
+          error: status === 'completed' ? null : { code: 'original_failure', message: 'Original provider failure' },
+          output: status === 'completed' ? { items: [{ query: 'portable blender' }] } : null,
+          summary: { raw_records: status === 'completed' ? 1 : 0, sources: [{ state: status }] },
+        };
+        const final = { ...pending, settlement_pending: false, runHandle: null };
+        globalThis.fetch = async (_input, init) => {
+          bodies.push(JSON.parse(String(init?.body)));
+          if (bodies.length === 3) {
+            assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), pending);
+          }
+          return Response.json(bodies.length < 3 ? pending : final);
+        };
+        assert.equal(await runHostedDomainCommand('research', [
+          'run', 'google-trends-fast', '--query', 'portable blender', '--hosted-operation-id', pending.operationId,
+          '--wait', '--poll-interval-seconds', '0.001', '--output', outputPath,
+        ]), 0);
+        assert.equal(bodies.length, 3);
+        assert.equal(bodies.filter(body => 'input' in body).length, 1);
+        assert.deepEqual(bodies.slice(1), [
+          { routeKey: pending.routeKey, runHandle: pending.runHandle },
+          { routeKey: pending.routeKey, runHandle: pending.runHandle },
+        ]);
+        assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), final);
+      }
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  it('Research wait can settle the original failed operation when no provider handle exists', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-research-settlement-operation-'));
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'result.json');
+    await setLocalSession({ accountId: 'account_1', accountName: 'Account', apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token', sessionExpiresAt: null, userEmail: 'agent@example.com', userId: 'user_1' });
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    const pending = {
+      routeKey: 'google-trends-fast', operationId: 'original-without-handle', runHandle: null,
+      status: 'failed', settlement_pending: true,
+      error: { code: 'provider_rejected', message: 'Original request rejected' },
+      summary: { raw_records: 0, sources: [{ state: 'failed' }] },
+    };
+    const final = { ...pending, settlement_pending: false };
+    globalThis.fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json(bodies.length === 1 ? pending : final);
+    };
+    try {
+      assert.equal(await runHostedDomainCommand('research', [
+        'run', 'google-trends-fast', '--query', 'portable blender', '--hosted-operation-id', pending.operationId,
+        '--wait', '--poll-interval-seconds', '0.001', '--output', outputPath,
+      ]), 0);
+      assert.equal(bodies.length, 2);
+      assert.deepEqual(bodies[1], { routeKey: pending.routeKey, sourceOperationId: pending.operationId });
+      assert.equal(bodies.filter(body => 'input' in body).length, 1);
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), final);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  it('Research checkpoints retain terminal outcomes and resume guidance while credit settlement is pending', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-research-settlement-resume-'));
+    tempDirs.push(requestDir);
+    await setLocalSession({ accountId: 'account_1', accountName: 'Account', apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token', sessionExpiresAt: null, userEmail: 'agent@example.com', userId: 'user_1' });
+    const originalFetch = globalThis.fetch;
+    const originalStderr = process.stderr.write;
+    try {
+      for (const status of ['completed', 'failed', 'canceled']) {
+        let stderr = '';
+        process.stderr.write = ((chunk: unknown) => { stderr += String(chunk); return true; }) as typeof originalStderr;
+        const outputPath = resolve(requestDir, `${status}.json`);
+        const bodies: Array<Record<string, unknown>> = [];
+        const pending = {
+          routeKey: 'google-trends-fast', operationId: `original-${status}`, runHandle: null,
+          status, settlement_pending: true,
+          error: status === 'completed' ? null : { code: 'original_failure', message: 'Original provider failure' },
+          summary: { raw_records: 0, sources: [{ state: status }] },
+        };
+        const final = { ...pending, settlement_pending: false };
+        globalThis.fetch = async (_input, init) => {
+          bodies.push(JSON.parse(String(init?.body)));
+          return Response.json(bodies.length < 3 ? pending : final);
+        };
+        assert.equal(await runHostedDomainCommand('research', [
+          'run', 'google-trends-fast', '--query', 'portable blender', '--hosted-operation-id', pending.operationId,
+          '--output', outputPath,
+        ]), 0);
+        assert.match(stderr, /resume: postplus research run --resume-from/);
+        assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), pending);
+        stderr = '';
+        assert.equal(await runHostedDomainCommand('research', ['run', '--resume-from', outputPath, '--wait-seconds', '0']), 0);
+        assert.match(stderr, /resume: postplus research run --resume-from/);
+        assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), pending);
+        stderr = '';
+        assert.equal(await runHostedDomainCommand('research', ['run', '--resume-from', outputPath, '--wait-seconds', '0']), 0);
+        assert.equal(stderr, '');
+        assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), final);
+        assert.deepEqual(bodies.slice(1), [
+          { routeKey: pending.routeKey, sourceOperationId: pending.operationId },
+          { routeKey: pending.routeKey, sourceOperationId: pending.operationId },
+        ]);
+        await assert.rejects(() => runHostedDomainCommand('research', ['run', '--resume-from', outputPath, '--wait-seconds', '0']), /already terminal/);
+        assert.equal(bodies.length, 3);
+        assert.equal(bodies.filter(body => 'input' in body).length, 1);
+      }
+    } finally { globalThis.fetch = originalFetch; process.stderr.write = originalStderr; }
+  });
+
+  it('Research status errors preserve the latest failed outcome and pending settlement checkpoint', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-research-settlement-interrupted-'));
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'result.json');
+    await setLocalSession({ accountId: 'account_1', accountName: 'Account', apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token', sessionExpiresAt: null, userEmail: 'agent@example.com', userId: 'user_1' });
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    const pending = {
+      routeKey: 'google-trends-fast', operationId: 'original-interrupted', runHandle: null,
+      status: 'failed', settlement_pending: true,
+      error: { code: 'provider_failed', message: 'Actual failure reason' },
+      summary: { raw_records: 0, sources: [{ state: 'failed' }] },
+    };
+    globalThis.fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      if (bodies.length === 1) return Response.json({ ...pending, status: 'processing', runHandle: 'original-handle', error: null });
+      if (bodies.length === 2) return Response.json(pending);
+      return Response.json({ code: 'postplus_cli_research_poll_unavailable', message: 'Status temporarily unavailable' }, { status: 503 });
+    };
+    try {
+      assert.equal(await runHostedDomainCommand('research', [
+        'run', 'google-trends-fast', '--query', 'portable blender', '--hosted-operation-id', pending.operationId,
+        '--wait', '--poll-interval-seconds', '0.001', '--output', outputPath,
+      ]), 1);
+      assert.equal(bodies.length, 3);
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), pending);
+      // A known original run with pending settlement is never re-admitted,
+      // even when a later status read reports typed absence.
+      globalThis.fetch = async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return Response.json({ code: 'postplus_cli_hosted_async_run_not_found', message: 'Original run missing' }, { status: 404 });
+      };
+      assert.equal(await runHostedDomainCommand('research', ['run', '--resume-from', outputPath, '--wait-seconds', '0']), 1);
+      assert.deepEqual(bodies[3], { routeKey: pending.routeKey, sourceOperationId: pending.operationId });
+      assert.equal(bodies.length, 4);
+      assert.equal(bodies.filter(body => 'input' in body).length, 1);
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), pending);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  it('Research resumes nested terminal evidence with pending settlement from its original operation', async () => {
+    const requestDir = await mkdtemp(resolve(tmpdir(), 'postplus-research-settlement-nested-'));
+    tempDirs.push(requestDir);
+    const outputPath = resolve(requestDir, 'result.json');
+    await setLocalSession({ accountId: 'account_1', accountName: 'Account', apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token', sessionExpiresAt: null, userEmail: 'agent@example.com', userId: 'user_1' });
+    const pending = { operationId: 'original-nested', output: {
+      routeKey: 'google-trends-fast', runHandle: null, status: 'failed', settlement_pending: true,
+      error: { message: 'Original failure' }, summary: { raw_records: 0 },
+    } };
+    await writeFile(outputPath, JSON.stringify(pending));
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json({ ...pending, output: { ...pending.output, settlement_pending: false } });
+    };
+    try {
+      assert.equal(await runHostedDomainCommand('research', ['run', '--resume-from', outputPath, '--wait-seconds', '0']), 0);
+      assert.deepEqual(bodies, [{ routeKey: pending.output.routeKey, sourceOperationId: pending.operationId }]);
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), { ...pending, output: { ...pending.output, settlement_pending: false } });
+    } finally { globalThis.fetch = originalFetch; }
   });
 
   it('rejects legacy Research commands and invalid semantic intent before network access', async () => {

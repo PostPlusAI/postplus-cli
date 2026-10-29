@@ -51,7 +51,7 @@ export async function setup({ release, root = defaultInstallRoot(), command = 'i
         cliVersion: release.cliVersion, nodeVersion: release.node.version,
         reusedRuntime: installed.reusedNode, repairs: installed.repairs, pathRegistration,
         currentSessionAction: `Use ${installed.commandPath} for subsequent commands in this session; new shells will load the registered PATH.` },
-        nextAction: report.session?.newSessionRequired ? report.session.action : 'Continue the user’s original task.' };
+        nextAction: report.session?.action ?? 'Continue the user’s original task in this conversation.' };
     },
   });
 }

@@ -58,6 +58,7 @@ export type ReportCreative = {
   headline: string;
   description: string;
   destination: string;
+  destinationState?: 'unsupported_map';
   cta: string;
   media: { kind: string; url: string; poster: string; contentHash?: string }[];
 };
@@ -65,6 +66,8 @@ export type ReportAd = {
   id: string;
   advertiser: string;
   advertiserId: string;
+  advertiserPageId?: string;
+  advertiserUrl?: string;
   logo: string;
   status: string;
   observed: string;
@@ -76,14 +79,15 @@ export type ReportAd = {
   creatives: ReportCreative[];
 };
 export type ReportInput = { name: string; payload: unknown };
+export type ReportSource = {
+  name: string;
+  state: string;
+  count: number | null;
+  note: string;
+};
 export function normalizeAdReport(inputs: ReportInput[]) {
   const ads = new Map<string, ReportAd>();
-  const sources: {
-    name: string;
-    state: string;
-    count: number | null;
-    note: string;
-  }[] = [];
+  const sources: ReportSource[] = [];
   for (const input of inputs) {
     const envelope = obj(input.payload);
     const stored =
@@ -101,7 +105,9 @@ export function normalizeAdReport(inputs: ReportInput[]) {
         note:
           str(error.message) ||
           str(envelope.error) ||
-          'Collection has not completed. This is not evidence of no ads.',
+          (['failed', 'canceled', 'cancelled'].includes(state)
+            ? 'Collection did not complete successfully. This is not evidence of no ads.'
+            : 'Collection has not completed. This is not evidence of no ads.'),
       });
       continue;
     }
@@ -196,6 +202,8 @@ export function normalizeAdReport(inputs: ReportInput[]) {
               poster: '',
             });
         }
+        const destination = c.destinationUrl || c.link_url || snapshot.link_url;
+        const unsupportedMap = /^fbgeo:/i.test(str(destination));
         return {
           body:
             str(obj(c.body).text) ||
@@ -206,7 +214,10 @@ export function normalizeAdReport(inputs: ReportInput[]) {
           description: str(
             c.description || c.link_description || snapshot.link_description,
           ),
-          destination: url(c.destinationUrl || c.link_url || snapshot.link_url),
+          destination: unsupportedMap ? '' : url(destination),
+          ...(unsupportedMap
+            ? { destinationState: 'unsupported_map' as const }
+            : {}),
           cta: str(c.ctaText || c.cta_text || snapshot.cta_text),
           media,
         };
@@ -220,6 +231,11 @@ export function normalizeAdReport(inputs: ReportInput[]) {
               : a.page_name || snapshot.page_name,
           ) || 'Advertiser not provided',
         advertiserId: str(a.page_id) || str(brand.slug) || id,
+        advertiserPageId: str(a.page_id) || undefined,
+        advertiserUrl:
+          url(
+            stored ? obj(a.advertiser).page_url : snapshot.page_profile_uri,
+          ) || undefined,
         logo: url(
           stored ? brand.logo_url : snapshot.page_profile_picture_url,
           true,
@@ -288,6 +304,121 @@ export function reportCreativeGroupKey(ad: ReportAd): string {
     : `ad:${ad.id}`;
 }
 
+export type AdReportSummary = {
+  raw_records: number;
+  unique_ads: number;
+  cards: number;
+  /** Saved media references, not a count of verified playable media. */
+  media_references: number;
+  advertiser_total: number;
+  advertisers: {
+    page_id: string | null;
+    name: string;
+    ad_count: number;
+    destination_domains: string[];
+  }[];
+  advertisers_shown: number;
+  /** Whether every loaded advertiser and source record fits this summary. */
+  summary_complete: boolean;
+  sources: ReportSource[];
+};
+
+/** Bounded projection of saved evidence; never truncates a record or identifier. */
+export function summarizeAdReport(inputs: ReportInput[]): AdReportSummary {
+  const model = normalizeAdReport(inputs);
+  const { ads, sources } = model;
+  const advertisers = new Map<string, AdReportSummary['advertisers'][number]>();
+  for (const ad of ads) {
+    const advertiser = advertisers.get(ad.advertiserId) ?? {
+      page_id: ad.advertiserPageId ?? null,
+      name: ad.advertiser,
+      ad_count: 0,
+      destination_domains: [],
+    };
+    advertiser.ad_count++;
+    for (const creative of ad.creatives) {
+      if (!creative.destination) continue;
+      const domain = new URL(creative.destination).hostname;
+      if (!advertiser.destination_domains.includes(domain))
+        advertiser.destination_domains.push(domain);
+    }
+    advertiser.destination_domains.sort();
+    advertisers.set(ad.advertiserId, advertiser);
+  }
+  const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  const rows = [...advertisers.values()].sort(
+    (a, b) =>
+      b.ad_count - a.ad_count ||
+      compare(a.page_id ?? '', b.page_id ?? '') ||
+      compare(a.name, b.name),
+  );
+  const summary: AdReportSummary = {
+    raw_records: sources.reduce(
+      (total, source) => total + (source.count ?? 0),
+      0,
+    ),
+    unique_ads: ads.length,
+    cards: new Set(ads.map(reportCreativeGroupKey)).size,
+    media_references: ads.reduce(
+      (total, ad) =>
+        total +
+        ad.creatives.reduce(
+          (count, creative) => count + creative.media.length,
+          0,
+        ),
+      0,
+    ),
+    advertiser_total: rows.length,
+    advertisers: [],
+    advertisers_shown: 0,
+    summary_complete: false,
+    sources: [],
+  };
+  const fits = () =>
+    new TextEncoder().encode(JSON.stringify(summary)).byteLength <= 8 * 1024;
+  for (const source of [...sources].sort((a, b) =>
+    compare(JSON.stringify(a), JSON.stringify(b)),
+  )) {
+    summary.sources.push(source);
+    if (!fits()) summary.sources.pop();
+  }
+  for (const advertiser of rows) {
+    if (summary.advertisers.length === 20) break;
+    summary.advertisers.push(advertiser);
+    summary.advertisers_shown = summary.advertisers.length;
+    if (!fits()) {
+      summary.advertisers.pop();
+      summary.advertisers_shown = summary.advertisers.length;
+    }
+  }
+  summary.summary_complete =
+    summary.advertisers_shown === rows.length &&
+    summary.sources.length === sources.length;
+  return summary;
+}
+
+function emptyReportMessage(ads: ReportAd[], sources: ReportSource[]): string {
+  if (ads.length) return 'No ads match the current filters.';
+  const failed = sources.some((source) =>
+    ['failed', 'canceled', 'cancelled'].includes(source.state),
+  );
+  const pending = sources.some(
+    (source) =>
+      ![
+        'completed',
+        'stored snapshots',
+        'failed',
+        'canceled',
+        'cancelled',
+      ].includes(source.state),
+  );
+  if (pending)
+    return `Collection is still in progress.${failed ? ' Some sources failed; review their errors below.' : ''} This is not evidence of no ads.`;
+  if (failed)
+    return 'No ads are available from these sources. Collection failed or was canceled; review the errors below. This is not evidence of no ads.';
+  return 'Collection completed with no returned ads. This does not establish that no ads exist.';
+}
+
 export function adTimingSignal(ad: Pick<ReportAd, 'start' | 'end' | 'observed' | 'status'>) {
   const start = Date.parse(ad.start);
   const observed = Date.parse(ad.observed);
@@ -337,7 +468,8 @@ export function renderAdReport(inputs: ReportInput[]): string {
       : `<span>${esc(name)}</span>`;
   };
   const creative = (a: ReportAd, c: ReportCreative, i: number) => {
-    const hasDestination = c.headline || c.description || c.destination;
+    const hasDestination =
+      c.headline || c.description || c.destination || c.destinationState;
     return `<section class="variant" data-variant="${i}" ${i ? 'hidden' : ''} aria-label="Creative ${i + 1} of ${a.creatives.length}">
       <div class="identity">${logo(a)}<div><strong>${esc(a.advertiser)}</strong><span class="sponsored">Sponsored</span></div></div>
       ${c.body ? `<div class="copy">${esc(c.body)}</div>` : ''}
@@ -349,12 +481,12 @@ export function renderAdReport(inputs: ReportInput[]): string {
         )
         .join('')}</div>
       ${!c.media.length ? '<p class="copy muted">Media not supplied. Open the source to inspect this ad.</p>' : ''}
-      ${hasDestination ? `<div class="destination"><div class="destination-copy">${c.destination ? `<div class="domain">${esc(new URL(c.destination).hostname)}</div>` : ''}${c.headline ? `<div class="destination-title">${esc(c.headline)}</div>` : ''}${c.description ? `<div class="description">${esc(c.description)}</div>` : ''}</div>${c.destination && c.cta ? link(c.destination, c.cta, 'cta') : ''}</div>` : ''}
+      ${hasDestination ? `<div class="destination"><div class="destination-copy">${c.destinationState === 'unsupported_map' ? '<div class="description">Map destination is not supported in this viewer.</div>' : c.destination ? `<div class="domain">${esc(new URL(c.destination).hostname)}</div>` : ''}${c.headline ? `<div class="destination-title">${esc(c.headline)}</div>` : ''}${c.description ? `<div class="description">${esc(c.description)}</div>` : ''}</div>${c.destinationState === 'unsupported_map' && c.cta ? `<span class="cta" aria-disabled="true">${esc(c.cta)}</span>` : c.destination && c.cta ? link(c.destination, c.cta, 'cta') : ''}</div>` : ''}
     </section>`;
   };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>PostPlus · Ad research</title><style>
 *{box-sizing:border-box}body{margin:0;background:#f0f2f5;color:#1c1e21;font:14px/1.45 Arial,Helvetica,sans-serif}header{background:#fff;border-bottom:1px solid #dadde1}header>div,main{max-width:1600px;margin:auto;padding:24px 32px}h1{font-size:28px;letter-spacing:-.8px;margin:8px 0 12px}p{margin:10px 0}.muted,small{color:#65676b}.brands,.filters{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}button,input,select{font:inherit;padding:10px 14px;border:1px solid #ccd0d5;border-radius:6px;background:#fff;color:inherit}button{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px}button:hover{background:#f0f2f5}button[aria-pressed=true]{border-color:#1877f2;background:#e7f0fd;color:#165dc0}input{flex:1;min-width:180px}:focus-visible{outline:3px solid #1877f2;outline-offset:3px}.logo{width:36px;height:36px;object-fit:contain;border-radius:50%;flex-shrink:0;border:1px solid #e4e6eb}.missing{display:grid;place-items:center;background:#eee}.brands .logo{width:28px;height:28px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;align-items:start}.card{min-width:0;background:#fff;border:1px solid #d4d6d9;border-radius:8px;padding:16px 12px 12px;box-shadow:0 1px 4px #00000018}.meta{padding:0 4px 16px;font-size:13px;line-height:1.55}.meta p{margin:8px 0}.status{display:inline-flex;align-items:center;gap:5px;padding:0 7px;background:#eceef0;border-radius:12px;font-weight:600;text-transform:capitalize;line-height:20px}.active{background:#e7f1e5;color:#006b50}.inactive{background:#eceef0;color:#65676b}.status-dot{width:12px;height:12px;display:block;flex:none}.status{font-size:12px;height:20px;padding:0 6px;gap:6px}.brands{margin-top:0}.platforms{display:flex;align-items:center;gap:7px;margin:6px 0}.platform-icon{width:14px;height:14px;color:#45484b}.checked{font-size:11px;color:#65676b;margin-top:7px}.collation{font-size:14px}.creative-controls{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px;border-radius:6px;background:#f0f2f5;padding:5px 8px}.creative-controls button{padding:2px 10px;border:0;background:transparent;font-size:21px;line-height:25px}.creative-controls output{font-size:12px}.creative-frame{border-top:1px solid #dadde1;padding-top:16px}.variant{border:1px solid #dadde1;border-radius:6px;overflow:hidden;box-shadow:0 1px 4px #00000012}.identity{display:flex;gap:8px;align-items:center;padding:12px 10px 8px}.identity strong{font-size:14px;line-height:18px}.sponsored{display:block;color:#65676b;font-size:12px;line-height:16px;font-weight:600}.copy{padding:0 10px 10px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.4}.media{background:#f0f2f5}.media img,.media video{display:block;width:100%;height:280px;object-fit:contain;margin:auto}.media>*+*{border-top:2px solid #fff}.destination{display:flex;align-items:center;gap:10px;padding:10px;background:#fff;min-height:58px}.destination-copy{flex:1;min-width:0;overflow-wrap:anywhere}.domain{text-transform:uppercase;color:#65676b;font-size:10px;line-height:1.4;margin-bottom:2px}.destination-title{font-size:12px;line-height:1.4}.description{color:#65676b;font-size:11px;line-height:1.45;margin-top:3px}.cta{flex-shrink:0;background:#f0f2f5;border-radius:6px;color:#1c1e21;text-decoration:none;padding:10px 14px;font-size:14px;line-height:20px;max-width:45%;text-align:center;overflow-wrap:anywhere}.cta:hover{background:#e4e6eb}.source{margin:10px 4px 0;font-size:11px}.source a{color:#65676b;text-decoration:none}.source a:hover{text-decoration:underline}.counts{margin:0 0 18px;font-size:16px;font-weight:600}.notice{border:1px solid #d6dce1;background:#fff;padding:12px;border-radius:6px}.sources{margin-top:36px;overflow-wrap:anywhere}.sources h2{font-size:18px}[hidden]{display:none!important}@media(min-width:1450px){.media img,.media video{height:320px}}@media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}header>div,main{padding:20px}}@media(max-width:600px){.grid{grid-template-columns:minmax(0,1fr)}header>div,main{padding:16px}.filters>*{width:100%}.media img,.media video{height:300px}}
-</style></head><body><header><div><nav class="brands" aria-label="Filter by advertiser"><button type="button" aria-pressed="true" data-brand="">All advertisers</button>${brands.map((a) => `<button type="button" aria-pressed="false" data-brand="${esc(a.advertiserId)}">${logo(a)}${esc(a.advertiser)} <small>${ads.filter((b) => b.advertiserId === a.advertiserId).length}</small></button>`).join('')}</nav><div class="filters"><input id="query" type="search" aria-label="Search ad text or advertiser" placeholder="Search ad text or advertiser"><select id="status" aria-label="Observed ad status"><option value="">All statuses</option><option>active</option><option>inactive</option><option>unknown</option></select><select id="media" aria-label="Media type"><option value="">All media</option><option>video</option><option>image</option></select></div></div></header><main><p id="count" class="counts" role="status">${ads.length} ads shown</p><p id="empty" class="notice" ${ads.length ? 'hidden' : ''}>No ads to display. Check collection outcomes below; an empty result does not establish that no ads exist.</p><div class="grid">${ads.map((a) => `<article class="card" data-ad="${esc(a.id)}" data-group="${esc(reportCreativeGroupKey(a))}" data-brand="${esc(a.advertiserId)}" data-status="${esc(a.status)}" data-media="${esc(a.creatives.flatMap((c) => c.media.map((m) => m.kind)).join(' '))}"><div class="meta"><span class="status ${a.status}"><svg class="status-dot" aria-hidden="true" viewBox="0 0 16 16"><circle cx="8" cy="8" r="8" fill="currentColor"/><path d="${a.status === 'active' ? 'M4.2 8.1 6.7 10.5 11.8 5.3' : 'M4.5 8h7'}" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>${a.status}</span><p>Library ID: ${esc(a.id)}</p>${a.start ? `<div>Started running on ${esc(calendarDate(a.start))}</div>` : ''}${a.end && a.status === 'inactive' ? `<div>Source-reported end: ${esc(calendarDate(a.end))}</div>` : ''}${a.platforms.length ? `<div class="platforms"><span>Platforms</span>${a.platforms.map(platform).join('')}</div>` : ''}${a.collatedAds ? `<p class="collation"><strong>${a.collatedAds} ads</strong> use this creative and text</p>` : ''}<div class="checked">Checked: ${esc(a.observed || 'Not provided')}</div>${timingMarkup(a)}${a.creatives.length > 1 ? `<div class="creative-controls" aria-label="Creative variants"><button type="button" data-step="-1" aria-label="Previous creative">‹</button><output aria-live="polite">Creative 1 of ${a.creatives.length}</output><button type="button" data-step="1" aria-label="Next creative">›</button></div>` : ''}</div><div class="creative-frame">${a.creatives.map((c, i) => creative(a, c, i)).join('')}</div><div class="source">${link(a.source, 'View original ad ↗')}</div></article>`).join('')}</div><section class="sources"><h2>Collection outcomes</h2><p class="muted">Media loads from source URLs when viewed and may expire. The report itself needs no external scripts.</p>${sources.map((s) => `<p class="notice"><strong>${esc(s.name)}</strong> · ${esc(s.state)} · ${s.count === null ? 'No completed result' : `${s.count} returned records`}${s.note ? `<br>${esc(s.note)}` : ''}</p>`).join('')}</section></main><script>
+</style></head><body><header><div><nav class="brands" aria-label="Filter by advertiser"><button type="button" aria-pressed="true" data-brand="">All advertisers</button>${brands.map((a) => `<button type="button" aria-pressed="false" data-brand="${esc(a.advertiserId)}">${logo(a)}${esc(a.advertiser)} <small>${ads.filter((b) => b.advertiserId === a.advertiserId).length}</small></button>`).join('')}</nav><div class="filters"><input id="query" type="search" aria-label="Search ad text or advertiser" placeholder="Search ad text or advertiser"><select id="status" aria-label="Observed ad status"><option value="">All statuses</option><option>active</option><option>inactive</option><option>unknown</option></select><select id="media" aria-label="Media type"><option value="">All media</option><option>video</option><option>image</option></select></div></div></header><main><p id="count" class="counts" role="status">${ads.length} ads shown</p><p id="empty" class="notice" ${ads.length ? 'hidden' : ''}>${esc(emptyReportMessage(ads, sources))}</p><div class="grid">${ads.map((a) => `<article class="card" data-ad="${esc(a.id)}" data-group="${esc(reportCreativeGroupKey(a))}" data-brand="${esc(a.advertiserId)}" data-status="${esc(a.status)}" data-media="${esc(a.creatives.flatMap((c) => c.media.map((m) => m.kind)).join(' '))}"><div class="meta"><span class="status ${a.status}"><svg class="status-dot" aria-hidden="true" viewBox="0 0 16 16"><circle cx="8" cy="8" r="8" fill="currentColor"/><path d="${a.status === 'active' ? 'M4.2 8.1 6.7 10.5 11.8 5.3' : 'M4.5 8h7'}" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>${a.status}</span><p>Library ID: ${esc(a.id)}</p>${a.start ? `<div>Started running on ${esc(calendarDate(a.start))}</div>` : ''}${a.end && a.status === 'inactive' ? `<div>Source-reported end: ${esc(calendarDate(a.end))}</div>` : ''}${a.platforms.length ? `<div class="platforms"><span>Platforms</span>${a.platforms.map(platform).join('')}</div>` : ''}${a.collatedAds ? `<p class="collation"><strong>${a.collatedAds} ads</strong> use this creative and text</p>` : ''}<div class="checked">Checked: ${esc(a.observed || 'Not provided')}</div>${timingMarkup(a)}${a.creatives.length > 1 ? `<div class="creative-controls" aria-label="Creative variants"><button type="button" data-step="-1" aria-label="Previous creative">‹</button><output aria-live="polite">Creative 1 of ${a.creatives.length}</output><button type="button" data-step="1" aria-label="Next creative">›</button></div>` : ''}</div><div class="creative-frame">${a.creatives.map((c, i) => creative(a, c, i)).join('')}</div><div class="source">${link(a.source, 'View original ad ↗')}</div></article>`).join('')}</div><section class="sources"><h2>Collection outcomes</h2><p class="muted">Media loads from source URLs when viewed and may expire. The report itself needs no external scripts.</p>${sources.map((s) => `<p class="notice"><strong>${esc(s.name)}</strong> · ${esc(s.state)} · ${s.count === null ? 'No completed result' : `${s.count} returned records`}${s.note ? `<br>${esc(s.note)}` : ''}</p>`).join('')}</section></main><script>
 const cards=[...document.querySelectorAll('.card')],buttons=[...document.querySelectorAll('[data-brand][aria-pressed]')];let brand='';
 const groups=new Map(),selection=new Map();for(const card of cards){card.dataset.search=card.textContent.toLowerCase();const key=card.dataset.group;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(card)}for(const [key,members] of groups){if(members.length<2)continue;for(const card of members){const control=document.createElement('select');control.className='ad-group';control.setAttribute('aria-label','Ads using the same video');control.style.cssText='width:100%;margin-bottom:12px';control.addEventListener('change',()=>{selection.set(key,control.value);filter()});card.prepend(control)}}
 function showCreative(card,index){const variants=[...card.querySelectorAll('.variant')];variants.forEach((v,i)=>{v.hidden=i!==index;if(v.hidden)v.querySelectorAll('video').forEach(video=>video.pause())});card.dataset.current=String(index);const output=card.querySelector('.creative-controls output');if(output)output.textContent='Creative '+(index+1)+' of '+variants.length}

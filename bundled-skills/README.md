@@ -15,7 +15,8 @@ for the current session, then continues your original task. New shells use the
 registered `postplus` command.
 
 The CLI includes its matching skills and verifies actual installed content.
-Follow the completion message for session reload and continuing your task.
+After a change, your agent reads the updated instructions needed for your task
+and continues in the current conversation. You do not need to open a new chat.
 Correct installations are reused; do not run a separate skills installer.
 Use `postplus install --current-directory` for a project-only installation.
 
@@ -74,8 +75,8 @@ You can also run `postplus update` to update the CLI and its matching skills.
 Official skill names are managed by PostPlus: local changes are overwritten and
 retired skills are removed without prompts or backups. Keep custom skills under
 separate names. Correct installations are reused.
-Follow the reported action only if an update fails or a new agent session is required;
-do not repeat maintenance blindly.
+After a successful update, continue the original task in the current conversation.
+If the update fails, follow its reported action; do not repeat maintenance blindly.
 
 ```bash
 postplus status

@@ -67,7 +67,7 @@ for (const { args, scenario } of cases) {
           return Response.json({code:'postplus_client_upgrade_required'}, {status:426});
         }
         if (s.updates === 0 || ${JSON.stringify(scenario)} === 'repeat') return Response.json({code:'postplus_client_upgrade_required',
-          compatibility:{upgrade:{cli:{required:true},restartAgentSession:false}}
+          compatibility:{upgrade:{cli:{required:true},restartAgentSession:true}}
         }, {status:426});
         return Response.json({marker:'original-task-completed',connection:{status:'active'},
           accountId:'next-account',userId:'fixture-user',cliSessionToken:'new-fixture-token',

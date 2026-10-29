@@ -8,7 +8,7 @@ import test from 'node:test';
 
 // Exercise real inherited file descriptors in a child process: intercepting
 // process.stdout.write cannot catch an installer's inherited stdout.
-async function recover(options: { updateExit?: number; restart?: boolean; malformed?: boolean; human?: boolean; newSession?: boolean; notes?: boolean; runtime?: boolean } = {}) {
+async function recover(options: { updateExit?: number; restart?: boolean; malformed?: boolean; human?: boolean; newSession?: boolean; notes?: boolean; runtime?: boolean; changed?: boolean } = {}) {
   const source = `
     import { runPostPlusClientUpgradeRecovery } from './src/update-check.ts';
     import { runInteractiveCommand } from './src/command-runner.ts';
@@ -25,7 +25,7 @@ async function recover(options: { updateExit?: number; restart?: boolean; malfor
       runInteractiveCommand: async (command, args, options) => {
         args = args.slice(3);
         const script = args[0] === 'update'
-          ? ${JSON.stringify(`console.log(${JSON.stringify(options.malformed ? 'broken JSON' : JSON.stringify((options.updateExit ?? 0) === 0 ? {ok:true, ...(options.notes ? {releaseNotes:{title:'Marketing Channels', summary:'Plan and publish from one channel workspace.'}} : {}), session:{newSessionRequired:options.newSession === true,action:options.newSession ? 'Start a new agent session before using updated skills.' : null}} : {ok:false,error:{code:options.human?'postplus_requires_human':'postplus_cli_update_failed',stage:'npm-install',service:'npm',correlationId:'fixture-id',retryable:false,message:'Update stopped.',action:'Review the installation.',...(options.runtime ? {component:'node',operation:'update',version:'24.21.0',currentVersion:'24.18.1',targetVersion:'24.21.0',failureStage:'artifact-request',platform:'darwin-arm64',originalUrl:'https://user:password@nodejs.org/dist/node.tar.gz?token=private',failureUrl:'https://cdn.test/node.tar.gz?signature=private',elapsedMs:125,timeoutMs:300000,httpStatus:503} : {}),cause:[{name:'Error',code:'EACCES',message:'npm permission denied'}]}}))}); console.error('installer stderr'); process.exitCode = ${options.updateExit ?? 0};`)}
+          ? ${JSON.stringify(`console.log(${JSON.stringify(options.malformed ? 'broken JSON' : JSON.stringify((options.updateExit ?? 0) === 0 ? {ok:true, ...(options.changed ? {changed:true} : {}), ...(options.notes ? {releaseNotes:{title:'Marketing Channels', summary:'Plan and publish from one channel workspace.'}} : {}), session:{newSessionRequired:options.newSession === true,action:options.newSession ? 'Start a new agent session before using updated skills.' : null}} : {ok:false,error:{code:options.human?'postplus_requires_human':'postplus_cli_update_failed',stage:'npm-install',service:'npm',correlationId:'fixture-id',retryable:false,message:'Update stopped.',action:'Review the installation.',...(options.runtime ? {component:'node',operation:'update',version:'24.21.0',currentVersion:'24.18.1',targetVersion:'24.21.0',failureStage:'artifact-request',platform:'darwin-arm64',originalUrl:'https://user:password@nodejs.org/dist/node.tar.gz?token=private',failureUrl:'https://cdn.test/node.tar.gz?signature=private',elapsedMs:125,timeoutMs:300000,httpStatus:503} : {}),cause:[{name:'Error',code:'EACCES',message:'npm permission denied'}]}}))}); console.error('installer stderr'); process.exitCode = ${options.updateExit ?? 0};`)}
           : 'process.stdout.write(JSON.stringify({ok:true,args:process.argv.slice(1)}));';
         return runInteractiveCommand(process.execPath, ['-e', script, '--', ...args], options);
       }
@@ -83,20 +83,25 @@ test('malformed update JSON fails closed without replay', async () => {
   assert.equal(result.code, 1);
 });
 
-test('restart-required maintenance leaves stdout empty without replay', async (t) => {
+test('a legacy server restart hint does not interrupt successful update and continuation', async (t) => {
   const result = await recover({ restart: true });
-  assert.equal(result.code, 1);
-  assert.equal(result.stdout, '');
-  assert.match(result.stderr, /requires a new agent session/);
+  assert.equal(result.code, 0);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    ok: true,
+    args: ['media', 'schema', '--json', 'two words', '& literal'],
+  });
+  assert.equal(result.stderr, '');
   t.diagnostic(`exit=${result.code}; stdout=${JSON.stringify(result.stdout)}`);
 });
 
 
-test('successful compatible skills update silently continues the original task', async () => {
+test('a successful update replaces an obsolete session action with current-task continuation', async () => {
   const result = await recover({newSession:true});
   assert.equal(result.code,0);
   assert.equal(JSON.parse(result.stdout).ok,true);
-  assert.equal(result.stderr, '');
+  assert.match(result.stderr, /Read the updated Skill/);
+  assert.match(result.stderr, /continue the original task in this conversation/);
+  assert.doesNotMatch(result.stderr, /Start a new agent session/);
 });
 test('malformed successful update fails closed without replay', async () => {
   const result = await recover({malformed:true});
@@ -194,4 +199,17 @@ test('automatic recovery preserves sanitized runtime diagnostics in one final JS
   assert.equal(fact.recovery.exhausted, true);
   assert.doesNotMatch(result.stdout + result.stderr, /user:password|token=private|signature=private/);
   assert.equal(result.stderr, '');
+});
+
+
+test('changed skills without release notes expose continuation to the Agent on stderr', async () => {
+  const result = await recover({ changed: true });
+  assert.equal(result.code, 0);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    ok: true,
+    args: ['media', 'schema', '--json', 'two words', '& literal'],
+  });
+  assert.match(result.stderr, /Read the updated Skill and references needed for the current task/);
+  assert.match(result.stderr, /continue the original task in this conversation/);
+  assert.doesNotMatch(result.stderr, /Start a new agent session|PostPlus updated:/);
 });
