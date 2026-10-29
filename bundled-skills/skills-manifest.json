@@ -5,7 +5,7 @@
     {
       "name": "ads",
       "path": "skills/60-ads/ads/SKILL.md",
-      "contentHash": "7f6cbbc4907db44b441300166504fd4762d3c4aa6d138764ff7ed3f0d9102bd0"
+      "contentHash": "c29b996c36e2cf7d0c09c0588326511ddd3f4bd6759fd109ae3eef5aa5e9692c"
     },
     {
       "name": "audio-transcription",
@@ -20,7 +20,7 @@
     {
       "name": "benchmark-to-brief",
       "path": "skills/40-creative/benchmark-to-brief/SKILL.md",
-      "contentHash": "6b78ae85a982fed00e569f03f2fa7f08040ecbda2759c61e8d6ec5491978b6c3"
+      "contentHash": "bfa8a0e99d89eb734f415e4bf276c4f34888d4b2bc36d377f60d8dd728d18057"
     },
     {
       "name": "channel-messaging",
@@ -65,7 +65,7 @@
     {
       "name": "measurement",
       "path": "skills/30-measurement/measurement/SKILL.md",
-      "contentHash": "81102b3389d146f92b99bb8541825b55bff6b97b712028adb8796e717f19d19a"
+      "contentHash": "94611da1f3d25466c635034f07e04f05af4a8879e2f5ef7813ac9a3ec30528fe"
     },
     {
       "name": "media-analysis",
@@ -91,6 +91,11 @@
       "name": "reference-decode",
       "path": "skills/10-routing/reference-decode/SKILL.md",
       "contentHash": "97158e7edac2bf0b77cd7e4304f520aeaedb7c7e9ac642509c93279008268b67"
+    },
+    {
+      "name": "seo-geo",
+      "path": "skills/30-measurement/seo-geo/SKILL.md",
+      "contentHash": "ef41a600623f1fdaca5830527a45670caac3222427ab2e489e7e1c24dcca11f5"
     },
     {
       "name": "social",

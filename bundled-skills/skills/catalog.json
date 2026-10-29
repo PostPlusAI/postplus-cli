@@ -340,7 +340,7 @@
       "familyId": "measurement",
       "familyName": "Website and Search Measurement",
       "name": "measurement",
-      "description": "Investigate website behavior in GA4, Google search visibility in Search Console, and differences between those reports and ad-platform results using the user's connected properties.",
+      "description": "Investigate GA4 and Search Console results, reconcile marketing data, and diagnose or repair confirmed website conversion-tracking defects when authorized editing is available. Use Ads for campaign goals and event imports, and seo-geo for search content and indexing improvements.",
       "category": "analyze",
       "example": "Explain the change in organic search clicks and compare it with GA4 sessions for the same site.",
       "path": "skills/30-measurement/measurement/SKILL.md",
@@ -441,6 +441,17 @@
       "category": "analyze",
       "example": "Extract reusable visual and hook rules from these reference frames.",
       "path": "skills/10-routing/reference-decode/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
+      "familyId": "measurement",
+      "familyName": "Website and Search Measurement",
+      "name": "seo-geo",
+      "description": "Diagnose organic search and AI answer visibility, prioritize content, and repair confirmed website issues through available authorized tools. Use for SEO, AI citations and answer accuracy; use Ads for paid changes and Measurement for event tracking.",
+      "category": "analyze",
+      "example": "Find search content opportunities, repair confirmed website SEO issues, and check whether AI answers accurately recommend our product.",
+      "path": "skills/30-measurement/seo-geo/SKILL.md",
       "status": "released",
       "supportedModels": []
     },
