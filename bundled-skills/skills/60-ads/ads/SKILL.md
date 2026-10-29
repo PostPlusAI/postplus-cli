@@ -41,7 +41,7 @@ account connection.
 | Apply a copied Ad Strategy, evaluate its rules, or execute its selected actions | [Strategy execution](references/strategy-execution.md); use applicable embedded fields/actions directly; platform references are for platform changes, missing/inapplicable parameters or tool conflicts. |
 | Plan a first campaign, choose channels, structure a test or decide where to spend | [Audience planning](references/audience-planning.md), [Payback](references/payback.md), and the selected platform; add [B2B growth](references/b2b-growth.md) for a sales-led journey. |
 | Daily/weekly report, period comparison, account anomaly | [Performance reports](references/performance-report.md) and the selected platform below. |
-| Google Search diagnosis, search terms, RSA submission, campaign or budget changes | [Google Ads](references/google-ads.md). |
+| Google keyword planning, paused Search builds, conversion goals, search terms, campaign or budget changes | [Google Ads](references/google-ads.md). |
 | Meta delivery, creative performance, lead costs, supported object and budget changes | [Meta Ads](references/meta-ads.md); new campaigns: [paused build and preview](references/meta-paused-build.md). |
 | TikTok GMV Max, Smart+ material or video analysis; supported Smart+ or GMV Max creation and exact budget changes | [TikTok Ads](references/tiktok-ads.md); preserve the specialty report and campaign type's actual scope. |
 | Reddit Ads account/campaign discovery, dated reports, or an exact campaign pause/resume | [Reddit Ads](references/reddit-ads.md). |

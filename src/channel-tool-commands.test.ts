@@ -333,3 +333,45 @@ test('shared Meta funding explains the platform wait without changing the submit
   assert.ok(messages.some(t => t.includes('31 seconds')));
   assert.equal(bodies.length, 1);
 });
+
+test('Google creation recovery status preserves IDs and never submits another mutation', async () => {
+  const createdResources = [
+    {
+      resourceName: 'customers/1234567890/campaigns/77',
+      kind: 'campaigns',
+      customerId: '1234567890',
+      operationIndex: 0,
+    },
+  ];
+  const bodies: unknown[] = [];
+  const messages: string[] = [];
+  const code = await runChannelToolCommand(
+    ['run', '--status', 'google-create-unknown'],
+    {
+      submit: async ({ body }) => {
+        bodies.push(body);
+        return {
+          output: {
+            operationId: 'google-create-unknown',
+            execution: { resultStatus: 'unknown' },
+            error: { createdResources },
+          },
+        };
+      },
+      output: (value) => messages.push(value),
+      diagnostic: () => {},
+    },
+  );
+  assert.equal(code, 2);
+  assert.deepEqual(bodies, [
+    {
+      capability: 'marketing-channels',
+      operation: 'status',
+      operationId: 'google-create-unknown',
+    },
+  ]);
+  assert.deepEqual(
+    JSON.parse(messages[0]!).output.error.createdResources,
+    createdResources,
+  );
+});
