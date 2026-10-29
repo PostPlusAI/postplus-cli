@@ -53,8 +53,13 @@ research step. Preserve source URL, observation date, country, and status.
 
 For a named brand, use existing discovery and page collection before ad collection:
 
-1. Take Facebook links from the official site when available. Otherwise search
-   the brand name, aliases or former names with `facebook-search`. Its
+1. Take Facebook links from the official site when available. If there is no
+   direct Facebook link, check the official social profiles linked by that site
+   (for example a YouTube About page) for a Facebook link before paying for a
+   broad name search. Preserve the official-site → social-profile → Facebook
+   link chain and verify the candidate below; a matching name alone is not proof.
+   If those first-party links do not resolve identity, search the brand name,
+   aliases or former names with `facebook-search`. Its
    `categories` input is a list of free-text search terms, not a taxonomy or a
    brand filter. Search results supply candidate page URLs, not verified identity.
    Prefer a candidate's `pageUrl` or page-specific `url`; a `facebookUrl` that

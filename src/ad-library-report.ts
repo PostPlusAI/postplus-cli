@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
+import { appendSavedMediaLinks } from './saved-media-delivery.js';
+import { resolveApiBaseUrlState } from './local-state.js';
 
 type Row = Record<string, unknown>;
 const obj = (x: unknown): Row =>
@@ -531,7 +533,7 @@ export async function runAdLibraryReport(
       payload: JSON.parse(await readFile(path, 'utf8')) as unknown,
     })),
   );
-  const html = renderAdReport(inputs);
+  const html = appendSavedMediaLinks(renderAdReport(inputs), inputs, (await resolveApiBaseUrlState()).value);
   await mkdir(dirname(output), { recursive: true });
   const temp = `${output}.${randomUUID()}.tmp`;
   try {

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
+import { resolveApiBaseUrlState } from './local-state.js';
 import {
   RESEARCH_ANALYSIS_SCHEMA,
   type ResearchAnalysis,
@@ -19,6 +20,7 @@ import {
   normalizeResearchReport,
   string,
 } from './research-report-model.js';
+import { appendSavedMediaLinks } from './saved-media-delivery.js';
 
 const esc = (value: unknown) =>
   string(value).replace(
@@ -318,7 +320,11 @@ export async function runResearchReport(
           report.items,
         )
       : undefined;
-  const html = renderResearchReport(report, analysis);
+  const html = appendSavedMediaLinks(
+    renderResearchReport(report, analysis),
+    inputs,
+    (await resolveApiBaseUrlState()).value,
+  );
   await mkdir(dirname(output), { recursive: true });
   const temp = `${output}.${randomUUID()}.tmp`;
   try {

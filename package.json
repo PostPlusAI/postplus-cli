@@ -9,6 +9,7 @@
     "build/account-binding-display.js",
     "build/ad-library.js",
     "build/ad-library-report.js",
+    "build/saved-media-delivery.js",
     "build/auth-lifecycle.js",
     "build/auth-login.js",
     "build/auth-session.js",
