@@ -9,6 +9,7 @@ import {
   normalizeAdReport,
   renderAdReport,
   reportCreativeGroupKey,
+  summarizeAdReport,
 } from './ad-library-report.js';
 import { runAdLibraryCommand } from './ad-library.js';
 
@@ -127,6 +128,287 @@ test('escapes source content and rejects executable or credentialed URLs', () =>
     a.snapshot.link_url = unsafe;
     assert.throws(() => renderAdReport([input([a])]));
   }
+});
+
+test('optional fbgeo card destinations keep every ad and creative without parent URL substitution', () => {
+  const records: any[] = Array.from({ length: 30 }, (_, i) => ad(String(i)));
+  const map = 'fbgeo://1.25,2.5,"Example map destination"';
+  records[29].snapshot.cards = Array.from({ length: 5 }, (_, i) => ({
+    title: `Map creative ${i}`,
+    body: `Map copy ${i}`,
+    link_url: map,
+    cta_text: 'Get directions',
+    images: [{ original_image_url: `https://example.test/map-${i}.png` }],
+  }));
+  const inputs = [input(records)];
+  const before = JSON.stringify(inputs);
+  const normalized = normalizeAdReport(inputs);
+  assert.equal(normalized.ads.length, 30);
+  const mapAd = normalized.ads[29]!;
+  assert.equal(mapAd.creatives.length, 5);
+  for (const [i, creative] of mapAd.creatives.entries()) {
+    assert.equal(creative.destinationState, 'unsupported_map');
+    assert.equal(creative.destination, '');
+    assert.equal(creative.body, `Map copy ${i}`);
+    assert.equal(creative.media[0]!.url, `https://example.test/map-${i}.png`);
+  }
+  const html = renderAdReport([input([records[29]])]);
+  assert.equal((html.match(/aria-disabled="true"/g) || []).length, 5);
+  assert.equal(
+    (html.match(/Map destination is not supported in this viewer/g) || [])
+      .length,
+    5,
+  );
+  assert.ok(!html.includes('fbgeo:'));
+  assert.ok(!html.includes('https://example.test/landing'));
+  assert.match(html, /Get directions/);
+  assert.equal(JSON.stringify(inputs), before);
+});
+
+test('unsupported map state applies to stored destinations while other invalid URLs still fail', () => {
+  const stored: any = {
+    name: 'stored.json',
+    payload: {
+      schemaVersion: 1,
+      items: [
+        {
+          archive_id: 'stored-map',
+          presentation: { common: { destinationUrl: 'fbgeo://1,2,"Example"' } },
+        },
+      ],
+    },
+  };
+  assert.equal(
+    normalizeAdReport([stored]).ads[0]!.creatives[0]!.destinationState,
+    'unsupported_map',
+  );
+  for (const invalid of [
+    'fbgeox://1,2',
+    'mailto:example@example.test',
+    'https://',
+    '/relative',
+    'not a URL',
+  ]) {
+    const record = ad();
+    record.snapshot.link_url = invalid;
+    assert.throws(() => normalizeAdReport([input([record])]));
+  }
+  for (const location of ['logo', 'source', 'media', 'poster', 'advertiser']) {
+    const record: any = ad();
+    if (location === 'logo')
+      record.snapshot.page_profile_picture_url = 'fbgeo://1,2';
+    if (location === 'source') record.ad_library_url = 'fbgeo://1,2';
+    if (location === 'media')
+      record.snapshot.videos[0].video_hd_url = 'fbgeo://1,2';
+    if (location === 'poster')
+      record.snapshot.videos[0].video_preview_image_url = 'fbgeo://1,2';
+    if (location === 'advertiser')
+      record.snapshot.page_profile_uri = 'fbgeo://1,2';
+    assert.throws(
+      () => normalizeAdReport([input([record])]),
+      /Unsafe report URL/,
+    );
+  }
+});
+
+test('advertiser page identity and page URL use actual source fields only', () => {
+  const fresh: any = ad();
+  fresh.snapshot.page_profile_uri = 'https://www.facebook.com/example';
+  const stored = {
+    name: 'stored.json',
+    payload: {
+      schemaVersion: 1,
+      items: [
+        {
+          archive_id: 'stored',
+          advertiser: {
+            name: 'Stored advertiser',
+            page_url: 'https://www.facebook.com/stored',
+          },
+        },
+      ],
+    },
+  };
+  const normalized = normalizeAdReport([input([fresh]), stored]);
+  assert.equal(normalized.ads[0]!.advertiserPageId, '99');
+  assert.equal(
+    normalized.ads[0]!.advertiserUrl,
+    'https://www.facebook.com/example',
+  );
+  assert.equal(normalized.ads[1]!.advertiserPageId, undefined);
+  assert.equal(
+    normalized.ads[1]!.advertiserUrl,
+    'https://www.facebook.com/stored',
+  );
+  const missing: any = ad('missing-page');
+  delete missing.page_id;
+  const missingAd = normalizeAdReport([input([missing])]).ads[0]!;
+  assert.equal(missingAd.advertiserPageId, undefined);
+  assert.equal(missingAd.advertiserUrl, undefined);
+  assert.equal(
+    summarizeAdReport([input([missing])]).advertisers[0]!.page_id,
+    null,
+  );
+  fresh.snapshot.page_profile_uri = 'https://user:pass@example.test';
+  assert.throws(() => normalizeAdReport([input([fresh])]), /Unsafe report URL/);
+});
+
+test('summary counts raw records, unique ads, verified cards, references and all source states', () => {
+  const stored = {
+    name: 'stored.json',
+    payload: {
+      schemaVersion: 1,
+      items: ['1', '2'].map((archive_id) => ({
+        archive_id,
+        page_id: '99',
+        advertiser: { name: 'Example' },
+        presentation: {
+          common: { destinationUrl: 'https://stored.example.test/path' },
+        },
+        media: [
+          {
+            kind: 'video',
+            url: 'https://example.test/shared.mp4',
+            content_sha256: 'a'.repeat(64),
+          },
+        ],
+      })),
+    },
+  };
+  const variant = ad('3');
+  variant.snapshot.body.text = 'Second variant';
+  const other = { ...ad('4'), page_id: '77', page_name: 'Other advertiser' };
+  const inputs = [
+    stored,
+    input([ad('3'), variant, other]),
+    input([]),
+    ...['failed', 'pending'].map((status) => ({
+      name: `${status}.json`,
+      payload: {
+        routeKey: 'facebook-ads-library',
+        status,
+        error: { message: `${status} source` },
+      },
+    })),
+  ];
+  const summary = summarizeAdReport(inputs);
+  assert.equal(summary.raw_records, 5);
+  assert.equal(summary.unique_ads, 4);
+  assert.equal(summary.cards, 3);
+  assert.equal(summary.media_references, 5);
+  assert.equal(summary.advertiser_total, 2);
+  assert.equal(summary.advertisers_shown, 2);
+  assert.equal(summary.summary_complete, true);
+  assert.deepEqual(summary.advertisers, [
+    {
+      page_id: '99',
+      name: 'Example',
+      ad_count: 3,
+      destination_domains: ['example.test', 'stored.example.test'],
+    },
+    {
+      page_id: '77',
+      name: 'Other advertiser',
+      ad_count: 1,
+      destination_domains: ['example.test'],
+    },
+  ]);
+  assert.equal(summary.sources.length, 5);
+  assert.deepEqual(
+    new Set(summary.sources.map((source) => source.state)),
+    new Set(['stored snapshots', 'completed', 'failed', 'pending']),
+  );
+  assert.equal(
+    summary.sources.find((source) => source.state === 'failed')!.note,
+    'failed source',
+  );
+  assert.deepEqual(summarizeAdReport(inputs), summary);
+});
+
+test('summary stays under 8KiB UTF8 and 20 whole advertisers without truncating identities', () => {
+  const records = Array.from({ length: 150 }, (_, i) => ({
+    ...ad(`ad-${i}`),
+    page_id: `page-${i}-${'9'.repeat(40)}`,
+    page_name: `Advertiser ${i} ${'中文名称'.repeat(25)}`,
+  }));
+  const inputs = [input(records)];
+  const before = JSON.stringify(inputs);
+  const summary = summarizeAdReport(inputs);
+  assert.equal(summary.raw_records, 150);
+  assert.equal(summary.unique_ads, 150);
+  assert.equal(summary.advertiser_total, 150);
+  assert.equal(summary.summary_complete, false);
+  assert.ok(summary.advertisers_shown > 0 && summary.advertisers_shown <= 20);
+  assert.equal(summary.advertisers_shown, summary.advertisers.length);
+  assert.ok(Buffer.byteLength(JSON.stringify(summary), 'utf8') <= 8 * 1024);
+  for (const advertiser of summary.advertisers) {
+    const record = records.find(
+      (record) => record.page_id === advertiser.page_id,
+    )!;
+    assert.ok(record);
+    assert.equal(advertiser.name, record.page_name);
+    assert.equal(advertiser.page_id, record.page_id);
+    assert.deepEqual(advertiser.destination_domains, ['example.test']);
+  }
+  assert.equal(JSON.stringify(inputs), before);
+  const smallRows = records
+    .slice(0, 25)
+    .map((record) => ({ ...record, page_name: 'Short name' }));
+  assert.equal(summarizeAdReport([input(smallRows)]).advertisers_shown, 20);
+});
+
+test('oversize source and advertiser summary records are omitted whole with completeness disclosed', () => {
+  const oversized: any = ad();
+  oversized.page_name = '文'.repeat(9_000);
+  const inputs = [
+    input([
+      oversized,
+      { ...ad('small'), page_id: '100', page_name: 'Fits whole' },
+    ]),
+    {
+      name: 'oversize-source-id',
+      payload: {
+        routeKey: 'facebook-ads-library',
+        status: 'failed',
+        error: { message: '文'.repeat(9_000) },
+      },
+    },
+  ];
+  const summary = summarizeAdReport(inputs);
+  assert.equal(summary.summary_complete, false);
+  assert.equal(summary.advertiser_total, 2);
+  assert.equal(summary.advertisers_shown, 1);
+  assert.equal(summary.advertisers[0]!.name, 'Fits whole');
+  assert.equal(summary.sources.length, 1);
+  assert.equal(summary.sources[0]!.name, 'fresh.json');
+  assert.ok(Buffer.byteLength(JSON.stringify(summary), 'utf8') <= 8 * 1024);
+});
+
+test('HTML distinguishes in-progress sources, failed sources, empty success and filter mismatch', () => {
+  const source = (status: string) => ({
+    name: `${status}.json`,
+    payload: { routeKey: 'facebook-ads-library', status },
+  });
+  assert.match(
+    renderAdReport([source('pending')]),
+    /Collection is still in progress/,
+  );
+  assert.match(
+    renderAdReport([source('failed')]),
+    /Collection failed or was canceled/,
+  );
+  assert.match(
+    renderAdReport([input([])]),
+    /Collection completed with no returned ads/,
+  );
+  assert.match(
+    renderAdReport([source('failed'), source('running')]),
+    /Some sources failed; review their errors/,
+  );
+  assert.match(
+    renderAdReport([input([ad()])]),
+    /No ads match the current filters/,
+  );
 });
 test('offline command accepts repeated inputs, preserves source files and publishes HTML atomically', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ad-report-'));
@@ -443,7 +725,6 @@ test('stored videos use only their matching thumbnail and reject unsafe poster U
   payload.items[0]!.media[5]!.url = 'javascript:alert(1)';
   assert.throws(() => renderAdReport(inputs), /Unsafe report URL/);
 });
-
 
 test('timing research signal uses observation time and never equates elapsed time with profitability', () => {
   const base = { start: '2026-10-01T00:00:00Z', end: '', observed: '2026-10-08T00:00:00Z', status: 'active' };

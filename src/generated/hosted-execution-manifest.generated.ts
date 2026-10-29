@@ -114,7 +114,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--query",
               "type": "string",
               "required": false,
-              "description": "Brand keyword; use query OR page ID."
+              "description": "Keyword discovery by product, problem, offer or brand mention; does not select an advertiser. Use query OR verified page ID."
             },
             {
               "name": "page_id",
@@ -122,7 +122,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--page-id",
               "type": "string",
               "required": false,
-              "description": "Exact numeric Meta advertiser Page ID; use page ID OR query."
+              "description": "Numeric Meta Page ID verified against the requested brand; discover with facebook-search and facebook-pages first. Use page ID OR query."
             },
             {
               "name": "sort",
@@ -384,7 +384,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--category",
               "type": "string",
               "required": true,
-              "description": "Search category; repeat for more than one.",
+              "description": "Free-text Facebook search term, such as a brand name or product category; not a taxonomy filter. Repeat for more terms.",
               "repeatable": true
             },
             {
