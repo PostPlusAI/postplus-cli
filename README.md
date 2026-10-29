@@ -70,7 +70,10 @@ eligible subscription; research and media generation can have separate charges.
 
 Research and generated media use the same saved-file backend as the chat connector.
 `--wait` waits for saving as well as the final charge. An interrupted save resumes
-on the original run without another collection or generation. Permanent source
+on the original run without another collection or generation. Explicitly reopening
+a completed research checkpoint with `--resume-from` reads the original run and
+can save its still-available legacy media; it never submits the collection again.
+Permanent source
 failures are reported instead of waiting forever.
 
 Research HTML exports include a **Saved media** section. Those links reopen the
