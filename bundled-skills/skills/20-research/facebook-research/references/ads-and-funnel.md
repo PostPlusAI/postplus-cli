@@ -57,9 +57,12 @@ For a named brand, use existing discovery and page collection before ad collecti
    the brand name, aliases or former names with `facebook-search`. Its
    `categories` input is a list of free-text search terms, not a taxonomy or a
    brand filter. Search results supply candidate page URLs, not verified identity.
-2. Read candidate URLs with `facebook-pages`. Preserve returned `pageId`,
-   `pageUrl`, `website` and `pageAdLibrary` when present. Keep numeric Page IDs as
-   strings. Do not invent a missing ID from the page name or ask the user to find it.
+   Prefer a candidate's `pageUrl` or page-specific `url`; a `facebookUrl` that
+   names the search page is search provenance, not the candidate page.
+2. Read candidate URLs with `facebook-pages`. Preserve returned `pageId` and
+   `facebookId` separately from `pageAdLibrary.id`, alongside `pageUrl` and
+   `website`. Keep numeric IDs as strings. Do not invent a missing ID from the
+   page name or ask the user to find it.
 3. Verify the association using sourced first-party evidence, such as the brand's
    official site linking to that Facebook page, or a page website linked to the
    verified product. A matching name or matching returned Page ID alone does not
@@ -68,10 +71,16 @@ For a named brand, use existing discovery and page collection before ad collecti
    why. Destination domains may legitimately be regional, redirected, affiliated
    or agency-managed: investigate the relationship rather than requiring exact
    domain equality or accepting every similar domain.
-4. Collect ads by each verified Page ID within scope. Compare returned advertiser
-   Page IDs with the requested ID; preserve a mismatch as a source error and do
-   not attribute those ads to the requested advertiser. A brand mention in another
-   advertiser's copy is comparison evidence, not that brand's own advertising.
+4. Use the verified `pageAdLibrary.id` as the advertiser ID for ad collection
+   when returned. `pageId` or `facebookId` may be profile IDs that differ from
+   the ad-library advertiser ID; do not substitute them when they differ. If no
+   ad-library ID is returned, use an existing numeric Page ID only with sourced evidence
+   associating it with the requested brand.
+5. Collect ads by that verified advertiser ID within scope. Compare returned
+   advertiser Page IDs with the requested ID; preserve a mismatch as a source
+   error and do not attribute those ads to the requested advertiser. A brand
+   mention in another advertiser's copy is comparison evidence, not that brand's
+   own advertising.
 
 If grounded discovery cannot establish identity, report **identity unresolved**
 with the candidates and missing association evidence. Continue other independent

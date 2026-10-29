@@ -122,7 +122,7 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               "flag": "--page-id",
               "type": "string",
               "required": false,
-              "description": "Numeric Meta Page ID verified against the requested brand; discover with facebook-search and facebook-pages first. Use page ID OR query."
+              "description": "Numeric advertiser Page ID verified against the requested brand. Prefer facebook-pages pageAdLibrary.id when present; pageId/facebookId may identify a different profile. Use page ID OR query."
             },
             {
               "name": "sort",
