@@ -70,7 +70,7 @@
     {
       "name": "media-analysis",
       "path": "skills/40-creative/media-analysis/SKILL.md",
-      "contentHash": "6c438210505cdf6c1cdff441b2398e1c42958c151082a1f078ceff6637a48f1f"
+      "contentHash": "5f73c60ece4c0a16c49f5df2d284f173badda6fa4e0f8bc6cb8799d65e920272"
     },
     {
       "name": "pinterest-search",
@@ -101,6 +101,11 @@
       "name": "social",
       "path": "skills/50-publishing/social/SKILL.md",
       "contentHash": "d01d0a7f9e736a9d5438ca77c1a3d45515207d3d87c1481ce9d9d7231a470352"
+    },
+    {
+      "name": "street-interview",
+      "path": "skills/40-creative/street-interview/SKILL.md",
+      "contentHash": "f1a23e2c12d4f1c000cbd415c7c9242e1b9a20e00b079d510d94a5280c3fa6f7"
     },
     {
       "name": "tiktok-research",

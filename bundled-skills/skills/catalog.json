@@ -467,6 +467,17 @@
       "supportedModels": []
     },
     {
+      "familyId": "media-production",
+      "familyName": "Media and Creative Production",
+      "name": "street-interview",
+      "description": "Adapt user-supplied street-interview reference videos to new products and people. Deliver detailed shot scripts or complete AI videos, including blind tests, problem-to-replacement interviews, and playful street challenges.",
+      "category": "advertise",
+      "example": "Adapt this street-interview reference into a shot script for our product, preserving the full exchange.",
+      "path": "skills/40-creative/street-interview/SKILL.md",
+      "status": "released",
+      "supportedModels": []
+    },
+    {
       "familyId": "tiktok",
       "familyName": "TikTok",
       "name": "tiktok-research",
