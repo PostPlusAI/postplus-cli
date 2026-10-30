@@ -68,6 +68,22 @@ content or change. If the result is unknown, the agent checks the original
 operation instead of sending a duplicate. Channel access is covered by your
 eligible subscription; research and media generation can have separate charges.
 
+## Saved results
+
+Research and generated media use the same saved-file backend as the chat connector.
+`--wait` waits for saving as well as the final charge. An interrupted save resumes
+on the original run without another collection or generation. Explicitly reopening
+a completed research checkpoint with `--resume-from` reads the original run and
+can save its still-available legacy media; it never submits the collection again.
+Permanent source
+failures are reported instead of waiting forever.
+
+Research HTML exports include a **Saved media** section. Those links reopen the
+owned files through your configured PostPlus site after sign-in, even when an
+original source preview has expired. Offline HTML previews themselves cannot
+renew private playback access. Keep the original result JSON and its saved
+`postplus-media://` references to retrieve the same files with the CLI.
+
 ## Maintenance
 
 Your agent continues the task while the CLI handles a required compatible update.
