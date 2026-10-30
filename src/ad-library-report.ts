@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
-import { appendSavedMediaLinks } from './saved-media-delivery.js';
+
 import { resolveApiBaseUrlState } from './local-state.js';
+import { appendSavedMediaLinks } from './saved-media-delivery.js';
 
 type Row = Record<string, unknown>;
 const obj = (x: unknown): Row =>
@@ -415,22 +416,33 @@ function emptyReportMessage(ads: ReportAd[], sources: ReportSource[]): string {
       ].includes(source.state),
   );
   if (pending)
-    return `Collection is still in progress.${failed ? ' Some sources failed; review their errors below.' : ''} This is not evidence of no ads.`;
+    return `Collection is still in progress.${failed ? ' Some sources failed; some results are unavailable.' : ''} This is not evidence of no ads.`;
   if (failed)
-    return 'No ads are available from these sources. Collection failed or was canceled; review the errors below. This is not evidence of no ads.';
+    return 'No ads are available from these sources. Collection failed or was canceled; some results are unavailable. This is not evidence of no ads.';
   return 'Collection completed with no returned ads. This does not establish that no ads exist.';
 }
 
-export function adTimingSignal(ad: Pick<ReportAd, 'start' | 'end' | 'observed' | 'status'>) {
+export function adTimingSignal(
+  ad: Pick<ReportAd, 'start' | 'end' | 'observed' | 'status'>,
+) {
   const start = Date.parse(ad.start);
   const observed = Date.parse(ad.observed);
-  if (!Number.isFinite(start) || !Number.isFinite(observed) || observed < start) return null;
+  if (!Number.isFinite(start) || !Number.isFinite(observed) || observed < start)
+    return null;
   const elapsedDays = Math.floor((observed - start) / 86_400_000);
   const end = Date.parse(ad.end);
-  const reportedSpanDays = ad.status === 'inactive' && Number.isFinite(end) && end >= start && end <= observed
-    ? Math.floor((end - start) / 86_400_000) : null;
-  return { elapsedDays, reportedSpanDays,
-    prioritize: ad.status === 'active' && observed - start > 7 * 86_400_000 };
+  const reportedSpanDays =
+    ad.status === 'inactive' &&
+    Number.isFinite(end) &&
+    end >= start &&
+    end <= observed
+      ? Math.floor((end - start) / 86_400_000)
+      : null;
+  return {
+    elapsedDays,
+    reportedSpanDays,
+    prioritize: ad.status === 'active' && observed - start > 7 * 86_400_000,
+  };
 }
 
 function timingMarkup(ad: ReportAd): string {
@@ -441,6 +453,13 @@ function timingMarkup(ad: ReportAd): string {
 
 export function renderAdReport(inputs: ReportInput[]): string {
   const { ads, sources } = normalizeAdReport(inputs);
+  const sourceNotices = [
+    ...new Set(
+      sources
+        .filter((source) => source.note && source.state !== 'completed')
+        .map((source) => source.note),
+    ),
+  ];
   const brands = [...new Map(ads.map((a) => [a.advertiserId, a])).values()];
   const logo = (a: ReportAd) =>
     a.logo
@@ -488,7 +507,7 @@ export function renderAdReport(inputs: ReportInput[]): string {
   };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>PostPlus · Ad research</title><style>
 *{box-sizing:border-box}body{margin:0;background:#f0f2f5;color:#1c1e21;font:14px/1.45 Arial,Helvetica,sans-serif}header{background:#fff;border-bottom:1px solid #dadde1}header>div,main{max-width:1600px;margin:auto;padding:24px 32px}h1{font-size:28px;letter-spacing:-.8px;margin:8px 0 12px}p{margin:10px 0}.muted,small{color:#65676b}.brands,.filters{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}button,input,select{font:inherit;padding:10px 14px;border:1px solid #ccd0d5;border-radius:6px;background:#fff;color:inherit}button{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px}button:hover{background:#f0f2f5}button[aria-pressed=true]{border-color:#1877f2;background:#e7f0fd;color:#165dc0}input{flex:1;min-width:180px}:focus-visible{outline:3px solid #1877f2;outline-offset:3px}.logo{width:36px;height:36px;object-fit:contain;border-radius:50%;flex-shrink:0;border:1px solid #e4e6eb}.missing{display:grid;place-items:center;background:#eee}.brands .logo{width:28px;height:28px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;align-items:start}.card{min-width:0;background:#fff;border:1px solid #d4d6d9;border-radius:8px;padding:16px 12px 12px;box-shadow:0 1px 4px #00000018}.meta{padding:0 4px 16px;font-size:13px;line-height:1.55}.meta p{margin:8px 0}.status{display:inline-flex;align-items:center;gap:5px;padding:0 7px;background:#eceef0;border-radius:12px;font-weight:600;text-transform:capitalize;line-height:20px}.active{background:#e7f1e5;color:#006b50}.inactive{background:#eceef0;color:#65676b}.status-dot{width:12px;height:12px;display:block;flex:none}.status{font-size:12px;height:20px;padding:0 6px;gap:6px}.brands{margin-top:0}.platforms{display:flex;align-items:center;gap:7px;margin:6px 0}.platform-icon{width:14px;height:14px;color:#45484b}.checked{font-size:11px;color:#65676b;margin-top:7px}.collation{font-size:14px}.creative-controls{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px;border-radius:6px;background:#f0f2f5;padding:5px 8px}.creative-controls button{padding:2px 10px;border:0;background:transparent;font-size:21px;line-height:25px}.creative-controls output{font-size:12px}.creative-frame{border-top:1px solid #dadde1;padding-top:16px}.variant{border:1px solid #dadde1;border-radius:6px;overflow:hidden;box-shadow:0 1px 4px #00000012}.identity{display:flex;gap:8px;align-items:center;padding:12px 10px 8px}.identity strong{font-size:14px;line-height:18px}.sponsored{display:block;color:#65676b;font-size:12px;line-height:16px;font-weight:600}.copy{padding:0 10px 10px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.4}.media{background:#f0f2f5}.media img,.media video{display:block;width:100%;height:280px;object-fit:contain;margin:auto}.media>*+*{border-top:2px solid #fff}.destination{display:flex;align-items:center;gap:10px;padding:10px;background:#fff;min-height:58px}.destination-copy{flex:1;min-width:0;overflow-wrap:anywhere}.domain{text-transform:uppercase;color:#65676b;font-size:10px;line-height:1.4;margin-bottom:2px}.destination-title{font-size:12px;line-height:1.4}.description{color:#65676b;font-size:11px;line-height:1.45;margin-top:3px}.cta{flex-shrink:0;background:#f0f2f5;border-radius:6px;color:#1c1e21;text-decoration:none;padding:10px 14px;font-size:14px;line-height:20px;max-width:45%;text-align:center;overflow-wrap:anywhere}.cta:hover{background:#e4e6eb}.source{margin:10px 4px 0;font-size:11px}.source a{color:#65676b;text-decoration:none}.source a:hover{text-decoration:underline}.counts{margin:0 0 18px;font-size:16px;font-weight:600}.notice{border:1px solid #d6dce1;background:#fff;padding:12px;border-radius:6px}.sources{margin-top:36px;overflow-wrap:anywhere}.sources h2{font-size:18px}[hidden]{display:none!important}@media(min-width:1450px){.media img,.media video{height:320px}}@media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}header>div,main{padding:20px}}@media(max-width:600px){.grid{grid-template-columns:minmax(0,1fr)}header>div,main{padding:16px}.filters>*{width:100%}.media img,.media video{height:300px}}
-</style></head><body><header><div><nav class="brands" aria-label="Filter by advertiser"><button type="button" aria-pressed="true" data-brand="">All advertisers</button>${brands.map((a) => `<button type="button" aria-pressed="false" data-brand="${esc(a.advertiserId)}">${logo(a)}${esc(a.advertiser)} <small>${ads.filter((b) => b.advertiserId === a.advertiserId).length}</small></button>`).join('')}</nav><div class="filters"><input id="query" type="search" aria-label="Search ad text or advertiser" placeholder="Search ad text or advertiser"><select id="status" aria-label="Observed ad status"><option value="">All statuses</option><option>active</option><option>inactive</option><option>unknown</option></select><select id="media" aria-label="Media type"><option value="">All media</option><option>video</option><option>image</option></select></div></div></header><main><p id="count" class="counts" role="status">${ads.length} ads shown</p><p id="empty" class="notice" ${ads.length ? 'hidden' : ''}>${esc(emptyReportMessage(ads, sources))}</p><div class="grid">${ads.map((a) => `<article class="card" data-ad="${esc(a.id)}" data-group="${esc(reportCreativeGroupKey(a))}" data-brand="${esc(a.advertiserId)}" data-status="${esc(a.status)}" data-media="${esc(a.creatives.flatMap((c) => c.media.map((m) => m.kind)).join(' '))}"><div class="meta"><span class="status ${a.status}"><svg class="status-dot" aria-hidden="true" viewBox="0 0 16 16"><circle cx="8" cy="8" r="8" fill="currentColor"/><path d="${a.status === 'active' ? 'M4.2 8.1 6.7 10.5 11.8 5.3' : 'M4.5 8h7'}" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>${a.status}</span><p>Library ID: ${esc(a.id)}</p>${a.start ? `<div>Started running on ${esc(calendarDate(a.start))}</div>` : ''}${a.end && a.status === 'inactive' ? `<div>Source-reported end: ${esc(calendarDate(a.end))}</div>` : ''}${a.platforms.length ? `<div class="platforms"><span>Platforms</span>${a.platforms.map(platform).join('')}</div>` : ''}${a.collatedAds ? `<p class="collation"><strong>${a.collatedAds} ads</strong> use this creative and text</p>` : ''}<div class="checked">Checked: ${esc(a.observed || 'Not provided')}</div>${timingMarkup(a)}${a.creatives.length > 1 ? `<div class="creative-controls" aria-label="Creative variants"><button type="button" data-step="-1" aria-label="Previous creative">‹</button><output aria-live="polite">Creative 1 of ${a.creatives.length}</output><button type="button" data-step="1" aria-label="Next creative">›</button></div>` : ''}</div><div class="creative-frame">${a.creatives.map((c, i) => creative(a, c, i)).join('')}</div><div class="source">${link(a.source, 'View original ad ↗')}</div></article>`).join('')}</div><section class="sources"><h2>Collection outcomes</h2><p class="muted">Media loads from source URLs when viewed and may expire. The report itself needs no external scripts.</p>${sources.map((s) => `<p class="notice"><strong>${esc(s.name)}</strong> · ${esc(s.state)} · ${s.count === null ? 'No completed result' : `${s.count} returned records`}${s.note ? `<br>${esc(s.note)}` : ''}</p>`).join('')}</section></main><script>
+</style></head><body><header><div><nav class="brands" aria-label="Filter by advertiser"><button type="button" aria-pressed="true" data-brand="">All advertisers</button>${brands.map((a) => `<button type="button" aria-pressed="false" data-brand="${esc(a.advertiserId)}">${logo(a)}${esc(a.advertiser)} <small>${ads.filter((b) => b.advertiserId === a.advertiserId).length}</small></button>`).join('')}</nav><div class="filters"><input id="query" type="search" aria-label="Search ad text or advertiser" placeholder="Search ad text or advertiser"><select id="status" aria-label="Observed ad status"><option value="">All statuses</option><option>active</option><option>inactive</option><option>unknown</option></select><select id="media" aria-label="Media type"><option value="">All media</option><option>video</option><option>image</option></select></div></div></header><main><p id="count" class="counts" role="status">${ads.length} ads shown</p><p id="empty" class="notice" ${ads.length ? 'hidden' : ''}>${esc(emptyReportMessage(ads, sources))}</p><div class="grid">${ads.map((a) => `<article class="card" data-ad="${esc(a.id)}" data-group="${esc(reportCreativeGroupKey(a))}" data-brand="${esc(a.advertiserId)}" data-status="${esc(a.status)}" data-media="${esc(a.creatives.flatMap((c) => c.media.map((m) => m.kind)).join(' '))}"><div class="meta"><span class="status ${a.status}"><svg class="status-dot" aria-hidden="true" viewBox="0 0 16 16"><circle cx="8" cy="8" r="8" fill="currentColor"/><path d="${a.status === 'active' ? 'M4.2 8.1 6.7 10.5 11.8 5.3' : 'M4.5 8h7'}" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>${a.status}</span><p>Library ID: ${esc(a.id)}</p>${a.start ? `<div>Started running on ${esc(calendarDate(a.start))}</div>` : ''}${a.end && a.status === 'inactive' ? `<div>Source-reported end: ${esc(calendarDate(a.end))}</div>` : ''}${a.platforms.length ? `<div class="platforms"><span>Platforms</span>${a.platforms.map(platform).join('')}</div>` : ''}${a.collatedAds ? `<p class="collation"><strong>${a.collatedAds} ads</strong> use this creative and text</p>` : ''}<div class="checked">Checked: ${esc(a.observed || 'Not provided')}</div>${timingMarkup(a)}${a.creatives.length > 1 ? `<div class="creative-controls" aria-label="Creative variants"><button type="button" data-step="-1" aria-label="Previous creative">‹</button><output aria-live="polite">Creative 1 of ${a.creatives.length}</output><button type="button" data-step="1" aria-label="Next creative">›</button></div>` : ''}</div><div class="creative-frame">${a.creatives.map((c, i) => creative(a, c, i)).join('')}</div><div class="source">${link(a.source, 'View original ad ↗')}</div></article>`).join('')}</div>${sourceNotices.length ? `<div class="sources">${sourceNotices.map((note) => `<p class="notice">${esc(note)}</p>`).join('')}</div>` : ''}</main><script>
 const cards=[...document.querySelectorAll('.card')],buttons=[...document.querySelectorAll('[data-brand][aria-pressed]')];let brand='';
 const groups=new Map(),selection=new Map();for(const card of cards){card.dataset.search=card.textContent.toLowerCase();const key=card.dataset.group;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(card)}for(const [key,members] of groups){if(members.length<2)continue;for(const card of members){const control=document.createElement('select');control.className='ad-group';control.setAttribute('aria-label','Ads using the same video');control.style.cssText='width:100%;margin-bottom:12px';control.addEventListener('change',()=>{selection.set(key,control.value);filter()});card.prepend(control)}}
 function showCreative(card,index){const variants=[...card.querySelectorAll('.variant')];variants.forEach((v,i)=>{v.hidden=i!==index;if(v.hidden)v.querySelectorAll('video').forEach(video=>video.pause())});card.dataset.current=String(index);const output=card.querySelector('.creative-controls output');if(output)output.textContent='Creative '+(index+1)+' of '+variants.length}
@@ -533,7 +552,11 @@ export async function runAdLibraryReport(
       payload: JSON.parse(await readFile(path, 'utf8')) as unknown,
     })),
   );
-  const html = appendSavedMediaLinks(renderAdReport(inputs), inputs, (await resolveApiBaseUrlState()).value);
+  const html = appendSavedMediaLinks(
+    renderAdReport(inputs),
+    inputs,
+    (await resolveApiBaseUrlState()).value,
+  );
   await mkdir(dirname(output), { recursive: true });
   const temp = `${output}.${randomUUID()}.tmp`;
   try {

@@ -50,6 +50,10 @@ test('retains 720 ads beyond request page sizes and all creative variants, dedup
   assert.match(html, /Checked:/);
   assert.match(html, /aria-label="FACEBOOK"/);
   assert.match(html, /aria-label="INSTAGRAM"/);
+  assert.doesNotMatch(
+    html,
+    /Collection outcomes|Media loads from source URLs|external scripts|fresh\.json|returned records/,
+  );
 });
 test('stored results normalize with correct observation, relative public logos and pagination disclosure', () => {
   const result = {
@@ -92,8 +96,14 @@ test('failed and pending outcomes are explicit, unknown payloads and missing ite
         },
       },
     ]);
-    assert.match(html, new RegExp(status));
+    assert.match(
+      html,
+      status === 'failed'
+        ? /Collection failed or was canceled/
+        : /Collection is still in progress/,
+    );
     assert.match(html, /Provider rejected request/);
+    assert.doesNotMatch(html, /operation\.json|Collection outcomes/);
   }
   assert.throws(
     () => normalizeAdReport([{ name: 'x', payload: {} }]),
@@ -403,7 +413,7 @@ test('HTML distinguishes in-progress sources, failed sources, empty success and 
   );
   assert.match(
     renderAdReport([source('failed'), source('running')]),
-    /Some sources failed; review their errors/,
+    /Some sources failed; some results are unavailable/,
   );
   assert.match(
     renderAdReport([input([ad()])]),
@@ -727,16 +737,45 @@ test('stored videos use only their matching thumbnail and reject unsafe poster U
 });
 
 test('timing research signal uses observation time and never equates elapsed time with profitability', () => {
-  const base = { start: '2026-10-01T00:00:00Z', end: '', observed: '2026-10-08T00:00:00Z', status: 'active' };
-  assert.deepEqual(adTimingSignal(base), { elapsedDays: 7, reportedSpanDays: null, prioritize: false });
-  assert.equal(adTimingSignal({ ...base, observed: '2026-10-09T00:00:00Z' })?.prioritize, true);
-  for (const status of ['inactive', 'unknown']) assert.equal(adTimingSignal({ ...base, status, observed: '2026-10-19' })?.prioritize, false);
+  const base = {
+    start: '2026-10-01T00:00:00Z',
+    end: '',
+    observed: '2026-10-08T00:00:00Z',
+    status: 'active',
+  };
+  assert.deepEqual(adTimingSignal(base), {
+    elapsedDays: 7,
+    reportedSpanDays: null,
+    prioritize: false,
+  });
+  assert.equal(
+    adTimingSignal({ ...base, observed: '2026-10-09T00:00:00Z' })?.prioritize,
+    true,
+  );
+  for (const status of ['inactive', 'unknown'])
+    assert.equal(
+      adTimingSignal({ ...base, status, observed: '2026-10-19' })?.prioritize,
+      false,
+    );
   assert.equal(adTimingSignal({ ...base, observed: '' }), null);
   assert.equal(adTimingSignal({ ...base, start: '2026-11-01' }), null);
   assert.equal(adTimingSignal({ ...base, start: '' }), null);
-  assert.equal(adTimingSignal({ ...base, status: 'inactive', end: '2026-10-04' })?.reportedSpanDays, 3);
-  assert.equal(adTimingSignal({ ...base, status: 'inactive', end: '2026-12-01' })?.reportedSpanDays, null);
-  const html = renderAdReport([input([{ ...ad(), start_date: Date.parse('2026-10-01') / 1000 }])]);
+  assert.equal(
+    adTimingSignal({ ...base, status: 'inactive', end: '2026-10-04' })
+      ?.reportedSpanDays,
+    3,
+  );
+  assert.equal(
+    adTimingSignal({ ...base, status: 'inactive', end: '2026-12-01' })
+      ?.reportedSpanDays,
+    null,
+  );
+  const html = renderAdReport([
+    input([{ ...ad(), start_date: Date.parse('2026-10-01') / 1000 }]),
+  ]);
   assert.match(html, /Elapsed since reported start: 11 days at observation/);
-  assert.match(html, /does not establish uninterrupted delivery, learning-phase completion, or positive ROAS/);
+  assert.match(
+    html,
+    /does not establish uninterrupted delivery, learning-phase completion, or positive ROAS/,
+  );
 });
