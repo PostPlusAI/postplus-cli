@@ -299,7 +299,11 @@ function project(
               ? 'video'
               : row.type === 'Image'
                 ? 'image'
-                : 'unknown',
+                : platform === 'tiktok' &&
+                    kind === 'content' &&
+                    videoMeta.format === 'mp4'
+                  ? 'video'
+                  : 'unknown',
     tags,
     text,
     date: first(row.timestamp, row.createTimeISO, row.createTime),
