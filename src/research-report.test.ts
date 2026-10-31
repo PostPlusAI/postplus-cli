@@ -65,6 +65,38 @@ const analysis = () => ({
   ],
 });
 
+test('declared TikTok MP4 content remains video without a direct file URL and preserves explicit media types', () => {
+  const mp4 = { format: 'mp4', duration: 29, width: 720, height: 1280 };
+  const rows = [
+    { ...video('901'), isSlideshow: false, videoMeta: mp4, mediaUrls: [] },
+    { ...video('902'), videoMeta: mp4 },
+    { ...video('903'), isSlideshow: true, videoMeta: mp4 },
+    { ...video('904'), isSlideshow: false },
+    { ...video('905'), type: 'Image', videoMeta: mp4 },
+    { ...video('906'), type: 'Video' },
+    { ...video('907'), productType: 'clips', videoMeta: mp4 },
+  ];
+  const report = normalizeResearchReport([
+    input('tiktok-videos', rows),
+    input('instagram-posts', [{ id: '908', videoMeta: mp4 }], 'instagram.json'),
+  ]);
+  assert.deepEqual(
+    report.items.map((item) => item.mediaFormat),
+    [
+      'video',
+      'video',
+      'slideshow',
+      'unknown',
+      'image',
+      'video',
+      'reel',
+      'unknown',
+    ],
+  );
+  assert.ok(!report.items[0]!.video);
+  assert.deepEqual(report.items[0]!.images, []);
+});
+
 test('projects both platforms, profile snapshots and actual zeros without fabricating missing metrics', () => {
   const report = normalizeResearchReport([
     ...inputs(),
