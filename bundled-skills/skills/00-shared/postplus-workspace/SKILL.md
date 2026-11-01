@@ -117,6 +117,8 @@ Follow [stage-gates.md](references/stage-gates.md). Run the workspace entrypoint
 local execution. Stages: onboarding, research, strategy, test, production, launch,
 learn. `BLOCKED` stops the affected stage; local `READY` never replaces current
 prices, balance, provider validation, authorization or live state.
+For campaign stages, pass `--campaign <intended-campaign-slug>` and confirm the
+returned campaign matches the intended one before using its readiness result.
 Use [uncertainty-policy.md](references/uncertainty-policy.md) for material gaps.
 Save confirmed results, actual cost, chosen brand/version and next actions in
 the relevant cloud record or requested workspace. Explain blockers and the next

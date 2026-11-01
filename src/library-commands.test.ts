@@ -174,8 +174,11 @@ test('website collection returns a review proposal through the same library acti
     { action: 'preview_brand_website', website: 'https://postplus.io' },
   );
 });
-test('saved Web outputs recover only by their original task identity',async()=>{
-  assert.deepEqual(await parseLibraryCommand(['recover-task','original-task','--json']),{action:'recover_task_outputs',task_id:'original-task'});
+test('saved Web outputs recover only by their original task identity', async () => {
+  assert.deepEqual(
+    await parseLibraryCommand(['recover-task', 'original-task', '--json']),
+    { action: 'recover_task_outputs', task_id: 'original-task' },
+  );
 });
 test('authentication and compatibility failures retain the outer command recovery', async () => {
   const failure = new Error('Authentication requires sign-in');
@@ -190,4 +193,76 @@ test('authentication and compatibility failures retain the outer command recover
     (error) => error === failure,
   );
   assert.equal(output, '');
+});
+
+for (const [state, expectedExit] of [
+  ['completed', 0],
+  ['partial', 1],
+  ['failed', 1],
+  ['unknown', 2],
+  [undefined, 2],
+] as const) {
+  test(`Web output recovery ${state} preserves receipts and reports its actual outcome`, async () => {
+    const payload = {
+      task_id: 'original-task',
+      registration: {
+        state,
+        retryable: true,
+        entries: [
+          {
+            reference: 'postplus-media://uploads/original/file.png',
+            asset_id: 'saved-file',
+          },
+          {
+            reference: 'postplus-media://uploads/original/missing.png',
+            code: 'library_storage_unavailable',
+            retryable: true,
+          },
+        ],
+      },
+    };
+    let calls = 0,
+      output = '';
+    const exit = await runLibraryCommand(
+      ['recover-task', 'original-task', '--json'],
+      {
+        request: async (body) => {
+          calls++;
+          assert.deepEqual(body, {
+            action: 'recover_task_outputs',
+            task_id: 'original-task',
+          });
+          return Response.json(payload);
+        },
+        output: (text) => {
+          output += text;
+        },
+      },
+    );
+    assert.equal(exit, expectedExit);
+    assert.equal(calls, 1);
+    assert.deepEqual(JSON.parse(output), JSON.parse(JSON.stringify(payload)));
+  });
+}
+
+test('help-like search and name values execute the intended command', async () => {
+  for (const args of [
+    ['assets', '--query', 'help'],
+    ['rename', 'original-file', '--revision', '1', '--name', 'help'],
+    ['collection-create', 'original-collection', '--name', '-h'],
+  ]) {
+    let calls = 0;
+    assert.equal(
+      await runLibraryCommand(args, {
+        request: async (body) => {
+          calls++;
+          assert.deepEqual(body, await parseLibraryCommand(args));
+          return Response.json({ saved: true });
+        },
+        output: () => {},
+      }),
+      0,
+    );
+    assert.equal(calls, 1);
+  }
 });

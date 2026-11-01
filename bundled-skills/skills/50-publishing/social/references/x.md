@@ -66,8 +66,9 @@ time requires an implemented scheduler rather than an invented argument.
 Upload the user's local file through `postplus media-file upload` and preserve
 its complete returned media reference. Inspect `TWITTER_UPLOAD_MEDIA` for a small
 image, or `TWITTER_UPLOAD_LARGE_MEDIA` for a GIF, video or larger image. Both have
-the `media` file slot. Supply an input JSON containing the chosen schema-defined
-options and a media-map file:
+the `media` file slot. Put the chosen non-media schema options in `x-upload.json`
+(use `{}` when no options are needed). Put only the media mapping in
+`x-media-map.json`:
 
 ```json
 {"media":"<complete owned PostPlus media reference>"}

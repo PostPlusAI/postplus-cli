@@ -86,7 +86,9 @@ export async function parseLibraryCommand(
   };
   let body: Record<string, unknown>;
   switch (action) {
-    case 'recover-task':body={action:'recover_task_outputs',task_id:id()};break;
+    case 'recover-task':
+      body = { action: 'recover_task_outputs', task_id: id() };
+      break;
     case 'assets':
       body = {
         action: 'assets',
@@ -255,7 +257,12 @@ export async function runLibraryCommand(
   } = {},
 ): Promise<number> {
   const output = deps.output ?? ((text: string) => process.stdout.write(text));
-  if (!args.length || args.some((v) => ['help', '--help', '-h'].includes(v))) {
+  if (
+    !args.length ||
+    args[0] === 'help' ||
+    args[0] === '-h' ||
+    args.includes('--help')
+  ) {
     output(help);
     return 0;
   }
@@ -289,5 +296,12 @@ export async function runLibraryCommand(
     return 2;
   }
   output(`${JSON.stringify(payload, null, 2)}\n`);
-  return response.ok ? 0 : 1;
+  if (!response.ok) return 1;
+  if (body.action === 'recover_task_outputs') {
+    const state = (payload as { registration?: { state?: unknown } } | null)
+      ?.registration?.state;
+    if (state === 'completed') return 0;
+    return state === 'partial' || state === 'failed' ? 1 : 2;
+  }
+  return 0;
 }
