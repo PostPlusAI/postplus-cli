@@ -33,6 +33,33 @@ scalar account or object field identifies that target. A connection target is
 accepted for other argument-bound requests; never invent a field solely to
 attach a target pair.
 
+## Use the declared billing mode
+
+Connection management and tool-directory discovery do not charge X execution
+credits. An eligible personal subscription unlocks channel access; X execution
+uses the selected workspace's existing PostPlus credits under the current
+server pricing. Other channels retain their declared billing mode. Read the
+server's pricing and result fields; do not calculate provider rates or duplicate
+a price table in this Skill.
+
+For the server's current quote, use the same inputs before submission:
+
+```sh
+postplus channels tools run <FULL_TOOL_SLUG> --connection <own-connection-id> --input-file request.json --estimate --json
+```
+
+Include the same target and media-map flags when required by the task. An
+estimate does not execute platform work, reserve credits, or create a run. If
+pricing is unavailable, report the returned pricing gap; do not assume zero
+cost or bypass the quote.
+
+Use existing task and spending authorization. Do not add a payment-confirmation
+step for every requested task. Do not recharge or buy a subscription automatically.
+Insufficient credits stop before platform submission. A credit reservation is
+not a settled charge or a caller-enforced final-cost cap. Keep the original
+operation ID when execution or billing is unresolved; a new request is not a
+way to recover the original task.
+
 ## Submit once and keep the first result
 
 ```sh
@@ -44,7 +71,7 @@ link, visibility, and any schedule against the user's actual instruction.
 Authorization to connect or read is not authorization to post. If the user has
 already authorized this exact content and destination, proceed; otherwise get
 the missing choice before sending. The first response and operation ID are
-part of the evidence. If a run exits with unknown result, use
+part of the evidence. If execution or billing remains unresolved, use
 `postplus channels tools run --status <same-operation-id> --json`. The status
 endpoint only reports lifecycle; it does not recreate the first full business
 result. Never retry a possibly completed write under a new ID. Platform

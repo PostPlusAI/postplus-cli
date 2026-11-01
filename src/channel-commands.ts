@@ -56,12 +56,16 @@ Connections:
 Tools:
   postplus channels tools list [--toolkit <id>] [--query <text>] [--offset <n>] [--limit <n>] [--json]
   postplus channels tools show <tool-slug> [--json]
-  postplus channels tools run <tool-slug> --connection <id> --input-file <json-path> [--media-map-file <json-path>] [--target-id <id> --target-path <argument.path>] [--operation-id <id>] [--wait] [--json]
+  postplus channels tools run <tool-slug> --connection <id> --input-file <json-path> [--media-map-file <json-path>] [--target-id <id> --target-path <argument.path>] [--operation-id <id>] [--estimate] [--wait] [--json]
   postplus channels tools run --status <operation-id> [--json]
 
 Start with channels list, select your connection, then tools list and tools show.
 Tool availability does not prove your platform permissions; execution checks them.
 Connecting and executing require eligible subscription access on your own PostPlus account.
+Use --estimate with the same run inputs to quote credits without reserving credits or executing platform work.
+X execution uses the selected workspace's existing PostPlus credits under the server's current pricing.
+Connection and tool discovery do not charge X execution credits. Other channels retain their declared billing mode.
+Requested X work uses existing authorization; insufficient credits stop before platform submission.
 You can also connect and manage accounts in Web Integrations. Complete browser authorization yourself;
 use channels wait to confirm the connection is active before continuing the original task.
 Connections can be reused across workspaces. Disconnect affects all your workspaces.

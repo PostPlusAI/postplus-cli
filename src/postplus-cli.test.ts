@@ -13252,6 +13252,53 @@ describe('account read-only commands', () => {
     }
   });
 
+  it('keeps metered X run billing and unresolved amounts distinct from subscription history', async () => {
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Acme',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const originalFetch = globalThis.fetch;
+    const base = {
+      id: 'x_run_1',
+      capability: 'marketing-channels',
+      billingMode: 'metered',
+      status: 'completed',
+      execution: { resultStatus: 'succeeded', nextAction: 'none' },
+      operationId: 'x_operation_1',
+      createdAt: '2026-11-01T10:00:00Z',
+      updatedAt: '2026-11-01T10:01:00Z',
+      finalizedCredits: 2,
+      reservedCredits: 3,
+    };
+    let pending = false;
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      ...base,
+      ...(pending ? { billingPending: true } : {}),
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    try {
+      const settled = await fetchHostedRunDetail('x_run_1');
+      assert.equal(settled.billingMode, 'metered');
+      assert.equal(settled.finalizedCredits, 2);
+      assert.match(formatHostedRunDetailReport(settled), /Finalized: 2 PostPlus credits/u);
+      assert.doesNotMatch(formatHostedRunDetailReport(settled), /included in personal subscription/u);
+      pending = true;
+      const unresolved = await fetchHostedRunDetail('x_run_1');
+      assert.equal(unresolved.billingMode, 'metered');
+      assert.equal(unresolved.finalizedCredits, null);
+      assert.equal(unresolved.reservedCredits, null);
+      const text = formatHostedRunDetailReport(unresolved);
+      assert.match(text, /Billing: pending verification; inspect this original operation/u);
+      assert.doesNotMatch(text, /Finalized:|Reserved:|0 PostPlus credits/u);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('emits machine-readable JSON on --json for every hosted read command (F coverage)', async () => {
     await setLocalSession({
       accountId: 'account_1',

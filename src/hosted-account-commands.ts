@@ -136,7 +136,7 @@ Next:
 // ---------------------------------------------------------------------------
 
 export type HostedRunSummary = {
-  billingMode?: 'personal_subscription';
+  billingMode?: 'personal_subscription' | 'metered';
   execution?: {
     resultStatus: string;
     nextAction: string;
@@ -303,8 +303,8 @@ function normalizeRunSummary(value: unknown): HostedRunSummary {
       ? (record.execution as Record<string, unknown>)
       : null;
   return {
-    ...(record.billingMode === 'personal_subscription'
-      ? { billingMode: 'personal_subscription' as const }
+    ...((record.billingMode === 'personal_subscription' || record.billingMode === 'metered')
+      ? { billingMode: record.billingMode }
       : {}),
     ...(execution && typeof execution.resultStatus === 'string'
       ? {
@@ -419,7 +419,7 @@ export function formatHostedRunDetailReport(report: HostedRunDetail): string {
     report.billingMode === 'personal_subscription'
       ? 'Billing: included in personal subscription'
       : report.billingPending
-        ? 'Billing: pending verification; do not submit another analysis.'
+        ? 'Billing: pending verification; inspect this original operation.'
         : settled
           ? `Finalized: ${report.finalizedCredits ?? 'unknown'} PostPlus credits${report.estimatedOnly ? ' (estimated settlement; actual usage unconfirmed)' : ''}`
           : `Reserved: ${report.reservedCredits ?? 'unknown'} PostPlus credits`,
@@ -429,7 +429,7 @@ export function formatHostedRunDetailReport(report: HostedRunDetail): string {
     '',
     report.execution?.resultStatus === 'unknown'
       ? 'Outcome unknown. Check this original task; do not resubmit automatically.'
-      : report.status === 'completed' || report.status === 'failed'
+      : !report.billingPending && (report.status === 'completed' || report.status === 'failed')
         ? 'This run is terminal.'
         : `Still running. Refresh: postplus runs show ${report.id}`,
   ]

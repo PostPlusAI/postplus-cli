@@ -8,12 +8,23 @@ postplus channels tools list --toolkit twitter --limit 100 --json
 postplus channels tools show TWITTER_USER_LOOKUP_ME --json
 ```
 
-Reuse the user's own active connection. Call `TWITTER_USER_LOOKUP_ME` to confirm
-the actual account ID and handle before an account operation. Use the complete
+Reuse the user's own active connection and its already verified account identity.
+When the task lacks a verified identity, use `TWITTER_USER_LOOKUP_ME` to confirm
+the actual account ID and handle; do not add a new identity read before every
+step when the same connection and identity remain established. Use the complete
 current tool catalog and each tool's `show` schema for fields, scopes, pagination,
 file inputs and platform restrictions. A connected account does not establish
 permission for every endpoint. Distinguish platform access, available balance,
 and the permission to perform the user's specific action.
+
+X execution consumes the selected workspace's existing PostPlus credits. Use
+the server's current pricing and billing result, including the difference
+between reserved and finalized credits. Tool discovery and connection
+management do not charge X execution credits. A follow-up read, upload, status
+query against X, or publication check is a separate platform action with its
+own declared price; inspecting the original PostPlus operation receipt does
+not execute the platform action again. Follow the common channel execution
+rules for existing authorization, insufficient balance and unresolved billing.
 
 ## Read and manage accounts
 

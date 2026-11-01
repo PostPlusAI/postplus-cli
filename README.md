@@ -65,8 +65,11 @@ you. Disconnecting a connection affects every workspace that uses it.
 
 For publishing or account changes, approve the exact destination and final
 content or change. If the result is unknown, the agent checks the original
-operation instead of sending a duplicate. Channel access is covered by your
-eligible subscription; research and media generation can have separate charges.
+operation instead of sending a duplicate. Your eligible subscription unlocks
+channel access. X execution consumes the selected workspace's existing PostPlus
+credits under the current server pricing; connecting and browsing its tool
+directory do not charge X execution credits. Other channels retain their
+declared billing mode. Research and media generation follow their own pricing.
 
 ## Saved results
 

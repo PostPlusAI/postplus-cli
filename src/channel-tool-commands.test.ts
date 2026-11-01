@@ -211,6 +211,7 @@ test('tool run requires a personal connection and JSON input file', () => {
     mediaMapFile: undefined,
     operationId: 'operation-123',
     wait: true,
+    estimate: false,
   });
   assert.deepEqual(
     buildChannelToolRequest(parsed, { customer_id: '1234567890' }),
@@ -374,4 +375,62 @@ test('Google creation recovery status preserves IDs and never submits another mu
     JSON.parse(messages[0]!).output.error.createdResources,
     createdResources,
   );
+});
+
+
+test('X estimate quotes the same envelope without execution or polling', async () => {
+  const bodies: unknown[] = [];
+  const quote = { billingMode: 'metered', charged: false, billing: { charged: false, estimatedCredits: 2, reservedCredits: 0, finalizedCredits: 0 }, output: { estimatedCredits: 2 } };
+  const messages: string[] = [];
+  assert.equal(await runChannelToolCommand(['run', 'TWITTER_USER_LOOKUP_ME', '--connection', 'x-connection', '--input-file', 'x.json', '--operation-id', 'quote-id', '--estimate', '--wait'], {
+    readInput: async () => '{}',
+    submit: async ({body}) => { bodies.push(body); return quote; },
+    output: text => messages.push(text), diagnostic: () => {},
+  }), 0);
+  assert.equal(bodies.length, 1);
+  assert.deepEqual(bodies[0], { capability: 'marketing-channels', operation: 'quote-tool', operationId: 'quote-id', tool: 'TWITTER_USER_LOOKUP_ME', connectionId: 'x-connection', target: {kind: 'connection'}, arguments: {} });
+  assert.deepEqual(JSON.parse(messages[0]!), quote);
+});
+
+test('X wait settles original billing while retaining first business data', async () => {
+  const bodies: unknown[] = [];
+  const messages: string[] = [];
+  assert.equal(await runChannelToolCommand(['run', 'TWITTER_USER_LOOKUP_ME', '--connection', 'x-connection', '--input-file', 'x.json', '--operation-id', 'x-original', '--wait'], {
+    readInput: async () => '{}',
+    submit: async ({body}) => {
+      bodies.push(body);
+      return bodies.length === 1
+        ? {billingMode: 'metered', billingPending: true, billing: {reservedCredits: 2}, output: {status: 'settling', execution: {resultStatus: 'succeeded'}, result: {data: {id: '123'}}}}
+        : {billingMode: 'metered', billingPending: false, billing: {charged: true, finalizedCredits: 2}, output: {status: 'completed', execution: {resultStatus: 'succeeded'}}};
+    }, output: text => messages.push(text), diagnostic: () => {},
+  }), 0);
+  assert.deepEqual(bodies[1], {capability: 'marketing-channels', operation: 'status', operationId: 'x-original'});
+  assert.equal(bodies.length, 2);
+  const result = JSON.parse(messages[0]!);
+  assert.deepEqual(result.output.result.data, {id: '123'});
+  assert.equal(result.billing.finalizedCredits, 2);
+  assert.equal(result.billingPending, false);
+  assert.equal(shouldPollChannelTool(true, {billingPending:true, output:{execution:{resultStatus:'unknown'}}}), false);
+});
+
+
+test('billing status failure preserves the observed X outcome and data without replay', async () => {
+  let submissions = 0;
+  const messages: string[] = [];
+  const code = await runChannelToolCommand(['run', 'TWITTER_USER_LOOKUP_ME', '--connection', 'x', '--input-file', 'x.json', '--operation-id', 'settlement-op', '--wait'], {
+    readInput: async () => '{}',
+    submit: async () => {
+      submissions++;
+      if (submissions > 2) throw new Error('status unavailable');
+      if (submissions === 1) return {billingMode:'metered', billingPending:true, output:{status:'accepted', execution:{resultStatus:'pending'}}};
+      return {billingMode:'metered', billingPending:true, output:{status:'settling', execution:{resultStatus:'succeeded'}, result:{data:{id:'123'}}}};
+    }, output: text => messages.push(text), diagnostic: () => {},
+  });
+  assert.equal(code, 2);
+  assert.equal(submissions, 3);
+  const result = JSON.parse(messages[0]!);
+  assert.equal(result.output.execution.resultStatus, 'succeeded');
+  assert.deepEqual(result.output.result.data, {id:'123'});
+  assert.equal(result.billingPending, true);
+  assert.match(result.next, /run --status settlement-op/);
 });
