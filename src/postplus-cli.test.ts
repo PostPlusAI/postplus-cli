@@ -6910,6 +6910,10 @@ describe('hosted domain commands', () => {
     const hostedBodies: Record<string, unknown>[] = [];
     let putCount = 0;
     globalThis.fetch = async (input, init) => {
+      if(String(input).endsWith('/api/postplus-cli/library')){
+        const receipt=JSON.parse(String(init?.body));assert.equal(receipt.action,'register_upload');assert.match(receipt.sha256,/^[a-f0-9]{64}$/);
+        return Response.json({asset:{id:'00000000-0000-4000-8000-000000000001'}});
+      }
       if (String(input) === 'https://storage.example.com/estimate-upload') {
         putCount += 1;
         return new Response(null, { status: 200 });
@@ -10602,6 +10606,10 @@ globalThis.fetch=async(url,init)=>{
     let putBytes: Buffer | null = null;
     let putContentType: string | null = null;
     globalThis.fetch = async (input, init) => {
+      if(String(input).endsWith('/api/postplus-cli/library')){
+        const receipt=JSON.parse(String(init?.body));assert.equal(receipt.action,'register_upload');assert.match(receipt.sha256,/^[a-f0-9]{64}$/);
+        return Response.json({asset:{id:'00000000-0000-4000-8000-000000000001'}});
+      }
       const url = String(input);
       if (url === 'https://postplus.test/api/postplus-cli/hosted/capability') {
         const requestBody = JSON.parse(String(init?.body));
@@ -11455,6 +11463,10 @@ globalThis.fetch=async(url,init)=>{
     const hostedBodies: Record<string, unknown>[] = [];
     let signedPutCount = 0;
     globalThis.fetch = async (input, init) => {
+      if(String(input).endsWith('/api/postplus-cli/library')){
+        const receipt=JSON.parse(String(init?.body));assert.equal(receipt.action,'register_upload');assert.match(receipt.sha256,/^[a-f0-9]{64}$/);
+        return Response.json({asset:{id:'00000000-0000-4000-8000-000000000001'}});
+      }
       if (String(input) === 'https://storage.example.com/signed-upload') {
         signedPutCount += 1;
         assert.equal(init?.method, 'PUT');
@@ -11533,6 +11545,10 @@ globalThis.fetch=async(url,init)=>{
     let putCount = 0;
     let submitCount = 0;
     globalThis.fetch = async (input, init) => {
+      if(String(input).endsWith('/api/postplus-cli/library')){
+        const receipt=JSON.parse(String(init?.body));assert.equal(receipt.action,'register_upload');assert.match(receipt.sha256,/^[a-f0-9]{64}$/);
+        return Response.json({asset:{id:'00000000-0000-4000-8000-000000000001'}});
+      }
       if (String(input) === 'https://storage.example.com/cache-upload') {
         putCount += 1;
         return new Response(null, { status: 200 });
@@ -11623,6 +11639,10 @@ globalThis.fetch=async(url,init)=>{
     const stageCounts = new Map<string, number>();
     let submitCount = 0;
     globalThis.fetch = async (input, init) => {
+      if(String(input).endsWith('/api/postplus-cli/library')){
+        const receipt=JSON.parse(String(init?.body));assert.equal(receipt.action,'register_upload');assert.match(receipt.sha256,/^[a-f0-9]{64}$/);
+        return Response.json({asset:{id:'00000000-0000-4000-8000-000000000001'}});
+      }
       const url = String(input);
       if (url.startsWith('https://storage.example.com/partial-')) {
         return new Response(null, { status: 200 });

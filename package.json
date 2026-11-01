@@ -6,6 +6,7 @@
   "description": "PostPlus CLI for PostPlus Cloud auth, status, and diagnostics.",
   "license": "SEE LICENSE IN LICENSE",
   "files": [
+    "build/library-commands.js",
     "build/account-binding-display.js",
     "build/ad-library.js",
     "build/ad-library-report.js",

@@ -3,6 +3,7 @@ import { runAdLibraryCommand } from './ad-library.js';
 import { HostedProductRequestError } from './hosted-command-runtime.js';
 import { runWorkspaceCommand } from './workspace-commands.js';
 import { runChannelsCommand } from './channel-commands.js';
+import { runLibraryCommand } from './library-commands.js';
 import { formatSkillDiscovery } from './skill-discovery.js';
 import { PostPlusFailure, writeFailure, toFailureFact, formatFailure } from './failure-contract.js';
 import { buildVerbTargetIndex } from './hosted-manifest-index.js';
@@ -103,6 +104,7 @@ Usage:
   postplus doctor [--skill <skill-id>] [--json]
   postplus workspace status|list|use <workspace-id> [--json]
   postplus channels list|show|connect|wait|disconnect ... [--json]
+  postplus library assets|asset|brands|brand|brand-save|brand-adopt ... [--json]
   postplus channels tools list|show|run ... [--json]
   postplus ad-library search|formats|categories [--json]
   postplus balance [--json]
@@ -482,6 +484,8 @@ async function main(): Promise<void> {
         await runStudioCommand(['help']);
       } else if (helpTopic === 'channels') {
         await runChannelsCommand(['help']);
+      } else if (helpTopic === 'library') {
+        await runLibraryCommand(['help']);
       } else {
         await printHelp();
       }
@@ -497,6 +501,9 @@ async function main(): Promise<void> {
       return;
     case 'channels':
       process.exitCode = await runChannelsCommand(rest);
+      return;
+    case 'library':
+      process.exitCode = await runLibraryCommand(rest);
       return;
     case 'ad-library':
       process.exitCode = await runAdLibraryCommand(rest);
