@@ -728,6 +728,10 @@ async function runMediaFileUpload(
       `postplus-cli:media-file:create-upload-url:${randomUUID()}`,
   };
 
+  const complete=async(payload:unknown,reference:string)=>{
+    await registerUploadedLibraryFile({reference,name:body.file.name,mimeType:body.file.mimeType,sha256:fingerprint.contentSha256,skillName:flags.values.get('skill')??null,context});
+    return buildDurableUploadResult(payload,reference);
+  };
   return dispatchHostedCommand(
     {
       request: async () => {
@@ -745,7 +749,7 @@ async function runMediaFileUpload(
               });
             }
             process.stderr.write(recovered.reusedCompleted ? 'The original upload is already complete; no bytes transferred.\n' : 'The original upload session was recovered without requesting a new signature.\n');
-            return buildDurableUploadResult({ output: {} }, recovered.mediaReference);
+            return complete({ output: {} }, recovered.mediaReference);
           }
         }
         const signedAt = Date.now();
@@ -757,7 +761,7 @@ async function runMediaFileUpload(
         });
         const output = readHostedUploadOutput(payload);
         const completedReference = readCompletedUploadReference(output, fingerprint.sizeBytes);
-        if (completedReference) return buildDurableUploadResult(payload, completedReference);
+        if (completedReference) return complete(payload, completedReference);
         const signedUpload = readSignedUpload(output);
         const mediaReference = readMediaReferenceValue(output);
         const transfer = await uploadHostedMediaFile({
@@ -791,7 +795,7 @@ async function runMediaFileUpload(
           });
           if (!context) process.stderr.write('The original upload is already complete; no bytes transferred.\n');
         }
-        return buildDurableUploadResult(payload, transfer.mediaReference);
+        return complete(payload, transfer.mediaReference);
       },
       errorInputLabel: inputFile,
       json: flags.booleans.has('json'),
@@ -1046,7 +1050,21 @@ function readMediaReferenceValue(output: Record<string, unknown>): string {
 // stops at the durable PostPlus reference: endpoint-owned provider
 // materialization happens later at the Web boundary, after every local file has
 // staged successfully and before the single provider submit.
-async function stageHostedMediaFile(input: {
+async function stageHostedMediaFile(input:{file:LocalMediaFile;operationId:string;skillName:string}):Promise<string>{
+  const reference=await transferHostedMediaFile(input);
+  await registerUploadedLibraryFile({reference,name:input.file.name,mimeType:input.file.mimeType,sha256:toMediaFileFingerprint(input.file).contentSha256,skillName:input.skillName});
+  return reference;
+}
+
+async function registerUploadedLibraryFile(input:{reference:string;name:string;mimeType:string;sha256:string;skillName:string|null;context?:HostedRequestContext}){
+  const parsed=new URL(input.reference);
+  if(parsed.protocol!=='postplus-media:'||parsed.hostname!=='uploads')throw new Error('Expected an original PostPlus upload reference.');
+  const storage_path=parsed.pathname.slice(1).split('/').map(part=>decodeURIComponent(part)).join('/');
+  try{await postHostedJson({pathName:'/api/postplus-cli/library',skillName:input.skillName,context:input.context,body:{action:'register_upload',storage_path,name:input.name,mime_type:input.mimeType,sha256:input.sha256}});}
+  catch(error){if(!input.context&&(!(error instanceof HostedProductRequestError)||!error.httpStatus||error.httpStatus>=500))process.stderr.write(`The original file was transferred; library confirmation is incomplete. Retry only registration: postplus library complete-upload --reference ${shellQuoteArg(input.reference)} --name ${shellQuoteArg(input.name)} --mime ${shellQuoteArg(input.mimeType)} --sha256 ${input.sha256}\n`);throw error;}
+}
+
+async function transferHostedMediaFile(input: {
   file: LocalMediaFile;
   operationId: string;
   skillName: string;

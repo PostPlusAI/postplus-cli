@@ -48,6 +48,15 @@ const signedUpload = {
 };
 const ref = 'postplus-media://uploads/account/input.bin';
 
+function registrationReceipt(url:unknown,init:RequestInit|undefined){
+  if(!String(url).endsWith('/api/postplus-cli/library'))return null;
+  const body=JSON.parse(String(init?.body));
+  assert.equal(init?.method,'POST');assert.equal(body.action,'register_upload');
+  assert.match(body.sha256,/^[a-f0-9]{64}$/);assert.equal(typeof body.storage_path,'string');
+  return Response.json({asset:{id:'00000000-0000-4000-8000-000000000001'}});
+}
+
+
 test('an estimate signing failure reaches the outer CLI with its original typed upload identity', async () => {
   const file = path.join(directory, 'pending.png');
   await writeFile(file, 'png-bytes');
@@ -76,6 +85,7 @@ test('a server-verified completed upload is reused by standalone upload and esti
   await writeFile(file, 'png-bytes');
   let signRequests = 0, estimates = 0;
   globalThis.fetch = async (url, init) => {
+    const registration=registrationReceipt(url,init);if(registration)return registration;
     assert.equal(init?.method, 'POST');
     const body = JSON.parse(String(init?.body));
     if (body.operation === 'create-upload-url') {
@@ -92,6 +102,20 @@ test('a server-verified completed upload is reused by standalone upload and esti
   assert.equal(signRequests, 2);
   assert.equal(estimates, 1);
 });
+test('a lost library receipt retries the same uploaded bytes without a second transfer or paid submission',async()=>{
+  const file=path.join(directory,'library-retry.bin');await writeFile(file,'0123');
+  let signs=0,puts=0,registrations=0;
+  globalThis.fetch=async(url,init)=>{
+    if(String(url).endsWith('/api/postplus-cli/library')){registrations++;const body=JSON.parse(String(init?.body));assert.equal(body.action,'register_upload');assert.equal(body.sha256,createHash('sha256').update('0123').digest('hex'));return registrations===1?Response.json({code:'library_database_unavailable',error:'Retry original registration.',retryable:true},{status:503}):Response.json({asset:{id:'original-asset'}});}
+    if(String(url).startsWith('https://postplus.test/')){const body=JSON.parse(String(init?.body));assert.equal(body.capability,'media-file');if(body.operation==='create-read-url')return Response.json({output:{mediaReference:ref,signedUrl:'https://storage.test/read-original'}});assert.equal(body.operation,'create-upload-url');signs++;return Response.json({output:{mediaReference:ref,signedUpload:{method:'PUT',url:'https://storage.test/upload-original',requiredHeaders:{}}}});}
+    if(String(url)==='https://storage.test/read-original')return new Response(null,{headers:{'content-length':'4'}});
+    assert.equal(String(url),'https://storage.test/upload-original');puts++;for await(const _ of init!.body as NodeJS.ReadableStream){}return new Response(null);
+  };
+  const args=['upload','--input-file',file,'--hosted-operation-id','original-upload','--output',path.join(directory,'library-retry.json')];
+  assert.equal(await runMediaFileCommand(args),1);assert.equal(await runMediaFileCommand(args),0);
+  assert.equal(signs,1);assert.equal(puts,1);assert.equal(registrations,2);
+});
+
 beforeEach(async () => {
   directory = await mkdtemp(path.join(tmpdir(), 'postplus-transfer-contract-'));
   originalConfig = process.env.POSTPLUS_CONFIG_DIR;
@@ -253,6 +277,7 @@ test('CLI upload prints its generated operation and resumes only that operation 
   let remoteOffset = 0;
   let rejectPatch = true;
   globalThis.fetch = async (url, init) => {
+    const registration=registrationReceipt(url,init);if(registration)return registration;
     if (String(url).startsWith('https://postplus.test/')) {
       const body = JSON.parse(String(init?.body));
       if (body.operation === 'create-read-url') {
@@ -381,6 +406,7 @@ test('hosted-lib upload uses current-call retries without reading or writing CLI
   await writeFile(file, '0123');
   const before = await readdir(process.env.POSTPLUS_CONFIG_DIR!);
   globalThis.fetch = async (url, init) => {
+    const registration=registrationReceipt(url,init);if(registration)return registration;
     if (String(url).startsWith('https://library.test/'))
       return Response.json({ output: { signedUpload, mediaReference: ref } });
     if (init?.method === 'POST')
@@ -464,6 +490,7 @@ test('CLI reference download accepts fresh signatures but rejects another refere
   let signs = 0;
   let downloads = 0;
   globalThis.fetch = async (url, init) => {
+    const registration=registrationReceipt(url,init);if(registration)return registration;
     if (String(url).startsWith('https://postplus.test/')) {
       signs++;
       return Response.json({
@@ -996,6 +1023,7 @@ test('completed CLI upload reuses by content, verifies the remote reference, and
   let reads = 0;
   let failRead = false;
   globalThis.fetch = async (url, init) => {
+    const registration=registrationReceipt(url,init);if(registration)return registration;
     if (String(url).startsWith('https://postplus.test/')) {
       const body = JSON.parse(String(init?.body));
       if (body.operation === 'create-read-url') {
@@ -1092,6 +1120,7 @@ test('local media staging reuses completed identity before signing even without 
   const uploadedSizes = new Map<string, number>();
   const uploadedRefsByName = new Map<string, string>();
   globalThis.fetch = async (url, init) => {
+    const registration=registrationReceipt(url,init);if(registration)return registration;
     if (String(url).startsWith('https://storage.test/read?')) {
       assert.equal(init?.method, 'HEAD');
       reads++;
@@ -1244,6 +1273,7 @@ test('real CLI process recovers final ACK loss from its original session while t
 const log=(method)=>appendFileSync(${JSON.stringify(trace)}, JSON.stringify({method})+'\\n');
 globalThis.fetch=async(url,init)=>{
  const method=init?.method??'GET';
+ if(String(url).endsWith('/api/postplus-cli/library')){log('register');return Response.json({asset:{id:'00000000-0000-4000-8000-000000000001'}});}
  if(String(url).startsWith('https://postplus.test/')){
   log('sign');if(process.env.TRANSFER_PHASE==='resume')return Response.json({error:'resource already exists'},{status:502});
   return Response.json({output:{mediaReference:${JSON.stringify(ref)},signedUpload:${JSON.stringify(signedUpload)}}});
@@ -1304,7 +1334,7 @@ globalThis.fetch=async(url,init)=>{
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line).method),
-    ['sign', 'POST', 'PATCH', 'HEAD'],
+    ['sign', 'POST', 'PATCH', 'HEAD', 'register'],
   );
   assert.equal(
     JSON.parse(await readFile(path.join(directory, 'result.json'), 'utf8'))

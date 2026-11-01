@@ -11,7 +11,7 @@ metadata:
 
 Help the user move from a specific audience question to useful content or an
 account action. This skill covers organic Instagram, Facebook Pages, LinkedIn,
-YouTube, TikTok, Reddit, and Pinterest. Paid campaigns belong to Ads; Discord,
+X, YouTube, TikTok, Reddit, and Pinterest. Paid campaigns belong to Ads; Discord,
 Slack, and WhatsApp Business messages belong to Channel Messaging.
 
 Start with the user's goal, intended reader, evidence, offer or point of view,
@@ -29,7 +29,7 @@ sales or infer a platform's current ranking rules from a few posts.
 | Rewrite an article, interview, or idea into platform-ready copy | [Writing and repurposing](references/writing-and-repurposing.md). |
 | Script a Reel, Short, or TikTok; analyze an existing video | [Short video](references/short-video.md). |
 | Outline a multi-panel visual story | [Carousel](references/carousel.md). |
-| Publish, schedule a Page post, reply, update a YouTube thumbnail, manage a playlist, inspect a post, or use account performance | [Channel execution](references/channel-execution.md), then [Instagram/Facebook](references/instagram-facebook.md), [LinkedIn](references/linkedin.md), [YouTube/TikTok](references/youtube-tiktok.md), or [Reddit/Pinterest](references/reddit-pinterest.md). |
+| Publish, schedule a Page post, reply, update a YouTube thumbnail, manage a playlist, inspect a post, or use account performance | [Channel execution](references/channel-execution.md), then [Instagram/Facebook](references/instagram-facebook.md), [LinkedIn](references/linkedin.md), [X](references/x.md), [YouTube/TikTok](references/youtube-tiktok.md), or [Reddit/Pinterest](references/reddit-pinterest.md). |
 
 ## Work from evidence to an action
 
