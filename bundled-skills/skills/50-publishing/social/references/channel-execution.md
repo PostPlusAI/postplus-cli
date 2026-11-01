@@ -8,14 +8,14 @@ fields. Public content research does not require a channel connection.
 
 ```sh
 postplus channels list --json
-postplus channels tools list --toolkit <instagram|facebook|linkedin|youtube|tiktok|reddit|pinterest> --query <task> --json
+postplus channels tools list --toolkit <instagram|facebook|linkedin|twitter|youtube|tiktok|reddit|pinterest> --query <task> --json
 postplus channels tools show <FULL_TOOL_SLUG> --json
 ```
 
 Reuse the connection that belongs to the user and matches the requested
 channel. If none exists, `postplus channels connect <channel-id> --json`, then
 `postplus channels wait <connection-id> --json`; valid social IDs are
-`instagram`, `facebook`, `linkedin`, `youtube`, `tiktok`, `reddit`, and
+`instagram`, `facebook`, `linkedin`, `x`, `youtube`, `tiktok`, `reddit`, and
 `pinterest`. Continue the original task after connection. A connected toolkit
 does not establish Page, organization, board, community, or publishing
 permission. Inspect the selected tool's current `show` result for enabled
