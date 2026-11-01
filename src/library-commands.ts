@@ -13,6 +13,7 @@ const help = `Personal PostPlus library — the same files and brands as Web and
   postplus library delete <id> --revision <n> --confirm-permanent
   postplus library register --reference <postplus-media://...> --name <name> --mime <type>
   postplus library complete-upload --reference <postplus-media://uploads/...> --name <name> --mime <type> --sha256 <original-hash>
+  postplus library recover-task <original-web-task-id>
   postplus library brand-website --url <https://official-website>
   postplus library brands [--query <text>] [--cursor <cursor>]
   postplus library brand <id> [--version <id>]
@@ -85,6 +86,7 @@ export async function parseLibraryCommand(
   };
   let body: Record<string, unknown>;
   switch (action) {
+    case 'recover-task':body={action:'recover_task_outputs',task_id:id()};break;
     case 'assets':
       body = {
         action: 'assets',

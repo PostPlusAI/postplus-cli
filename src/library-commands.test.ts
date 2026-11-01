@@ -174,6 +174,9 @@ test('website collection returns a review proposal through the same library acti
     { action: 'preview_brand_website', website: 'https://postplus.io' },
   );
 });
+test('saved Web outputs recover only by their original task identity',async()=>{
+  assert.deepEqual(await parseLibraryCommand(['recover-task','original-task','--json']),{action:'recover_task_outputs',task_id:'original-task'});
+});
 test('authentication and compatibility failures retain the outer command recovery', async () => {
   const failure = new Error('Authentication requires sign-in');
   let output = '';
