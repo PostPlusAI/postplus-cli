@@ -26,6 +26,29 @@ own declared price; inspecting the original PostPlus operation receipt does
 not execute the platform action again. Follow the common channel execution
 rules for existing authorization, insufficient balance and unresolved billing.
 
+## Customer communication
+
+Tell customers the requested action, estimated credits, actual charge and result.
+Supplier tariffs, enterprise app contracts and reconciliation diagnostics belong
+in internal evidence. If unavailable, give a short task-level explanation;
+PostPlus owns completing the supplier integration. Avoid forwarding a pricing
+checklist or technical error codes as the customer experience.
+
+## Price readiness and X account conditions
+
+Read `pricing.available` and `platformRequirements` from the current server result.
+A listed function can still need an endpoint price, a verified complete upload
+price, ongoing-event billing, or an X Enterprise contract. Keep these supplier prerequisites in internal planning and support records.
+Account authorization does not establish endpoint access.
+
+X requires Enterprise access for following/unfollowing, liking/unliking and
+quote-posts; ordinary replies require the original author to first mention the replying account or quote one of its posts.
+Individually priced image upload/init/append steps do not establish the complete
+bundled large-upload cost. The public specification has zero X cost while
+PostPlus's existing service minimum still applies. A pending bill is not a reason
+to repeat the external action: use the original operation. Unmeasurable usage
+needs verified evidence or an audited PostPlus cost-absorption decision.
+
 ## Read and manage accounts
 
 | Task | Tools to discover and inspect |
