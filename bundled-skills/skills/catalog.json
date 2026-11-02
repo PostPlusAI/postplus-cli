@@ -401,7 +401,7 @@
       "familyId": "workspace-publishing",
       "familyName": "Workspace, Publishing, and Meta",
       "name": "postplus-workspace",
-      "description": "Establish reusable brand facts from an official website, use the shared PostPlus brand and file library, and maintain optional local project context. Keep drafts, adopted facts, and research separate.",
+      "description": "Establish reusable brand facts from an official website, use the shared PostPlus brand and file library, and maintain optional local project context. Keep saved brand facts and research separate.",
       "category": "workspace",
       "example": "Set up our brand from its official website and reuse the same adopted facts and saved files.",
       "path": "skills/00-shared/postplus-workspace/SKILL.md",

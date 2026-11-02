@@ -17,7 +17,8 @@ const help = `Personal PostPlus library — the same files and brands as Web and
   postplus library brand-website --url <https://official-website>
   postplus library brands [--query <text>] [--cursor <cursor>]
   postplus library brand <id> [--version <id>]
-  postplus library brand-save <id> --revision <n> --file <content.json>
+  postplus library brand-save-current <id> --revision <n> --file <content.json>
+  postplus library brand-save <id> --revision <n> --file <content.json> (compatibility: draft only)
   postplus library brand-adopt <id> --revision <n> --request-id <uuid>
   postplus library brand-history <id> [--before <version-number>]
   postplus library brand-use <id> --sections facts,voice,visual [--version <id>]
@@ -28,7 +29,8 @@ const help = `Personal PostPlus library — the same files and brands as Web and
 All support --json. Read IDs and revisions before edits. Create a brand with a new
 UUID and revision 0; retry the same ID and content after an uncertain response.
 Brand-website returns a source-backed proposal and may save verified website images.
-Review preview.content before brand-save. Unknown facts remain empty; this does not adopt a brand.
+Review preview.content before brand-save-current. Unknown facts remain empty.
+brand-save-current saves and makes these facts usable immediately in Web, CLI and MCP.
 Saving a draft does not adopt it. Adopt only on explicit user intent, retaining
 the request UUID on retries. Versions remain immutable. Brand-use returns known
 facts for a brief; files are selected separately. No generation or publication.
@@ -185,12 +187,14 @@ export async function parseLibraryCommand(
     case 'brand':
       body = { action: 'brand', brand_id: id(), version_id: take('version') };
       break;
-    case 'brand-save': {
+    case 'brand-save':
+    case 'brand-save-current': {
       const brand_id = id(),
         expected_revision = number('revision', true),
         file = take('file', true)!;
       body = {
-        action: 'save_brand',
+        action:
+          action === 'brand-save-current' ? 'save_current_brand' : 'save_brand',
         brand_id,
         expected_revision,
         content: JSON.parse(await readFile(file, 'utf8')) as unknown,

@@ -42,6 +42,34 @@ test('permanent deletion cannot be confused with reversible archive', async () =
     },
   );
 });
+test('normal brand save becomes immediately usable through the shared action', async () => {
+  const directory = await mkdtemp(
+    path.join(tmpdir(), 'postplus-brand-current-'),
+  );
+  try {
+    const file = path.join(directory, 'brand.json');
+    const content = { name: 'Known name', summary: 'Reviewed facts' };
+    await writeFile(file, JSON.stringify(content));
+    assert.deepEqual(
+      await parseLibraryCommand([
+        'brand-save-current',
+        'stable-id',
+        '--revision',
+        '3',
+        '--file',
+        file,
+      ]),
+      {
+        action: 'save_current_brand',
+        brand_id: 'stable-id',
+        expected_revision: 3,
+        content,
+      },
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 test('saving known brand facts never adopts them or invents missing fields', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'postplus-library-'));
   try {
