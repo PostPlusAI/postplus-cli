@@ -28,12 +28,12 @@ metadata:
   auto-downloaded; see the download command below).
 - This runner validates and executes resolved requests. It must not make creative
   strategy, task-classification, or reference-policy decisions.
-- A higher-quality default and faster or cheaper model families are available;
-  prefer the default unless the user or upstream brief asks for a specific family,
-  ratio, quality, or resolution. The generated example below shows the default
-  endpoint key.
+- Unless the user or upstream brief specifies a model, use Nano Banana 2.1:
+  `image-nano-banana-2-1-text` for text-only generation and
+  `image-nano-banana-2-1-edit` for reference-bound generation or edits.
+  Preserve an explicit model choice; do not silently switch on failure.
 - Only edit endpoints accept `--reference-image` (default edit endpoint:
-  `image-gpt-image-2-edit`). Text endpoints such as `image-gpt-image-2-text`
+  `image-nano-banana-2-1-edit`). Text endpoints such as `image-nano-banana-2-1-text`
   reject the flag with `Unknown option`, so any reference-bound generation must
   target an edit endpoint, not a text endpoint.
 - Reference-based edits pass each source image via a repeated
@@ -101,7 +101,7 @@ metadata:
 
 <!-- BEGIN GENERATED EXECUTION EXAMPLE -->
 ```bash
-postplus media create image-gpt-image-2-text \
+postplus media create image-nano-banana-2-1-text \
   --prompt "Describe the result you need" \
   --wait \
   --output ./result.json
