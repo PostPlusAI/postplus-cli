@@ -195,12 +195,32 @@
       "supportedModels": [
         {
           "key": "image-nano-banana-2-edit",
-          "name": "Nano Banana 2 Edit",
+          "name": "Nano Banana 2",
           "source": "endpointKey"
         },
         {
           "key": "image-nano-banana-2-text",
-          "name": "Nano Banana 2 Text To Image",
+          "name": "Nano Banana 2",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-nano-banana-2-lite-edit",
+          "name": "Nano Banana 2 Lite",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-nano-banana-2-lite-text",
+          "name": "Nano Banana 2 Lite",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-nano-banana-2-1-edit",
+          "name": "Nano Banana 2.1",
+          "source": "endpointKey"
+        },
+        {
+          "key": "image-nano-banana-2-1-text",
+          "name": "Nano Banana 2.1",
           "source": "endpointKey"
         },
         {
@@ -277,7 +297,11 @@
           "image-gpt-image-2-edit",
           "image-gpt-image-2-text",
           "image-higgsfield-soul-text",
+          "image-nano-banana-2-1-edit",
+          "image-nano-banana-2-1-text",
           "image-nano-banana-2-edit",
+          "image-nano-banana-2-lite-edit",
+          "image-nano-banana-2-lite-text",
           "image-nano-banana-2-text",
           "image-nano-banana-pro-edit-1k",
           "image-nano-banana-pro-edit-2k",
