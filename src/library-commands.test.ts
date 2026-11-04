@@ -294,3 +294,31 @@ test('help-like search and name values execute the intended command', async () =
     assert.equal(calls, 1);
   }
 });
+
+test('brand material analysis reads the common guide without submitting documents or brand writes', async () => {
+  assert.deepEqual(await parseLibraryCommand(['brand-guide', '--json']), {
+    action: 'brand_guide',
+  });
+  await assert.rejects(
+    parseLibraryCommand(['brand-guide', '--file', 'unread.pdf']),
+    /Unexpected library arguments/,
+  );
+  const requests: Array<Record<string, unknown>> = [],
+    output: string[] = [];
+  const guide = {
+    analysis_guide: {
+      instructions: 'Analyze accessible user evidence.',
+      content_schema: { type: 'object' },
+    },
+  };
+  const code = await runLibraryCommand(['brand-guide', '--json'], {
+    request: async (body) => {
+      requests.push(body);
+      return new Response(JSON.stringify(guide), { status: 200 });
+    },
+    output: (text) => output.push(text),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(requests, [{ action: 'brand_guide' }]);
+  assert.deepEqual(JSON.parse(output.join('')), guide);
+});

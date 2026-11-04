@@ -14,6 +14,7 @@ const help = `Personal PostPlus library — the same files and brands as Web and
   postplus library register --reference <postplus-media://...> --name <name> --mime <type>
   postplus library complete-upload --reference <postplus-media://uploads/...> --name <name> --mime <type> --sha256 <original-hash>
   postplus library recover-task <original-web-task-id>
+  postplus library brand-guide
   postplus library brand-website --url <https://official-website>
   postplus library brands [--query <text>] [--cursor <cursor>]
   postplus library brand <id> [--version <id>]
@@ -29,7 +30,13 @@ const help = `Personal PostPlus library — the same files and brands as Web and
 All support --json. Read IDs and revisions before edits. Create a brand with a new
 UUID and revision 0; retry the same ID and content after an uncertain response.
 Brand-website returns a source-backed proposal and may save verified website images.
-Review preview.content before brand-save-current. Unknown facts remain empty.
+Brand-website includes website_context and analysis_guide with the actual content_schema.
+The current agent follows that guide to analyze positioning, product mechanisms, audience,
+voice and evidence before saving. For supplied documents or pasted brand materials,
+read brand-guide, then read the accessible sources with the current agent.
+The guide does not parse documents, call a model or save facts. Keep source evidence,
+leave unknowns empty, and save requested creation/edits without per-field confirmations.
+Read the latest brand before merging; preserve unrelated human edits and stable IDs.
 brand-save-current saves and makes these facts usable immediately in Web, CLI and MCP.
 Saving a draft does not adopt it. Adopt only on explicit user intent, retaining
 the request UUID on retries. Versions remain immutable. Brand-use returns known
@@ -178,6 +185,9 @@ export async function parseLibraryCommand(
       };
       break;
     }
+    case 'brand-guide':
+      body = { action: 'brand_guide' };
+      break;
     case 'brand-website':
       body = { action: 'preview_brand_website', website: take('url', true) };
       break;

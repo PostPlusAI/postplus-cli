@@ -9,8 +9,8 @@ metadata:
 
 # PostPlus Workspace
 
-Start with an official website, an existing PostPlus brand, saved files, or an
-explicitly requested project folder. Reuse confirmed facts across Web, CLI and
+Start with an official website, supplied brand materials, an existing PostPlus
+brand, saved files, or an explicitly requested project folder. Reuse confirmed facts across Web, CLI and
 MCP. A local folder is optional and never required for independent production.
 The agent owns context selection; the current CLI/server own schemas, revisions,
 permissions, costing, execution and recovery. Specialist skills own domain judgment.
@@ -31,52 +31,71 @@ permissions, costing, execution and recovery. Specialist skills own domain judgm
 
 | Request | Route |
 | --- | --- |
-| Establish a brand from a website | Collect cloud brand facts |
+| Build or improve a Brand Kit from a website, pasted text or documents | Analyze and save a shared Brand Kit |
 | Use a brand or saved files | Read the shared personal library |
 | Create a project folder | Initialize local workspace |
 | Start a campaign or continue a project | Read stage context, then route |
 | Research, strategy, testing or production | Read relevant facts and specialist skill |
 | Analyze performance | Record observations, conclusions and next hypothesis |
 
-## Collect Cloud Brand Facts
+## Analyze And Save A Shared Brand Kit
 
-Cloud brands own saved facts and internal immutable snapshots. Normal saves make
-reviewed facts usable immediately; users do not need a separate adoption step. Web, CLI and
-MCP use the same files, IDs, revisions and facts. Cloud library work requires no
-local folder or Python setup check. Read `postplus library --help` when needed.
+Read [brand-analysis.md](references/brand-analysis.md) for both website and
+material inputs. It owns the analysis method and mapping to Brand Kit content.
+The current conversational AI performs the synthesis; website extraction and
+the guide do not start an additional model or spend generation credits.
+Cloud brand work requires neither a local folder nor a Python setup check.
 
-1. Search `postplus library brands --json` before creating a replacement. Resolve
-   ambiguous brands with the user; read the chosen saved facts.
-2. With the user's official website, run
-   `postplus library brand-website --url <official-https-url> --json`.
-   This returns `preview.content`, sources/times, missing fields and explicit
-   page/image failures. It may save verified website images to the library;
-   it does not save or adopt brand facts.
-3. Review the sourced proposal with the user. Leave unknowns empty. Website
-   statements are not approved advertising claims. Further source reading may
-   establish additional facts; retain the exact source/time and label inferences.
-4. Save reviewed content with `brand-save-current`, its ID and expected revision.
-   Initial save uses one new UUID and revision 0. Retry the same ID, revision and
-   content after uncertain outcomes. Compare before replacing existing edits;
-   rereading a website never silently changes saved facts. A successful normal save
-   makes the reviewed content available to all three entrypoints immediately.
-   Web and MCP show the same continuously edited document. Custom chapters use
-   optional `sections: [{id, title, body}]`; keep their stable IDs and order.
-   Preserve all unrelated fields and chapters when editing. After a revision
-   conflict, reread and replay only the requested edits whose original passages
-   have not changed. If the user and agent changed the same passage, retain both
-   versions and resolve that passage; never replace the whole document to force
-   a save. An uncertain outcome still uses the exact original save request.
-5. Read the saved result. Old `brand-save` / `brand-adopt` commands retain their
-   draft-only compatibility semantics; use them only when a caller explicitly
-   needs a separate stored draft, never as the normal brand editing journey.
-6. Use `brand-use` to select relevant facts, voice or visual rules from the saved
-   brand. Retain its exact identity with the brief. Choose real file inputs and
-   their roles separately; do not automatically add logos, slogans or generation.
+1. Resolve the intended brand. Reuse its ID from the conversation, or search
+   `postplus library brands --json` when it is unknown. For updates, read
+   `postplus library brand <id> --json` and retain its complete content/revision.
+2. Read the supplied source:
+   - Official website: run
+     `postplus library brand-website --url <official-https-url> --json`.
+     Use `preview.content`, `preview.website_context` and
+     `preview.analysis_guide` together.
+     Extraction may save verified website images; it does not save brand facts.
+     Retain actual page/image failures and coverage limits.
+   - Pasted text or documents: read the material with the current host's supported
+     tools, then run `postplus library brand-guide --json` for the same
+     `analysis_guide.instructions` and current
+     `analysis_guide.content_schema`. This command supplies guidance;
+     it does not open, upload or parse a file. If a supplied file is unreadable,
+     name the exact unread portion and continue with the sources you can read.
+3. Apply the analysis method to the evidence. Go beyond copying the homepage:
+   connect product mechanism and use to benefits, audience situations, objections,
+   proof and voice. Preserve meaningful detail without filling unsupported facts.
+4. For a requested creation/update, save the in-scope result with
+   `postplus library brand-save-current <id> --revision <n> --file <content.json>`.
+   The request authorizes ordinary organization and grounded analysis: do not add
+   a separate review prompt or ask users to approve each field. A request only to
+   inspect, compare or preview ends before saving. Ask narrowly for a material
+   identity/evidence conflict or an unrequested change to approved meaning;
+   unrelated useful work continues.
+5. Read the saved result with `postplus library brand <id> --json`. Save makes it
+   usable immediately across Web, CLI and MCP. In MCP, call `library_brand` for
+   that same ID to display the editable card. Never claim a save from a prepared
+   payload, a timeout or a preview alone.
 
-MCP uses the matching `library_*` tools, including
-`library_preview_brand_website`, `library_save_current_brand` and
-`library_resolve_brand`, with the same review and recovery semantics.
+MCP uses `library_preview_brand_website` for the URL route and
+`library_brand_guide` for material analysis, then `library_save_current_brand`
+and `library_brand`. These are the same shared library boundary as CLI/Web.
+The returned `analysis_guide.content_schema` is authoritative for structure;
+never invent fields because a template contains a useful concept.
+
+For updates, merge only requested changes into the latest complete content;
+retain unrelated manual writing, custom chapters, media and stable IDs/order.
+Initial creation uses one new brand UUID and revision 0. Retry the exact same
+ID, revision and content after an uncertain outcome. On a revision conflict,
+reread and replay only edits whose original passages have not changed. If both
+writers changed a passage, retain both and resolve only that passage with the
+user. Normal saves need no separate adoption step. Old `brand-save` /
+`brand-adopt` are only for an explicitly requested separate draft journey.
+
+Use `postplus library brand-use <id> --sections facts,voice,visual --json`
+(or `library_resolve_brand`) to select context for later work. Retain the returned
+brand/version identity with the brief. Choose actual file inputs and roles
+separately; organizing a Brand Kit does not generate assets or launch ads.
 
 ## Read The Shared Personal Library
 
@@ -89,8 +108,8 @@ operation because catalogue registration failed. Recover completed Web tasks wit
 `postplus library recover-task <original-task-id>`; hosted generation recovery
 continues its original operation ID through the media command.
 
-Local `brand.md` / `product.md` may be explicitly imported as reviewed saved facts or exported
-from a chosen snapshot. No implicit bidirectional overwrites. Campaign plans,
+Local `brand.md` / `product.md` / `audience.md` can be read as supplied materials
+for the analysis route above, or exported from a chosen snapshot. No implicit bidirectional overwrites. Campaign plans,
 full research reports and hypotheses remain project context, not adopted facts.
 
 ## Initialize An Explicitly Requested Local Workspace
