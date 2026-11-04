@@ -45,7 +45,7 @@
     {
       "name": "image-batch-runner",
       "path": "skills/40-creative/image-batch-runner/SKILL.md",
-      "contentHash": "bae60534dedf12eaab1f7353c75d0166cdb636046b597329602cc2a3bac06dc7"
+      "contentHash": "62ffd0bf374a6e78e2864ed321d182d1b90c742b09739f7ee1ada76eacf2d69e"
     },
     {
       "name": "image-generation",
@@ -120,7 +120,7 @@
     {
       "name": "video-batch-runner",
       "path": "skills/40-creative/video-batch-runner/SKILL.md",
-      "contentHash": "7cb639e15503d1ba4afb9df14e4b63cd8f4c2c0004c41cef13f4c92d7864f62c"
+      "contentHash": "7eae44236f876fbc537e0afd2e12ac22fa8df63eec910c2008eda2e94209088a"
     },
     {
       "name": "video-transcription",
