@@ -9,10 +9,9 @@ metadata:
 
 # PostPlus Workspace
 
-Start with an official website, supplied brand materials, an existing PostPlus
-brand, saved files, or an explicitly requested project folder. Reuse confirmed facts across Web, CLI and
-MCP. A local folder is optional and never required for independent production.
-The agent owns context selection; the current CLI/server own schemas, revisions,
+Start with an official website, supplied brand materials, an existing PostPlus brand, saved files, or an explicitly
+requested project folder. Reuse confirmed facts across Web, CLI and MCP. A local folder is optional and never required
+for independent production. The agent owns context selection; the current CLI/server own schemas, revisions,
 permissions, costing, execution and recovery. Specialist skills own domain judgment.
 
 ## Core Contract
@@ -40,11 +39,10 @@ permissions, costing, execution and recovery. Specialist skills own domain judgm
 
 ## Analyze And Save A Shared Brand Kit
 
-Read [brand-analysis.md](references/brand-analysis.md) for both website and
-material inputs. It owns the analysis method and mapping to Brand Kit content.
-The current conversational AI performs the synthesis; website extraction and
-the guide do not start an additional model or spend generation credits.
-Cloud brand work requires neither a local folder nor a Python setup check.
+Read [brand-analysis.md](references/brand-analysis.md) for both website and material inputs. It owns the analysis method
+and mapping to Brand Kit content. The current conversational AI performs the synthesis; website extraction and the guide
+do not start an additional model or spend generation credits. Cloud brand work requires neither a local folder nor a
+Python setup check.
 
 1. Resolve the intended brand. Reuse its ID from the conversation, or search
    `postplus library brands --json` when it is unknown. For updates, read
@@ -77,40 +75,34 @@ Cloud brand work requires neither a local folder nor a Python setup check.
    that same ID to display the editable card. Never claim a save from a prepared
    payload, a timeout or a preview alone.
 
-MCP uses `library_preview_brand_website` for the URL route and
-`library_brand_guide` for material analysis, then `library_save_current_brand`
-and `library_brand`. These are the same shared library boundary as CLI/Web.
-The returned `analysis_guide.content_schema` is authoritative for structure;
-never invent fields because a template contains a useful concept.
+MCP uses `library_preview_brand_website` for the URL route and `library_brand_guide` for material analysis, then
+`library_save_current_brand` and `library_brand`. These are the same shared library boundary as CLI/Web. The returned
+`analysis_guide.content_schema` is authoritative for structure; never invent fields because a template contains a useful
+concept.
 
-For updates, merge only requested changes into the latest complete content;
-retain unrelated manual writing, custom chapters, media and stable IDs/order.
-Initial creation uses one new brand UUID and revision 0. Retry the exact same
-ID, revision and content after an uncertain outcome. On a revision conflict,
-reread and replay only edits whose original passages have not changed. If both
-writers changed a passage, retain both and resolve only that passage with the
-user. Normal saves need no separate adoption step. Old `brand-save` /
-`brand-adopt` are only for an explicitly requested separate draft journey.
+For updates, merge only requested changes into the latest complete content; retain unrelated manual writing, custom
+chapters, media and stable IDs/order. Initial creation uses one new brand UUID and revision 0. Retry the exact same ID,
+revision and content after an uncertain outcome. On a revision conflict, reread and replay only edits whose original
+passages have not changed. If both writers changed a passage, retain both and resolve only that passage with the user.
+Normal saves need no separate adoption step. Old `brand-save` / `brand-adopt` are only for an explicitly requested
+separate draft journey.
 
-Use `postplus library brand-use <id> --sections facts,voice,visual --json`
-(or `library_resolve_brand`) to select context for later work. Retain the returned
-brand/version identity with the brief. Choose actual file inputs and roles
+Use `postplus library brand-use <id> --sections facts,voice,visual --json` (or `library_resolve_brand`) to select
+context for later work. Retain the returned brand/version identity with the brief. Choose actual file inputs and roles
 separately; organizing a Brand Kit does not generate assets or launch ads.
 
 ## Read The Shared Personal Library
 
-Search files with `library assets`; reuse the original permanent
-`postplus-media://` reference instead of reuploading. Signed preview URLs expire.
-Archive/restore changes organization only. Permanent deletion needs explicit
-intent; unfinished deletion stays discoverable in archived assets and resumes
-that same deletion. Never delete originals as routine cleanup or rerun a paid
-operation because catalogue registration failed. Recover completed Web tasks with
-`postplus library recover-task <original-task-id>`; hosted generation recovery
-continues its original operation ID through the media command.
+Search files with `library assets`; reuse the original permanent `postplus-media://` reference instead of reuploading.
+Signed preview URLs expire. Archive/restore changes organization only. Permanent deletion needs explicit intent;
+unfinished deletion stays discoverable in archived assets and resumes that same deletion. Never delete originals as
+routine cleanup or rerun a paid operation because catalogue registration failed. Recover completed Web tasks with
+`postplus library recover-task <original-task-id>`; hosted generation recovery continues its original operation ID
+through the media command.
 
-Local `brand.md` / `product.md` / `audience.md` can be read as supplied materials
-for the analysis route above, or exported from a chosen snapshot. No implicit bidirectional overwrites. Campaign plans,
-full research reports and hypotheses remain project context, not adopted facts.
+Local `brand.md` / `product.md` / `audience.md` can be read as supplied materials for the analysis route above, or
+exported from a chosen snapshot. No implicit bidirectional overwrites. Campaign plans, full research reports and
+hypotheses remain project context, not adopted facts.
 
 ## Initialize An Explicitly Requested Local Workspace
 
@@ -125,30 +117,24 @@ full research reports and hypotheses remain project context, not adopted facts.
   --output <folder>/.postplus/workspace-init.json
 ```
 
-Optional `--brand`, `--product`, `--market`, `--platform` use only sourced/user
-values. The entrypoint creates missing files and rejects unsafe targets.
-Fill confirmed facts, preserve `UNKNOWN`, then run the onboarding check.
+Optional `--brand`, `--product`, `--market`, `--platform` use only sourced/user values. The entrypoint creates missing
+files and rejects unsafe targets. Fill confirmed facts, preserve `UNKNOWN`, then run the onboarding check.
 
 ## Continue A Local Project Or Campaign
 
-Read the nearest `project.yaml`, applicable `AGENTS.md` and only stage-relevant
-files from [context-schema.md](references/context-schema.md). Route to the
-specialist skill and resume recorded work rather than recreating it.
-To initialize a requested campaign, use the same entrypoint's `new-campaign`
-with `--target`, `--name`, optional `--slug` and an explicit `--output` report.
-Fill objective, market, platform, offer, CTA, KPI, constraints and approval state;
-set `current_campaign` only for the intended campaign.
+Read the nearest `project.yaml`, applicable `AGENTS.md` and only stage-relevant files from
+[context-schema.md](references/context-schema.md). Route to the specialist skill and resume recorded work rather than
+recreating it. To initialize a requested campaign, use the same entrypoint's `new-campaign` with `--target`, `--name`,
+optional `--slug` and an explicit `--output` report. Fill objective, market, platform, offer, CTA, KPI, constraints and
+approval state; set `current_campaign` only for the intended campaign.
 
 ## Stage Checks And Durable Results
 
-Follow [stage-gates.md](references/stage-gates.md). Run the workspace entrypoint's
-`check --target <folder> --stage <stage> --output <report.json>` before high-impact
-local execution. Stages: onboarding, research, strategy, test, production, launch,
-learn. `BLOCKED` stops the affected stage; local `READY` never replaces current
-prices, balance, provider validation, authorization or live state.
-For campaign stages, pass `--campaign <intended-campaign-slug>` and confirm the
-returned campaign matches the intended one before using its readiness result.
-Use [uncertainty-policy.md](references/uncertainty-policy.md) for material gaps.
-Save confirmed results, actual cost, chosen brand/version and next actions in
-the relevant cloud record or requested workspace. Explain blockers and the next
-useful action concisely. Local templates are in `assets/project-template/`.
+Follow [stage-gates.md](references/stage-gates.md). Run the workspace entrypoint's `check --target <folder> --stage
+<stage> --output <report.json>` before high-impact local execution. Stages: onboarding, research, strategy, test,
+production, launch, learn. `BLOCKED` stops the affected stage; local `READY` never replaces current prices, balance,
+provider validation, authorization or live state. For campaign stages, pass `--campaign <intended-campaign-slug>` and
+confirm the returned campaign matches the intended one before using its readiness result. Use
+[uncertainty-policy.md](references/uncertainty-policy.md) for material gaps. Save confirmed results, actual cost, chosen
+brand/version and next actions in the relevant cloud record or requested workspace. Explain blockers and the next useful
+action concisely. Local templates are in `assets/project-template/`.
