@@ -45,12 +45,12 @@
     {
       "name": "image-batch-runner",
       "path": "skills/40-creative/image-batch-runner/SKILL.md",
-      "contentHash": "1fe8cffe802c285f36471421cba5827113794132fd1b5de6ee31741226f8f958"
+      "contentHash": "bae60534dedf12eaab1f7353c75d0166cdb636046b597329602cc2a3bac06dc7"
     },
     {
       "name": "image-generation",
       "path": "skills/10-routing/image-generation/SKILL.md",
-      "contentHash": "746bea5f6414f3444efd9bd2c50b08f589cff201b67acdc4277e072aaa7d3025"
+      "contentHash": "d325ba584c75e81e5a104f954f61c7fca038b88b68df38d34618938866aba521"
     },
     {
       "name": "instagram-research",

@@ -578,10 +578,10 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       "domain": "media",
       "capability": "media-generation",
       "endpointKeys": [
-        "image-gpt-image-2-text",
-        "image-gpt-image-2-edit",
         "image-nano-banana-2-1-text",
         "image-nano-banana-2-1-edit",
+        "image-gpt-image-2-text",
+        "image-gpt-image-2-edit",
         "image-nano-banana-2-lite-text",
         "image-nano-banana-2-lite-edit",
         "image-nano-banana-2-text",
@@ -600,6 +600,137 @@ export const HOSTED_EXECUTION_MANIFESTS = {
       ],
       "effect": "spend",
       "endpoints": [
+        {
+          "endpointKey": "image-nano-banana-2-1-text",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "9:16",
+                "16:9",
+                "1:1",
+                "4:5"
+              ],
+              "default": "1:1",
+              "required": false
+            },
+            {
+              "name": "resolution",
+              "class": "default",
+              "flag": "--resolution",
+              "type": "string",
+              "enumValues": [
+                "1k",
+                "2k",
+                "4k"
+              ],
+              "canonicalize": "image-resolution-tier",
+              "default": "1k",
+              "required": false
+            },
+            {
+              "name": "output_format",
+              "class": "default",
+              "flag": "--output-format",
+              "type": "string",
+              "enumValues": [
+                "png",
+                "jpeg"
+              ],
+              "canonicalize": "lowercase",
+              "default": "png",
+              "required": false
+            },
+            {
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ]
+        },
+        {
+          "endpointKey": "image-nano-banana-2-1-edit",
+          "fields": [
+            {
+              "name": "prompt",
+              "class": "intent",
+              "flag": "--prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "images",
+              "class": "intent",
+              "flag": "--reference-image",
+              "type": "media-url",
+              "mediaKind": "image",
+              "repeatable": true,
+              "minItems": 1,
+              "maxItems": 14,
+              "required": true
+            },
+            {
+              "name": "aspect_ratio",
+              "class": "default",
+              "flag": "--aspect-ratio",
+              "type": "string",
+              "enumValues": [
+                "9:16",
+                "16:9",
+                "1:1",
+                "4:5"
+              ],
+              "default": "1:1",
+              "required": false
+            },
+            {
+              "name": "resolution",
+              "class": "default",
+              "flag": "--resolution",
+              "type": "string",
+              "enumValues": [
+                "1k",
+                "2k",
+                "4k"
+              ],
+              "canonicalize": "image-resolution-tier",
+              "default": "1k",
+              "required": false
+            },
+            {
+              "name": "output_format",
+              "class": "default",
+              "flag": "--output-format",
+              "type": "string",
+              "enumValues": [
+                "png",
+                "jpeg"
+              ],
+              "canonicalize": "lowercase",
+              "default": "png",
+              "required": false
+            },
+            {
+              "name": "operationId",
+              "class": "runner-managed",
+              "flag": null,
+              "type": "string",
+              "required": false
+            }
+          ]
+        },
         {
           "endpointKey": "image-gpt-image-2-text",
           "fields": [
@@ -730,137 +861,6 @@ export const HOSTED_EXECUTION_MANIFESTS = {
               ],
               "canonicalize": "lowercase",
               "default": "medium",
-              "required": false
-            },
-            {
-              "name": "operationId",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            }
-          ]
-        },
-        {
-          "endpointKey": "image-nano-banana-2-1-text",
-          "fields": [
-            {
-              "name": "prompt",
-              "class": "intent",
-              "flag": "--prompt",
-              "type": "string",
-              "required": true
-            },
-            {
-              "name": "aspect_ratio",
-              "class": "default",
-              "flag": "--aspect-ratio",
-              "type": "string",
-              "enumValues": [
-                "9:16",
-                "16:9",
-                "1:1",
-                "4:5"
-              ],
-              "default": "1:1",
-              "required": false
-            },
-            {
-              "name": "resolution",
-              "class": "default",
-              "flag": "--resolution",
-              "type": "string",
-              "enumValues": [
-                "1k",
-                "2k",
-                "4k"
-              ],
-              "canonicalize": "image-resolution-tier",
-              "default": "1k",
-              "required": false
-            },
-            {
-              "name": "output_format",
-              "class": "default",
-              "flag": "--output-format",
-              "type": "string",
-              "enumValues": [
-                "png",
-                "jpeg"
-              ],
-              "canonicalize": "lowercase",
-              "default": "png",
-              "required": false
-            },
-            {
-              "name": "operationId",
-              "class": "runner-managed",
-              "flag": null,
-              "type": "string",
-              "required": false
-            }
-          ]
-        },
-        {
-          "endpointKey": "image-nano-banana-2-1-edit",
-          "fields": [
-            {
-              "name": "prompt",
-              "class": "intent",
-              "flag": "--prompt",
-              "type": "string",
-              "required": true
-            },
-            {
-              "name": "images",
-              "class": "intent",
-              "flag": "--reference-image",
-              "type": "media-url",
-              "mediaKind": "image",
-              "repeatable": true,
-              "minItems": 1,
-              "maxItems": 14,
-              "required": true
-            },
-            {
-              "name": "aspect_ratio",
-              "class": "default",
-              "flag": "--aspect-ratio",
-              "type": "string",
-              "enumValues": [
-                "9:16",
-                "16:9",
-                "1:1",
-                "4:5"
-              ],
-              "default": "1:1",
-              "required": false
-            },
-            {
-              "name": "resolution",
-              "class": "default",
-              "flag": "--resolution",
-              "type": "string",
-              "enumValues": [
-                "1k",
-                "2k",
-                "4k"
-              ],
-              "canonicalize": "image-resolution-tier",
-              "default": "1k",
-              "required": false
-            },
-            {
-              "name": "output_format",
-              "class": "default",
-              "flag": "--output-format",
-              "type": "string",
-              "enumValues": [
-                "png",
-                "jpeg"
-              ],
-              "canonicalize": "lowercase",
-              "default": "png",
               "required": false
             },
             {
