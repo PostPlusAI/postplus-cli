@@ -60,6 +60,13 @@ local folder or Python setup check. Read `postplus library --help` when needed.
    content after uncertain outcomes. Compare before replacing existing edits;
    rereading a website never silently changes saved facts. A successful normal save
    makes the reviewed content available to all three entrypoints immediately.
+   Web and MCP show the same continuously edited document. Custom chapters use
+   optional `sections: [{id, title, body}]`; keep their stable IDs and order.
+   Preserve all unrelated fields and chapters when editing. After a revision
+   conflict, reread and replay only the requested edits whose original passages
+   have not changed. If the user and agent changed the same passage, retain both
+   versions and resolve that passage; never replace the whole document to force
+   a save. An uncertain outcome still uses the exact original save request.
 5. Read the saved result. Old `brand-save` / `brand-adopt` commands retain their
    draft-only compatibility semantics; use them only when a caller explicitly
    needs a separate stored draft, never as the normal brand editing journey.
