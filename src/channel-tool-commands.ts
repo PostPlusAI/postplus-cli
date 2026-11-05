@@ -72,7 +72,7 @@ export function parseChannelToolCommand(args: string[]) {
       pathName: `/api/postplus-cli/channels/tools?tool=${encodeURIComponent(first)}`,
     };
   if (operation === 'run' && first && !first.startsWith('--')) {
-    const { values, booleans } = flags(rest, ['--wait', '--estimate']);
+    const { values, booleans } = flags(rest, ['--wait']);
     if (
       [...values.keys()].some(
         (key) =>
@@ -108,11 +108,10 @@ export function parseChannelToolCommand(args: string[]) {
       mediaMapFile: values.get('--media-map-file'),
       operationId: values.get('--operation-id') ?? randomUUID(),
       wait: booleans.has('--wait'),
-      estimate: booleans.has('--estimate'),
     };
   }
   throw new Error(
-    'Use channels tools list [--toolkit <id>] [--query <text>] [--offset <n>] [--limit <n>] | show <tool-slug> | run <tool-slug> --connection <id> --input-file <json-path> [--media-map-file <json-path>] [--target-id <id> --target-path <argument.path>] [--operation-id <id>] [--estimate] [--wait] | run --status <operation-id>.',
+    'Use channels tools list [--toolkit <id>] [--query <text>] [--offset <n>] [--limit <n>] | show <tool-slug> | run <tool-slug> --connection <id> --input-file <json-path> [--media-map-file <json-path>] [--target-id <id> --target-path <argument.path>] [--operation-id <id>] [--wait] | run --status <operation-id>.',
   );
 }
 
@@ -133,26 +132,19 @@ function readRun(
   };
 }
 
-function billingPending(value: unknown): boolean {
-  return Boolean(value && typeof value === 'object' &&
-    'billingPending' in value && value.billingPending === true);
-}
-
-function mergeChannelToolReceipt(first: unknown, latest: unknown): unknown {
-  if (!first || typeof first !== 'object' || !latest || typeof latest !== 'object') return latest;
-  return { ...first, ...latest, output: { ...readRun(first), ...readRun(latest) } };
-}
-
 export function shouldPollChannelTool(wait: boolean, value: unknown) {
-  const outcome = readRun(value)?.execution?.resultStatus;
-  return wait && outcome !== 'unknown' &&
-    (billingPending(value) || !['succeeded', 'failed'].includes(outcome ?? ''));
+  return (
+    wait &&
+    !['succeeded', 'failed', 'unknown'].includes(
+      readRun(value)?.execution?.resultStatus ?? '',
+    )
+  );
 }
 
 function channelToolExitCode(value: unknown): 0 | 1 | 2 {
   const status = readRun(value)?.execution?.resultStatus;
   if (status === 'failed') return 1;
-  if (status === 'unknown' || billingPending(value)) return 2;
+  if (status === 'unknown') return 2;
   return 0;
 }
 
@@ -192,7 +184,7 @@ export function buildChannelToolRequest(
     throw new Error('Tool input must be a JSON object.');
   return {
     capability: 'marketing-channels' as const,
-    operation: command.estimate ? 'quote-tool' as const : 'execute-tool' as const,
+    operation: 'execute-tool' as const,
     operationId: command.operationId,
     tool: command.tool,
     connectionId: command.connectionId,
@@ -308,11 +300,10 @@ export async function runChannelToolCommand(
     operation: 'status',
     operationId: command.operationId,
   };
-  // Estimates do not create durable runs or submit platform work.
-  // The caller can inspect execution IDs if the submit response is lost.
-  diagnostic(`Channel ${command.estimate ? 'estimate' : 'operation'}: ${command.operationId}\n`);
+  // The caller can inspect this ID if the submit response is lost.
+  diagnostic(`Channel operation: ${command.operationId}\n`);
   if (command.targetId) diagnostic(`Target ID: ${command.targetId}\n`);
-  if (!command.estimate && command.tool === 'POSTPLUS_METAADS_SET_CAMPAIGN_BUDGET' && (argumentsValue as Record<string, unknown>).apply === true) diagnostic('Validating shared campaign funding; Meta requires about 31 seconds between validation and submission. The configuration is checked again before the single write.\n');
+  if (command.tool === 'POSTPLUS_METAADS_SET_CAMPAIGN_BUDGET' && (argumentsValue as Record<string, unknown>).apply === true) diagnostic('Validating shared campaign funding; Meta requires about 31 seconds between validation and submission. The configuration is checked again before the single write.\n');
   let result: unknown;
   try {
     result = await submit({
@@ -332,7 +323,6 @@ export async function runChannelToolCommand(
       error instanceof PostPlusClientUpgradeRequiredError
     )
       throw error;
-    if (command.estimate) throw error;
     // The request may have reached hosted even if its response was lost. The
     // durable run can be inspected by ID, but this CLI must never resubmit it.
     output(
@@ -340,37 +330,29 @@ export async function runChannelToolCommand(
     );
     return 2;
   }
-  // Status receipts carry billing updates; retain the first business response.
-  if (!command.estimate && shouldPollChannelTool(command.wait, result)) {
+  // A successful read carries its data only in the first response. Polling a
+  // completed run would replace that response with its metadata-only receipt.
+  if (shouldPollChannelTool(command.wait, result)) {
     try {
-      const settled = await pollHostedRunUntilSettled({
+      result = await pollHostedRunUntilSettled({
           pollIntervalMs: 1000,
           waitBudgetMs: 60_000,
-          pollOnce: async () => {
-            const receipt = await submit({
+          pollOnce: () =>
+            submit({
               skillName: null,
               pathName: '/api/postplus-cli/hosted/capability',
               body: statusRequest,
-            });
-            result = mergeChannelToolReceipt(result, receipt);
-            return receipt;
-          },
-          readStatus: (value) => shouldPollChannelTool(true, value) ? 'settling' : readRun(value)?.status ?? null,
+            }),
+          readStatus: (value) => readRun(value)?.status ?? null,
           stopWaiting: (value) =>
             readRun(value)?.execution?.resultStatus === 'unknown',
         });
-      result = mergeChannelToolReceipt(result, settled);
     } catch (error) {
       const uncertain = lostChannelToolSubmission(command.operationId, error);
-      const observed = readRun(result)?.execution;
-      const execution = ['succeeded', 'failed'].includes(observed?.resultStatus ?? '')
-        ? observed : uncertain.execution;
-      output(`${JSON.stringify(mergeChannelToolReceipt(result, {
+      output(`${JSON.stringify({
         ...uncertain,
-        execution,
-        output: { execution },
         error: { ...uncertain.error, stage: 'cli_status_poll', delivery: 'accepted' },
-      }), null, 2)}\n`);
+      }, null, 2)}\n`);
       return 2;
     }
   }
