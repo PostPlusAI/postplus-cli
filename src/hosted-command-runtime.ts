@@ -166,7 +166,12 @@ export async function postHostedJson(input: {
             resolveFreshRemoteAuth({ forceRefresh: true, signal }),
         }),
     skillName: input.skillName,
-    timeoutMs: input.timeoutMs ?? 120000,
+    // Research status requests can synchronously finish in-flight media transfers.
+    timeoutMs:
+      input.timeoutMs ??
+      (input.pathName === '/api/postplus-cli/hosted/research'
+        ? 300_000
+        : 120_000),
   });
 
   let payload: unknown;
