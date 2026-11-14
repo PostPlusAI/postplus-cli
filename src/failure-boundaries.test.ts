@@ -30,6 +30,23 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 const auth = { apiBaseUrl: 'https://postplus.test', cliSessionToken: 'fixture-session' };
+test('research requests have a longer transport budget without changing other hosted requests', async () => {
+  const originalTimeout = AbortSignal.timeout;
+  const budgets: number[] = [];
+  AbortSignal.timeout = (milliseconds) => {
+    budgets.push(milliseconds);
+    return originalTimeout(milliseconds);
+  };
+  globalThis.fetch = async () => Response.json({ status: 'completed' });
+  try {
+    await postHostedJson({ body: {}, pathName: '/api/postplus-cli/hosted/research', skillName: null, context: { auth } });
+    await postHostedJson({ body: {}, pathName: '/api/postplus-cli/hosted/capability', skillName: null, context: { auth } });
+    await postHostedJson({ body: {}, pathName: '/api/postplus-cli/hosted/research', skillName: null, timeoutMs: 1_000, context: { auth } });
+    assert.deepEqual(budgets, [300_000, 120_000, 1_000]);
+  } finally {
+    AbortSignal.timeout = originalTimeout;
+  }
+});
 const actions = [
   () => fetchHostedBalance(),
   () => fetchHostedRunDetail('run-original'),
