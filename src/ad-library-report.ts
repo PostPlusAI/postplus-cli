@@ -88,7 +88,7 @@ export type ReportSource = {
   count: number | null;
   note: string;
 };
-export function normalizeAdReport(inputs: ReportInput[]) {
+export function normalizeAdReport(inputs: ReportInput[], options: { imageSources?: 'display' | 'archive' } = {}) {
   const ads = new Map<string, ReportAd>();
   const sources: ReportSource[] = [];
   for (const input of inputs) {
@@ -201,8 +201,8 @@ export function normalizeAdReport(inputs: ReportInput[]) {
           ].map(obj))
             media.push({
               kind: 'image',
-              url: url(i.original_image_url || i.resized_image_url),
-              poster: '',
+              url: url(options.imageSources === 'archive' ? i.original_image_url : i.original_image_url || i.resized_image_url),
+              poster: options.imageSources === 'archive' ? url(i.resized_image_url) : '',
             });
         }
         const destination = c.destinationUrl || c.link_url || snapshot.link_url;
