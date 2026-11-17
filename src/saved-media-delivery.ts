@@ -39,10 +39,9 @@ export function appendSavedMediaLinks(
 
     if (typeof record.mediaReference === 'string') {
       const ref = new URL(record.mediaReference);
+      const research = /^postplus-research-media:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(record.mediaReference);
       if (
-        ref.protocol !== 'postplus-media:' ||
-        !['results', 'uploads'].includes(ref.hostname) ||
-        !ref.pathname ||
+        (!research && (ref.protocol !== 'postplus-media:' || !['results','uploads'].includes(ref.hostname) || !ref.pathname)) ||
         ref.search ||
         ref.hash ||
         ref.username ||
@@ -53,8 +52,8 @@ export function appendSavedMediaLinks(
         typeof record.name === 'string'
           ? record.name
           : typeof record.kind === 'string'
-            ? record.kind + ' · ' + ref.pathname.split('/').at(-1)
-            : ref.pathname.split('/').at(-1) || 'Saved file';
+            ? record.kind + ' · ' + (research ? ref.hostname : ref.pathname.split('/').at(-1))
+            : (research ? ref.hostname : ref.pathname.split('/').at(-1)) || 'Saved file';
       saved.set(ref.href, { source, label });
     }
     for (const key of [

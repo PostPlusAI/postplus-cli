@@ -1428,3 +1428,28 @@ test('complete partial altered after failed commit is rejected without fetching 
   assert.equal((await stat(output)).isDirectory(), true);
   assert.equal(await readFile(partial, 'utf8'), 'xxxx');
 });
+
+test('CLI reopens one research reference with fresh signatures and identical bytes', async () => {
+  const researchRef = 'postplus-research-media://aabbccdd-1234-4567-89ab-aabbccddeeff';
+  const original = Buffer.from('verified original bytes');
+  let signs = 0;
+  globalThis.fetch = async (url, init) => {
+    const registration = registrationReceipt(url, init);
+    if (registration) return registration;
+    if (String(url).startsWith('https://postplus.test/')) {
+      const request = JSON.parse(String(init?.body));
+      assert.equal(request.operation, 'create-read-url');
+      assert.equal(request.file.mediaReference, researchRef);
+      signs++;
+      return Response.json({ output: { mediaReference: researchRef, signedUrl: `https://download.test/original?signature=${signs}` } });
+    }
+    assert.equal(String(url), `https://download.test/original?signature=${signs}`);
+    return new Response(original, { headers: { 'content-length': String(original.length), etag: '"same-original"' } });
+  };
+  for (const reopening of [1, 2]) {
+    const output = path.join(directory, `research-${reopening}.bin`);
+    await runMediaFileCommand(['download', '--reference', researchRef, '--output-file', output, '--output', path.join(directory, `research-${reopening}.json`)]);
+    assert.deepEqual(await readFile(output), original);
+  }
+  assert.equal(signs, 2);
+});
