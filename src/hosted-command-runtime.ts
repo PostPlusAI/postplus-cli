@@ -130,6 +130,7 @@ export async function postHostedJson(input: {
   debug?: boolean;
   pathName: string;
   skillName: string | null;
+  statusRead?: boolean;
   timeoutMs?: number;
   // When present (the hosted-lib path) the POST uses the injected auth +
   // skillsReleaseId with NO disk read and NO 401-refresh-retry (the eve runtime
@@ -142,12 +143,13 @@ export async function postHostedJson(input: {
     capability?: unknown;
     operation?: unknown;
   } | null;
-  const isMediaStatus =
-    requestBody?.operation === 'status' &&
-    ['video-analysis', 'media-generation'].includes(
-      String(requestBody.capability),
-    );
-  const signal = isMediaStatus
+  const isStatusRead =
+    input.statusRead === true ||
+    (requestBody?.operation === 'status' &&
+      ['video-analysis', 'media-generation'].includes(
+        String(requestBody.capability),
+      ));
+  const signal = isStatusRead
     ? AbortSignal.timeout(input.timeoutMs ?? 30000)
     : undefined;
   const auth =
@@ -173,9 +175,9 @@ export async function postHostedJson(input: {
   try {
     payload = await readJsonResponse(response);
   } catch (error) {
-    if (response.ok || !isMediaStatus) {
+    if (response.ok || !isStatusRead) {
       if (
-        isMediaStatus &&
+        isStatusRead &&
         error instanceof Error &&
         (error instanceof TypeError ||
           error.name === 'AbortError' ||
@@ -405,18 +407,15 @@ export function shellQuoteArg(value: string): string {
   return `'${value.replace(/'/gu, "'\\''")}'`;
 }
 
-// Shared bounded wait loop for every resumable hosted run (`media poll
-// --handle`, `research collect/scrape --run-handle`). One invocation re-checks
-// the status boundary until the business and credit settlement are terminal, the payload stops
-// exposing a readable status (fail safe: return it rather than loop blind), or
-// the wait budget is spent — then returns the latest payload as-is. Every check
-// is an independent short HTTP read; nothing holds a connection open.
+// Shared bounded wait for resumable hosted runs. Callers can supply an earlier
+// completion condition, such as a research result ready for delivery.
 export async function pollHostedRunUntilSettled(input: {
   pollIntervalMs: number;
   initialPollIntervalMs?: number;
   pollOnce: (timeoutMs?: number) => Promise<unknown>;
   readStatus: (payload: unknown) => string | null;
   waitBudgetMs: number;
+  scheduleFromRequestStart?: boolean;
   retryTransientErrors?: boolean;
   stopWaiting?: (payload: unknown) => boolean;
 }): Promise<unknown> {
@@ -425,6 +424,7 @@ export async function pollHostedRunUntilSettled(input: {
   let latestPending: unknown;
   let hasPending = false;
   while (true) {
+    const requestStartedAt = performance.now();
     let payload: unknown;
     try {
       const remaining = input.waitBudgetMs - (performance.now() - startedAt);
@@ -477,17 +477,20 @@ export async function pollHostedRunUntilSettled(input: {
     }
     latestPending = payload;
     hasPending = true;
-    const remainingMs = input.waitBudgetMs - (performance.now() - startedAt);
+    const now = performance.now();
+    const remainingMs = input.waitBudgetMs - (now - startedAt);
     if (remainingMs <= 0) {
       return payload;
     }
-    // Short research tasks should not sit finished for a full media polling
-    // interval. After 30 seconds retain the normal cadence for long tasks.
+    // Legacy research routes retain their initial polling interval.
     const interval = input.initialPollIntervalMs !== undefined &&
-      performance.now() - startedAt < 30_000
+      now - startedAt < 30_000
       ? Math.min(input.initialPollIntervalMs, input.pollIntervalMs)
       : input.pollIntervalMs;
-    await sleepMs(Math.min(interval, remainingMs));
+    const delay = input.scheduleFromRequestStart
+      ? interval - (now - requestStartedAt)
+      : interval;
+    if (delay > 0) await sleepMs(Math.min(delay, remainingMs));
     if (
       input.retryTransientErrors &&
       performance.now() - startedAt >= input.waitBudgetMs

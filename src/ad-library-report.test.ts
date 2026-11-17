@@ -55,6 +55,26 @@ test('retains 720 ads beyond request page sizes and all creative variants, dedup
     /Collection outcomes|Media loads from source URLs|external scripts|fresh\.json|returned records/,
   );
 });
+test('renders ready Meta ads while settlement and archival are still pending', () => {
+  const ready = (items: unknown[]) => ({
+    name: 'meta-ready.json',
+    payload: {
+      ...input(items).payload,
+      operationId: 'meta-original',
+      status: 'processing',
+      results_ready: true,
+      settlement_pending: true,
+    },
+  });
+  const data = normalizeAdReport([ready([ad()])]);
+  assert.equal(data.ads.length, 1);
+  assert.equal(data.sources[0]?.count, 1);
+  assert.equal(data.sources[0]?.state, 'processing');
+  assert.match(renderAdReport([ready([ad()])]), /Actual text/);
+  assert.match(renderAdReport([ready([])]), /no returned ads/);
+  assert.doesNotMatch(renderAdReport([ready([])]), /Collection is still in progress/);
+});
+
 test('stored results normalize with correct observation, relative public logos and pagination disclosure', () => {
   const result = {
     name: 'stored.json',

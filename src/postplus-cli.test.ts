@@ -6289,6 +6289,265 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('retains a stateless V2 Meta checkpoint handle until the server confirms a durable operation', async () => {
+    const dir = await mkdtemp(resolve(tmpdir(), 'postplus-meta-v2-'));
+    tempDirs.push(dir);
+    const checkpoint = resolve(dir, 'result.json');
+    await setLocalSession({
+      accountId: 'account_1',
+      accountName: 'Account',
+      apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token',
+      sessionExpiresAt: null,
+      userEmail: 'agent@example.com',
+      userId: 'user_1',
+    });
+    const routeKey = 'facebook-ads-library';
+    const pending = {
+      routeKey,
+      operationId: 'old-stateless-op',
+      runHandle: 'sealed-v2-handle',
+      status: 'processing',
+      settlement_pending: true,
+    };
+    await writeFile(checkpoint, JSON.stringify(pending));
+    const calls: unknown[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      calls.push(body);
+      if (body.sourceOperationId) return Response.json({code: 'postplus_cli_hosted_async_run_not_found'}, {status: 404});
+      assert.deepEqual(body, {routeKey, runHandle: pending.runHandle});
+      return Response.json(calls.length === 1 ? pending : {
+        ...pending, status: 'completed', settlement_pending: false, runHandle: null,
+        output: { items: [{ ad_archive_id: '123' }] },
+      });
+    };
+    try {
+      assert.equal(await runHostedDomainCommand('research', [
+        'run', '--resume-from', checkpoint, '--poll-interval-seconds', '0.01', '--wait-seconds', '1',
+      ]), 0);
+      assert.equal(calls.length, 2);
+      assert.equal(JSON.parse(await readFile(checkpoint, 'utf8')).status, 'completed');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('delivers Meta Ads from submit and checkpoint before settlement or media finishes', async () => {
+    const dir = await mkdtemp(resolve(tmpdir(), 'postplus-meta-ready-'));
+    tempDirs.push(dir);
+    const outputPath = resolve(dir, 'result.json');
+    await setLocalSession({
+      accountId: 'account_1', accountName: 'Account', apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token', sessionExpiresAt: null,
+      userEmail: 'agent@example.com', userId: 'user_1',
+    });
+    const routeKey = 'facebook-ads-library';
+    const operationId = 'meta-ads-original';
+    const processing = {
+      routeKey, operationId, runHandle: 'sealed-meta-run', status: 'processing',
+      accountId: 'account_1', results_ready: false, settlement_pending: true,
+    };
+    const mediaRefId = '807d9003-e88c-4a7e-b73f-354e145431d0';
+    const ready = {
+      ...processing, results_ready: true,
+      output: {
+        items: [{ad_archive_id: '123'}],
+        media_preservation: {state: 'saving', missing: [{media_ref_id: mediaRefId}]},
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    const bodies: unknown[] = [];
+    const submit = (wait: string[], expectPoll: boolean) => {
+      globalThis.fetch = async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        bodies.push(body);
+        if (body.input) return Response.json(expectPoll ? processing : ready, { status: 202 });
+        assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), processing);
+        return Response.json(ready, { status: 202 });
+      };
+      return runHostedDomainCommand('research', [
+        'run', routeKey, '--query', 'running shoes', '--hosted-operation-id', operationId,
+        '--output', outputPath, ...wait,
+      ]);
+    };
+    try {
+      assert.equal(await submit(['--wait'], false), 0);
+      assert.equal(bodies.length, 1);
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), ready);
+      bodies.length = 0;
+      assert.equal(await submit(['--wait'], true), 0);
+      assert.equal(bodies.length, 2);
+      assert.deepEqual(bodies[1], {routeKey, sourceOperationId: operationId});
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), ready);
+      bodies.length = 0;
+      assert.equal(await submit(['--wait', 'false'], true), 0);
+      assert.equal(bodies.length, 1);
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), processing);
+
+      await writeFile(outputPath, JSON.stringify({...processing, runHandle: null}));
+      bodies.length = 0;
+      globalThis.fetch = async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return Response.json(ready, {status: 202});
+      };
+      assert.equal(await runHostedDomainCommand('research', [
+        'run', '--resume-from', outputPath, '--wait-seconds', '0',
+      ]), 0);
+      assert.deepEqual(bodies, [{routeKey, sourceOperationId: operationId}]);
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), ready);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects a malformed or mismatched Meta ready response and preserves the original checkpoint', async () => {
+    const dir = await mkdtemp(resolve(tmpdir(), 'postplus-meta-invalid-ready-'));
+    tempDirs.push(dir);
+    const outputPath = resolve(dir, 'result.json');
+    await setLocalSession({
+      accountId: 'account_1', accountName: 'Account', apiBaseUrl: 'https://postplus.test',
+      cliSessionToken: 'cli-session-token', sessionExpiresAt: null,
+      userEmail: 'agent@example.com', userId: 'user_1',
+    });
+    const originalFetch = globalThis.fetch;
+    const checkpoint = {
+      routeKey: 'facebook-ads-library', operationId: 'meta-original', runHandle: 'sealed-meta',
+      status: 'processing', accountId: 'account_1', results_ready: false,
+    };
+    try {
+      for (const response of [
+        {operationId: 'meta-other', output: {items: []}},
+        {output: {}},
+        {output: {items: []}, status: 'failed'},
+      ]) {
+        await writeFile(outputPath, JSON.stringify(checkpoint));
+        globalThis.fetch = async () => Response.json({
+          ...checkpoint, results_ready: true, ...response,
+        });
+        await assert.rejects(runHostedDomainCommand('research', [
+          'run', '--resume-from', outputPath, '--wait-seconds', '0',
+        ]), /different research operation|without a valid research result/);
+        assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), checkpoint);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('keeps one Meta status read in flight and uses the same one-second cadence after 30 seconds', {timeout: 5000}, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let elapsed = 0;
+    t.mock.method(performance, 'now', () => elapsed);
+    const flush = async () => new Promise<void>((resolve) => setImmediate(resolve));
+    const tick = async (milliseconds: number) => {
+      elapsed += milliseconds;
+      t.mock.timers.tick(milliseconds);
+      await flush();
+    };
+    const routeKey = 'facebook-ads-library';
+    const operationId = 'meta-original';
+    const starts: number[] = [];
+    const ready = {
+      routeKey, operationId, runHandle: 'sealed-meta', status: 'processing',
+      results_ready: true, settlement_pending: true, output: {items: []},
+    };
+    const firstStarted = Promise.withResolvers<void>();
+    const secondStarted = Promise.withResolvers<void>();
+    const finishFirst = Promise.withResolvers<void>();
+    let finishAll = false;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.input) return Response.json({...ready, results_ready: false, output: null});
+      assert.deepEqual(body, {routeKey, sourceOperationId: operationId});
+      starts.push(elapsed);
+      if (starts.length === 1) {
+        firstStarted.resolve();
+        await finishFirst.promise;
+      }
+      if (starts.length === 2) secondStarted.resolve();
+      return Response.json(!finishAll && starts.length < 3
+        ? {...ready, results_ready: false, output: null}
+        : ready);
+    };
+    const waiting = runHostedDomainCommand('research', [
+      'run', routeKey, '--query', 'running shoes', '--hosted-operation-id', operationId,
+      '--wait',
+    ], {
+      auth: {apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token'},
+    });
+    const waitForStatus = (seen: Promise<void>) => Promise.race([
+      seen,
+      waiting.then(() => { throw new Error('Meta wait finished before the expected status request'); }),
+    ]);
+    try {
+      await waitForStatus(firstStarted.promise);
+      assert.deepEqual(starts, [0]);
+      await tick(31_000);
+      assert.deepEqual(starts, [0]);
+      finishFirst.resolve();
+      await waitForStatus(secondStarted.promise);
+      await flush();
+      assert.deepEqual(starts, [0, 31_000]);
+      await tick(999);
+      assert.deepEqual(starts, [0, 31_000]);
+      await tick(1);
+      assert.deepEqual(await waiting, ready);
+      assert.deepEqual(starts, [0, 31_000, 32_000]);
+    } finally {
+      finishAll = true;
+      finishFirst.resolve();
+      await tick(8000);
+      await waiting.catch(() => {});
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('retries a transient Meta status read and stops on permission loss', async () => {
+    const routeKey = 'facebook-ads-library';
+    const operationId = 'meta-original';
+    const ready = {
+      routeKey, operationId, runHandle: 'sealed-meta', status: 'processing',
+      results_ready: true, settlement_pending: true, output: {items: []},
+    };
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const status of [429, 403]) {
+        let submits = 0;
+        let checks = 0;
+        globalThis.fetch = async (_url, init) => {
+          const body = JSON.parse(String(init?.body));
+          if (body.input) {
+            submits++;
+            return Response.json({...ready, results_ready: false, output: null});
+          }
+          assert.deepEqual(body, {routeKey, sourceOperationId: operationId});
+          checks++;
+          return checks === 1
+            ? Response.json(
+                {code: 'meta_status_unavailable', message: 'Meta status read unavailable'},
+                {status, headers: {'retry-after': '0'}},
+              )
+            : Response.json(ready);
+        };
+        const waiting = runHostedDomainCommand('research', [
+          'run', routeKey, '--query', 'running shoes', '--hosted-operation-id', operationId,
+          '--wait', '--poll-interval-seconds', '0.001',
+        ], {
+          auth: {apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token'},
+        });
+        if (status === 429) assert.deepEqual(await waiting, ready);
+        else await assert.rejects(waiting, /Meta status read unavailable/);
+        assert.equal(submits, 1);
+        assert.equal(checks, status === 429 ? 2 : 1);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('checkpoints an accepted Research run before polling and preserves it when polling fails', async () => {
     const requestDir = await mkdtemp(
       resolve(tmpdir(), 'postplus-research-checkpoint-first-'),
