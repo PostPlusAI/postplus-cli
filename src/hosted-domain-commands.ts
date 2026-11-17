@@ -846,10 +846,11 @@ async function runMediaFileDownload(
   }
   if (
     reference !== null &&
-    !reference.startsWith(HOSTED_MEDIA_REFERENCE_URI_PREFIX)
+    !reference.startsWith(HOSTED_MEDIA_REFERENCE_URI_PREFIX) &&
+    !/^postplus-research-media:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reference)
   ) {
     throw new Error(
-      `media-file download --reference must start with ${HOSTED_MEDIA_REFERENCE_URI_PREFIX}.`,
+      'media-file download --reference requires a saved file or research media reference.',
     );
   }
   if (directUrl !== null && !/^https:\/\//iu.test(directUrl)) {
