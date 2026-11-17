@@ -98,7 +98,15 @@ export function normalizeAdReport(inputs: ReportInput[], options: { imageSources
     if (!stored && envelope.routeKey !== 'facebook-ads-library')
       throw new Error(`Unsupported ad report input: ${input.name}`);
     const state = stored ? 'stored snapshots' : str(envelope.status);
-    if (!stored && state !== 'completed') {
+    const ready = !stored && envelope.results_ready === true;
+    if (ready && (
+      !str(envelope.operationId) ||
+      !['processing', 'completed'].includes(state) ||
+      envelope.error
+    )) {
+      throw new Error(`Invalid ready ad result: ${input.name}`);
+    }
+    if (!stored && state !== 'completed' && !ready) {
       if (!state) throw new Error(`Missing operation status: ${input.name}`);
       const error = obj(envelope.error);
       sources.push({
@@ -407,13 +415,8 @@ function emptyReportMessage(ads: ReportAd[], sources: ReportSource[]): string {
   );
   const pending = sources.some(
     (source) =>
-      ![
-        'completed',
-        'stored snapshots',
-        'failed',
-        'canceled',
-        'cancelled',
-      ].includes(source.state),
+      source.count === null &&
+      !['failed', 'canceled', 'cancelled'].includes(source.state),
   );
   if (pending)
     return `Collection is still in progress.${failed ? ' Some sources failed; some results are unavailable.' : ''} This is not evidence of no ads.`;
@@ -456,7 +459,11 @@ export function renderAdReport(inputs: ReportInput[]): string {
   const sourceNotices = [
     ...new Set(
       sources
-        .filter((source) => source.note && source.state !== 'completed')
+        .filter(
+          (source) =>
+            source.note &&
+            (source.count === null || source.state === 'stored snapshots'),
+        )
         .map((source) => source.note),
     ),
   ];

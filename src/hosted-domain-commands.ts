@@ -1568,17 +1568,19 @@ async function runMediaPoll(
 }
 
 type ResearchVerb = 'run';
+const META_ADS_RESEARCH_ROUTE = 'facebook-ads-library';
 
 type ResearchRunProjection = {
   routeKey: string | null;
   runHandle: string | null;
   operationId: string | null;
   status: string | null;
+  resultsReady: boolean | null;
 };
 
 function readResearchRunRecord(value: unknown): ResearchRunProjection {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { routeKey: null, runHandle: null, operationId: null, status: null };
+    return { routeKey: null, runHandle: null, operationId: null, status: null, resultsReady: null };
   }
   const record = value as Record<string, unknown>;
   return {
@@ -1596,6 +1598,7 @@ function readResearchRunRecord(value: unknown): ResearchRunProjection {
       typeof record.operationId === 'string' && record.operationId.trim()
         ? record.operationId
         : null,
+    resultsReady: typeof record.results_ready === 'boolean' ? record.results_ready : null,
     status:
       typeof record.status === 'string' && record.status.trim()
         ? record.status
@@ -1623,19 +1626,61 @@ function readResearchRunStatus(payload: unknown): string | null {
   return readResearchRun(payload).status;
 }
 
+function hasMetaAdsResults(payload: unknown): boolean {
+  return (
+    !!payload &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    (payload as Record<string, unknown>).results_ready === true
+  );
+}
+
 function assertResearchResumePayload(
   payload: unknown,
   verb: ResearchVerb,
-): void {
-  const { runHandle, operationId, status } = readResearchRun(payload);
-  if (status) {
-    if (!isHostedRunSettled(payload, status) && !runHandle &&
-        !(isTerminalRunStatus(status) && operationId)) {
+  expectedRouteKey: string | null,
+  expectedOperationId?: string | null,
+): ResearchRunProjection {
+  const run = readResearchRun(payload);
+  const { routeKey, runHandle, operationId, status } = run;
+  const meta = expectedRouteKey === META_ADS_RESEARCH_ROUTE;
+  if (
+    meta &&
+    ((routeKey && routeKey !== expectedRouteKey) ||
+      (expectedOperationId && operationId && operationId !== expectedOperationId))
+  ) {
+    throw new Error('Meta Ads status returned a different research operation.');
+  }
+  if (meta && hasMetaAdsResults(payload)) {
+    const record = payload as Record<string, unknown>;
+    const output = record.output;
+    if (
+      routeKey !== expectedRouteKey ||
+      !operationId ||
+      (status !== 'processing' && status !== 'completed') ||
+      record.error ||
+      !output ||
+      typeof output !== 'object' ||
+      Array.isArray(output) ||
+      !Array.isArray((output as Record<string, unknown>).items)
+    ) {
       throw new Error(
-        `Research ${verb} returned unfinished work without a resumable run handle or settlement operation identity.`,
+        'Meta Ads reported that results were ready without a valid research result.',
       );
     }
-    return;
+    return run;
+  }
+  if (status) {
+    if (
+      !isHostedRunSettled(payload, status) &&
+      !runHandle &&
+      !((meta || isTerminalRunStatus(status)) && operationId)
+    ) {
+      throw new Error(
+        `Research ${verb} returned unfinished work without a resumable run handle or operation identity.`,
+      );
+    }
+    return run;
   }
 
   throw new Error(
@@ -1707,12 +1752,23 @@ async function resolveResearchResumeInput(input: {
 
   const checkpointPath = path.resolve(requireFlag(input.flags, 'resume-from'));
   const checkpoint = await readJsonFile(checkpointPath);
-  const { routeKey, runHandle, operationId, status } = readResearchRun(checkpoint);
-  if (status && isHostedRunSettled(checkpoint, status)) {
-    // Explicitly reopening a completed result may finish saving legacy media.
-    // This path carries only original identity: it cannot recover admission or
-    // submit inputs, even when that old run is no longer available.
-    if (status === 'completed' && routeKey && (operationId || runHandle)) {
+  const { routeKey, runHandle, operationId, status, resultsReady } = readResearchRun(checkpoint);
+  const settled = status !== null && isHostedRunSettled(checkpoint, status);
+  // V2 can contain both IDs with no stored run behind its signed handle.
+  const hasDurableMetaIdentity =
+    routeKey === META_ADS_RESEARCH_ROUTE && operationId !== null &&
+    (resultsReady !== null || !runHandle);
+  const acceptedMeta =
+    hasDurableMetaIdentity && status !== null &&
+    status !== 'submission_unknown' && !settled;
+  if (settled || acceptedMeta) {
+    // Reopening an accepted Meta run or a completed result is a status read.
+    // Use only the original identity, even if the run is no longer available.
+    if (
+      (status === 'completed' || acceptedMeta) &&
+      routeKey &&
+      (operationId || runHandle)
+    ) {
       const record = checkpoint as Record<string, unknown>;
       const saved = record.researchRecovery;
       if (typeof record.accountId === 'string' || (saved && typeof saved === 'object' && !Array.isArray(saved))) {
@@ -1731,7 +1787,7 @@ async function resolveResearchResumeInput(input: {
         }
       }
       return { outputPath: checkpointPath, preserveCheckpointOnError: true, routeKey,
-        ...(operationId ? { sourceOperationId: operationId } : { runHandle: runHandle! }) };
+        ...(operationId && (routeKey !== META_ADS_RESEARCH_ROUTE || hasDurableMetaIdentity) ? { sourceOperationId: operationId } : { runHandle: runHandle! }) };
     }
     throw new Error(
       `Research ${input.verb} checkpoint is already terminal (${status}).`,
@@ -1795,6 +1851,24 @@ function resolveHostedRunWaitFlags(flags: ParsedFlags): {
       defaultSeconds: HOSTED_RUN_DEFAULT_WAIT_SECONDS,
       maxSeconds: HOSTED_RUN_MAX_WAIT_SECONDS,
     }),
+  };
+}
+
+function researchPollingOptions(
+  routeKey: string | null,
+  flags: ParsedFlags,
+  wait: { pollIntervalMs: number; waitBudgetMs: number },
+) {
+  const meta = routeKey === META_ADS_RESEARCH_ROUTE;
+  const customInterval = flags.values.has('poll-interval-seconds');
+  return {
+    ...wait,
+    pollIntervalMs: meta && !customInterval ? 1000 : wait.pollIntervalMs,
+    initialPollIntervalMs: !meta && !customInterval ? 2000 : undefined,
+    retryTransientErrors: meta,
+    scheduleFromRequestStart: meta,
+    stopWaiting: meta ? hasMetaAdsResults : undefined,
+    readStatus: readResearchRunStatus,
   };
 }
 
@@ -2195,39 +2269,55 @@ async function runResearchRun(
       routeKey,
     });
     assertKnownResearchRoute(targets, resumeRouteKey);
-    const { pollIntervalMs, waitBudgetMs } = resolveHostedRunWaitFlags(flags);
+    const polling = researchPollingOptions(
+      resumeRouteKey,
+      flags,
+      resolveHostedRunWaitFlags(flags),
+    );
+    const meta = resumeRouteKey === META_ADS_RESEARCH_ROUTE;
     let currentHandle = runHandle;
-    let admissionAttempted = false;
+    let currentOperationId = sourceOperationId;
+    let hasDurableMetaIdentity = meta && !!sourceOperationId;
+    let mayRecoverAdmission = !!recoveryRequest;
 
     return dispatchHostedCommand(
       {
         request: () =>
           pollHostedRunUntilSettled({
-            pollIntervalMs,
-            initialPollIntervalMs: flags.values.has('poll-interval-seconds') ? undefined : 2_000,
-            pollOnce: async () => {
+            ...polling,
+            pollOnce: async (timeoutMs) => {
               let payload: unknown;
+              const identity = currentOperationId && (hasDurableMetaIdentity || !currentHandle)
+                ? { sourceOperationId: currentOperationId }
+                : { runHandle: currentHandle };
               try { payload = await postHostedJson({
-                body: { routeKey: resumeRouteKey, ...(currentHandle ? {runHandle: currentHandle} : {sourceOperationId}) },
+                body: { routeKey: resumeRouteKey, ...identity },
                 pathName: '/api/postplus-cli/hosted/research',
                 skillName: null,
                 context,
+                statusRead: meta,
+                timeoutMs,
               }); } catch (error) {
-                if (currentHandle || admissionAttempted || !sourceOperationId || !recoveryRequest ||
+                if (currentHandle || !mayRecoverAdmission || !sourceOperationId || !recoveryRequest ||
                     !(error instanceof HostedProductRequestError) || error.httpStatus !== 404 ||
                     error.productError.code !== 'postplus_cli_hosted_async_run_not_found') throw error;
                 // Typed absence only. The durable unique row admits at most
                 // one dispatch even if the delayed original races this call.
-                admissionAttempted = true;
+                mayRecoverAdmission = false;
                 payload = await postHostedJson({body: {routeKey: resumeRouteKey, operationId: sourceOperationId, input: recoveryRequest.input}, pathName: '/api/postplus-cli/hosted/research', skillName: recoveryRequest.skillName, context});
               }
-              assertResearchResumePayload(payload, verb);
-              currentHandle = readResearchRun(payload).runHandle ?? currentHandle;
+              const run = assertResearchResumePayload(
+                payload, verb, resumeRouteKey, currentOperationId,
+              );
+              mayRecoverAdmission = false;
+              currentHandle = run.runHandle ?? currentHandle;
+              if (meta) {
+                currentOperationId = run.operationId ?? currentOperationId;
+                if (run.resultsReady !== null && currentOperationId) hasDurableMetaIdentity = true;
+              }
               if (outputPath) await writeResult(payload, outputPath, false);
               return payload;
             },
-            readStatus: readResearchRunStatus,
-            waitBudgetMs,
           }),
         errorInputLabel: 'research-run-handle',
         json: flags.booleans.has('json'),
@@ -2297,6 +2387,7 @@ async function runResearchRun(
     flags.values.get('hosted-operation-id') ??
     `postplus-cli:research:run:${routeKey}:${randomUUID()}`;
   const wait = resolveHostedSubmitWaitOption(flags);
+  const meta = routeKey === META_ADS_RESEARCH_ROUTE;
   let checkpointWritten = false;
 
   return dispatchHostedCommand(
@@ -2329,12 +2420,13 @@ async function runResearchRun(
           }
           throw error;
         }
-        assertResearchResumePayload(submitted, verb);
-        if (!wait) {
-          return submitted;
-        }
-        const run = readResearchRun(submitted);
-        if (!run.status || isHostedRunSettled(submitted, run.status)) {
+        const run = assertResearchResumePayload(submitted, verb, routeKey, operationId);
+        if (
+          !wait ||
+          !run.status ||
+          (meta && hasMetaAdsResults(submitted)) ||
+          isHostedRunSettled(submitted, run.status)
+        ) {
           return submitted;
         }
         if (!run.runHandle && !run.operationId) {
@@ -2347,23 +2439,33 @@ async function runResearchRun(
           checkpointWritten = true;
         }
         let currentHandle = run.runHandle;
+        let currentOperationId = run.operationId;
+        let hasDurableMetaIdentity = meta && run.resultsReady !== null;
         return pollHostedRunUntilSettled({
-          pollIntervalMs: wait.pollIntervalMs,
-          initialPollIntervalMs: flags.values.has('poll-interval-seconds') ? undefined : 2_000,
-          pollOnce: async () => {
+          ...researchPollingOptions(routeKey, flags, wait),
+          pollOnce: async (timeoutMs) => {
+            const identity = currentOperationId && (hasDurableMetaIdentity || !currentHandle)
+              ? { sourceOperationId: currentOperationId }
+              : { runHandle: currentHandle };
             const payload = await postHostedJson({
-              body: { routeKey, ...(currentHandle ? { runHandle: currentHandle } : { sourceOperationId: run.operationId }) },
+              body: { routeKey, ...identity },
               pathName: '/api/postplus-cli/hosted/research',
               skillName: null,
               context,
+              statusRead: meta,
+              timeoutMs,
             });
-            assertResearchResumePayload(payload, verb);
-            currentHandle = readResearchRun(payload).runHandle ?? currentHandle;
+            const observed = assertResearchResumePayload(
+              payload, verb, routeKey, operationId,
+            );
+            currentHandle = observed.runHandle ?? currentHandle;
+            if (meta) {
+              currentOperationId = observed.operationId ?? currentOperationId;
+              if (observed.resultsReady !== null && currentOperationId) hasDurableMetaIdentity = true;
+            }
             if (!context && outputPath) await writeResult(payload, outputPath, false);
             return payload;
           },
-          readStatus: readResearchRunStatus,
-          waitBudgetMs: wait.waitBudgetMs,
         });
       },
       errorInputLabel: `research-run-${routeKey}`,
@@ -2577,11 +2679,14 @@ function extractResearchResume(
   verb: ResearchVerb,
   outputPath: string | null,
 ): string | null {
-  const { runHandle, operationId, status } = readResearchRun(payload);
+  const { routeKey, runHandle, operationId, status } = readResearchRun(payload);
   if ((!runHandle && !operationId) || !outputPath) {
     return null;
   }
-  if (status && isHostedRunSettled(payload, status)) {
+  if (
+    (routeKey === META_ADS_RESEARCH_ROUTE && hasMetaAdsResults(payload)) ||
+    (status && isHostedRunSettled(payload, status))
+  ) {
     return null;
   }
   return `postplus research ${verb} --resume-from ${shellQuoteArg(

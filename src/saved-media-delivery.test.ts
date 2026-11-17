@@ -87,6 +87,35 @@ test('permanent missing media remains visible even when zero files could be save
 });
 
 
+test('early reports retain unopened archive references separately from saved files', () => {
+  const id = 'aabbccdd-1234-4567-89ab-aabbccddeeff';
+  const reference = `postplus-research-media://${id}`;
+  const missing = {media_ref_id: id, kind: 'video', source_url: 'https://provider.test/video?token=private'};
+  const input = (ready: boolean) => ({
+    name: 'original',
+    payload: {
+      output: {
+        media_preservation: {
+          state: ready ? 'complete' : 'saving',
+          savedCount: ready ? 1 : 0,
+          totalCount: 1,
+          missing: ready ? [] : [{...missing, retryable: true}, {media_ref_id: id + '/invalid', retryable: true}],
+          artifacts: ready ? [{mediaReference: reference, kind: 'video'}] : [],
+        },
+      },
+    },
+  });
+  const early = appendSavedMediaLinks('<body></body>', [input(false)], 'https://staging.postplus.io');
+  assert.match(early, /Saved media \(0\)/);
+  assert.match(early, /Media still saving/);
+  assert.ok(early.includes(encodeURIComponent(reference)));
+  assert.doesNotMatch(early, /token=|provider.test|invalid/);
+  const later = appendSavedMediaLinks('<body></body>', [input(false), input(true)], 'https://staging.postplus.io');
+  assert.match(later, /Saved media \(1\)/);
+  assert.doesNotMatch(later, /Media still saving/);
+  assert.equal(later.split(encodeURIComponent(reference)).length, 2);
+});
+
 test('reports preserve exact stable research identities without exposing provider URLs', () => {
   const reference = 'postplus-research-media://aabbccdd-1234-4567-89ab-aabbccddeeff';
   const html = appendSavedMediaLinks('<body></body>', [{ name: 'Research', payload: { output: { media_preservation: { artifacts: [{ mediaReference: reference, kind: 'video' }] } } } }], 'https://staging.postplus.io');

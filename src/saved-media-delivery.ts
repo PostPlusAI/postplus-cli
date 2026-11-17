@@ -1,4 +1,8 @@
-/** HTML navigation links to saved files. Playback is renewed by the signed-in
+const RESEARCH_MEDIA_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RESEARCH_MEDIA_PREFIX = 'postplus-research-media://';
+
+/** HTML navigation links to research originals. Playback is renewed by the signed-in
  * PostPlus file page; offline reports never contain account credentials. */
 export function appendSavedMediaLinks(
   html: string,
@@ -6,6 +10,7 @@ export function appendSavedMediaLinks(
   apiBaseUrl: string | null,
 ): string {
   const saved = new Map<string, { source: string; label: string }>();
+  const pending = new Map<string, { source: string; label: string }>();
   const gaps = new Map<string, string>();
   function visit(value: unknown, source: string, depth = 0) {
     if (!value || typeof value !== 'object' || depth > 10) return;
@@ -16,30 +21,46 @@ export function appendSavedMediaLinks(
     const record = value as Record<string, unknown>;
     const media = record.media_preservation;
     if (media && typeof media === 'object' && !Array.isArray(media)) {
-      const saved = media as Record<string, unknown>;
+      const archive = media as Record<string, unknown>;
       if (
         ['saving', 'pending', 'incomplete', 'failed'].includes(
-          String(saved.state),
+          String(archive.state),
         )
       )
         gaps.set(
           source,
-          (typeof saved.savedCount === 'number'
-            ? saved.savedCount
+          (typeof archive.savedCount === 'number'
+            ? archive.savedCount
             : 'Unknown') +
             ' of ' +
-            (typeof saved.totalCount === 'number'
-              ? saved.totalCount
+            (typeof archive.totalCount === 'number'
+              ? archive.totalCount
               : 'unknown') +
-            (['saving', 'pending'].includes(String(saved.state))
+            (['saving', 'pending'].includes(String(archive.state))
               ? ' files saved; saving is still in progress on the original task.'
               : ' files saved; some media could not be saved for later access.'),
         );
+      if (Array.isArray(archive.missing)) {
+        for (const gap of archive.missing) {
+          if (
+            gap?.retryable === true &&
+            typeof gap.media_ref_id === 'string' &&
+            RESEARCH_MEDIA_ID.test(gap.media_ref_id)
+          ) {
+            const ref = `${RESEARCH_MEDIA_PREFIX}${gap.media_ref_id}`;
+            const kind =
+              gap.kind === 'video' || gap.kind === 'image' ? gap.kind : 'media';
+            pending.set(ref, { source, label: `Open ${kind} archive` });
+          }
+        }
+      }
     }
 
     if (typeof record.mediaReference === 'string') {
       const ref = new URL(record.mediaReference);
-      const research = /^postplus-research-media:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(record.mediaReference);
+      const research =
+        record.mediaReference.toLowerCase().startsWith(RESEARCH_MEDIA_PREFIX) &&
+        RESEARCH_MEDIA_ID.test(record.mediaReference.slice(RESEARCH_MEDIA_PREFIX.length));
       if (
         (!research && (ref.protocol !== 'postplus-media:' || !['results','uploads'].includes(ref.hostname) || !ref.pathname)) ||
         ref.search ||
@@ -67,8 +88,9 @@ export function appendSavedMediaLinks(
       visit(record[key], source, depth + 1);
   }
   inputs.forEach((input) => visit(input.payload, input.name));
-  if (!saved.size && !gaps.size) return html;
-  if (!apiBaseUrl && saved.size)
+  for (const ref of saved.keys()) pending.delete(ref);
+  if (!saved.size && !pending.size && !gaps.size) return html;
+  if (!apiBaseUrl && (saved.size || pending.size))
     throw Error(
       'Configure the PostPlus API URL to reopen saved media from this report.',
     );
@@ -92,7 +114,7 @@ export function appendSavedMediaLinks(
           "'": '&#39;',
         })[c]!,
     );
-  const links = [...saved]
+  const links = (files: typeof saved) => [...files]
     .map(([reference, file]) => {
       const delivery = new URL('/connect/media', base!.origin);
       delivery.searchParams.set('reference', reference);
@@ -111,8 +133,12 @@ export function appendSavedMediaLinks(
     '<section style="padding:24px;max-width:1500px;margin:auto" aria-label="Saved PostPlus media"><h2>Saved media (' +
     saved.size +
     ')</h2><p>Reopen these saved files after PostPlus sign-in. This renews playback access without collecting, generating or charging again. Original source previews above may expire.</p><ul>' +
-    links +
+    links(saved) +
     '</ul>' +
+    (pending.size
+      ? '<h3>Media still saving</h3><p>Keep these links to reopen the same originals when they are ready.</p><ul>' +
+        links(pending) + '</ul>'
+      : '') +
     [...gaps]
       .map(
         ([source, message]) =>
