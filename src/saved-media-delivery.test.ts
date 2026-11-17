@@ -85,3 +85,13 @@ test('permanent missing media remains visible even when zero files could be save
   assert.match(html, /Saved media \(0\)/);
   assert.match(html, /0 of 2 files saved; some media could not be saved/);
 });
+
+
+test('reports preserve exact stable research identities without exposing provider URLs', () => {
+  const reference = 'postplus-research-media://aabbccdd-1234-4567-89ab-aabbccddeeff';
+  const html = appendSavedMediaLinks('<body></body>', [{ name: 'Research', payload: { output: { media_preservation: { artifacts: [{ mediaReference: reference, kind: 'video' }] } } } }], 'https://staging.postplus.io');
+  assert.ok(html.includes(encodeURIComponent(reference)));
+  for (const invalid of [reference + '/file', reference + '?token=private', 'postplus-research-media://results/owner/file']) {
+    assert.throws(() => appendSavedMediaLinks('<body></body>', [{ name: 'Research', payload: { artifacts: [{ mediaReference: invalid }] } }], 'https://staging.postplus.io'), /Invalid saved/);
+  }
+});

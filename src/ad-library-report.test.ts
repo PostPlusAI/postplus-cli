@@ -779,3 +779,14 @@ test('timing research signal uses observation time and never equates elapsed tim
     /does not establish uninterrupted delivery, learning-phase completion, or positive ROAS/,
   );
 });
+
+test('archive image sources keep originals and resized previews distinct', () => {
+  for (const original of ['https://example.test/original.png', undefined]) {
+    const source = input([{ ad_archive_id: '123', snapshot: { images: [{ original_image_url: original, resized_image_url: 'https://example.test/preview.jpg' }] } }]);
+    const stored = normalizeAdReport([source], { imageSources: 'archive' }).ads[0]!.creatives[0]!.media[0]!;
+    assert.equal(stored.url, original ?? '');
+    assert.equal(stored.poster, 'https://example.test/preview.jpg');
+    const display = normalizeAdReport([source]).ads[0]!.creatives[0]!.media[0]!;
+    assert.equal(display.url, original ?? 'https://example.test/preview.jpg');
+  }
+});
