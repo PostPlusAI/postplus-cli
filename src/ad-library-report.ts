@@ -63,7 +63,14 @@ export type ReportCreative = {
   destination: string;
   destinationState?: 'unsupported_map';
   cta: string;
-  media: { kind: string; url: string; poster: string; contentHash?: string }[];
+  media: {
+    kind: string;
+    url: string;
+    poster: string;
+    contentHash?: string;
+    mediaReference?: string;
+    posterReference?: string;
+  }[];
 };
 export type ReportAd = {
   id: string;
@@ -88,7 +95,19 @@ export type ReportSource = {
   count: number | null;
   note: string;
 };
-export function normalizeAdReport(inputs: ReportInput[], options: { imageSources?: 'display' | 'archive' } = {}) {
+function researchMediaReference(value: unknown) {
+  return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(str(value))
+    ? `postplus-research-media://${str(value)}`
+    : undefined;
+}
+
+export function normalizeAdReport(
+  inputs: ReportInput[],
+  options: {
+    imageSources?: 'display' | 'archive';
+    mediaSlots?: boolean;
+  } = {},
+) {
   const ads = new Map<string, ReportAd>();
   const sources: ReportSource[] = [];
   for (const input of inputs) {
@@ -136,7 +155,24 @@ export function normalizeAdReport(inputs: ReportInput[], options: { imageSources
             ? ''
             : 'No records returned by this collection; this does not prove the advertiser has no ads.',
     });
-    for (const value of data.items) {
+    const mediaSlots = new Map<string, Row[]>();
+    if (!stored && options.mediaSlots) {
+      const preservation = obj(envelope.media_preservation ?? data.media_preservation);
+      for (const slot of arr(preservation.media_order).map(obj)) {
+        if (
+          !Number.isSafeInteger(slot.source_item_index) ||
+          !Number.isSafeInteger(slot.creative_index) ||
+          !Number.isSafeInteger(slot.index) ||
+          !researchMediaReference(slot.media_ref_id) ||
+          !['image', 'video'].includes(str(slot.kind))
+        ) continue;
+        const key = `${slot.source_item_index}:${slot.creative_index}`;
+        const slots = mediaSlots.get(key) ?? [];
+        slots.push(slot);
+        mediaSlots.set(key, slots);
+      }
+    }
+    for (const [sourceIndex, value] of data.items.entries()) {
       const a = obj(value),
         snapshot = obj(a.snapshot),
         brand = obj(arr(a.brands)[0]);
@@ -150,9 +186,11 @@ export function normalizeAdReport(inputs: ReportInput[], options: { imageSources
           ? projected
           : [Object.keys(common).length ? common : a]
         : arr(snapshot.cards).length
-          ? arr(snapshot.cards)
+          ? [...arr(snapshot.cards)]
           : [snapshot];
-      const creatives = rawCreatives.map((raw) => {
+      if (!stored && arr(snapshot.cards).length && mediaSlots.has(`${sourceIndex}:${rawCreatives.length}`))
+        rawCreatives.push(snapshot);
+      const creatives = rawCreatives.map((raw, creativeIndex) => {
         const c = stored
           ? {
               ...common,
@@ -162,7 +200,19 @@ export function normalizeAdReport(inputs: ReportInput[], options: { imageSources
             }
           : obj(raw);
         const media: ReportCreative['media'] = [];
-        if (stored) {
+        const slots = mediaSlots.get(`${sourceIndex}:${creativeIndex}`);
+        if (slots?.length) {
+          for (const slot of slots.sort((a, b) => Number(a.index) - Number(b.index))) {
+            if (str(slot.item_id) !== id) throw Error('Archived media belongs to a different ad.');
+            media.push({
+              kind: str(slot.kind),
+              url: url(slot.source_url),
+              poster: url(slot.poster_url),
+              mediaReference: researchMediaReference(slot.media_ref_id),
+              posterReference: researchMediaReference(slot.poster_media_ref_id),
+            });
+          }
+        } else if (stored) {
           const storedMedia = arr(a.media).map(obj);
           for (const m of storedMedia)
             if (
@@ -502,11 +552,19 @@ export function renderAdReport(inputs: ReportInput[]): string {
       <div class="identity">${logo(a)}<div><strong>${esc(a.advertiser)}</strong><span class="sponsored">Sponsored</span></div></div>
       ${c.body ? `<div class="copy">${esc(c.body)}</div>` : ''}
       <div class="media">${c.media
-        .map((m) =>
-          m.kind === 'video'
-            ? `<video controls playsinline preload="none" src="${esc(m.url)}" ${m.poster ? `poster="${esc(m.poster)}"` : ''} aria-label="Video ad by ${esc(a.advertiser)}"></video>`
-            : `<img src="${esc(m.url)}" loading="lazy" alt="Ad creative by ${esc(a.advertiser)}">`,
-        )
+        .map((m) => {
+          const isVideo = m.kind === 'video';
+          const original = isVideo || Boolean(m.url) || !m.posterReference;
+          const source = original ? m.url : m.poster;
+          const reference = original ? m.mediaReference : m.posterReference;
+          const src = source || !reference ? `src="${esc(source)}"` : '';
+          const bound = reference ? ` data-src-media-reference="${esc(reference)}"` : '';
+          const poster = m.poster ? `poster="${esc(m.poster)}"` : '';
+          const posterBound = m.posterReference ? ` data-poster-media-reference="${esc(m.posterReference)}"` : '';
+          return isVideo
+            ? `<video controls playsinline preload="none" ${src}${bound} ${poster}${posterBound} aria-label="Video ad by ${esc(a.advertiser)}"></video>`
+            : `<img ${src}${bound} loading="lazy" alt="Ad creative by ${esc(a.advertiser)}">`;
+        })
         .join('')}</div>
       ${!c.media.length ? '<p class="copy muted">Media not supplied. Open the source to inspect this ad.</p>' : ''}
       ${hasDestination ? `<div class="destination"><div class="destination-copy">${c.destinationState === 'unsupported_map' ? '<div class="description">Map destination is not supported in this viewer.</div>' : c.destination ? `<div class="domain">${esc(new URL(c.destination).hostname)}</div>` : ''}${c.headline ? `<div class="destination-title">${esc(c.headline)}</div>` : ''}${c.description ? `<div class="description">${esc(c.description)}</div>` : ''}</div>${c.destinationState === 'unsupported_map' && c.cta ? `<span class="cta" aria-disabled="true">${esc(c.cta)}</span>` : c.destination && c.cta ? link(c.destination, c.cta, 'cta') : ''}</div>` : ''}
