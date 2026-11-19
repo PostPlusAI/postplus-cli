@@ -127,8 +127,38 @@ export async function resolveProxyConfiguration(options: {
   return result;
 }
 
-export async function createProxyDispatcher(options: ConstructorParameters<typeof EnvHttpProxyAgent>[0] = {}, url: URL) {
+async function resolveDispatcherConfiguration(url: URL): Promise<ProxyConfiguration> {
   const protocol = url.protocol;
   const config = proxyConfigurationForUrl(await resolveProxyConfiguration({ protocol }), url);
-  return new EnvHttpProxyAgent({...options,...config,...(protocol === 'https:' && !config.httpsProxy ? {httpProxy:''} : {})});
+  return protocol === 'https:' && !config.httpsProxy ? { ...config, httpProxy: '' } : config;
 }
+
+export async function createProxyDispatcher(options: ConstructorParameters<typeof EnvHttpProxyAgent>[0] = {}, url: URL) {
+  const config = await resolveDispatcherConfiguration(url);
+  return new EnvHttpProxyAgent({ ...options, ...config });
+}
+
+/** Reuse connections within one sequential wait, after checking the current proxy rules each time. */
+export function createProxyDispatcherScope() {
+  let current: { key: string; dispatcher: EnvHttpProxyAgent } | undefined;
+  async function close() {
+    const dispatcher = current?.dispatcher;
+    current = undefined;
+    await dispatcher?.destroy();
+  }
+  return {
+    async forUrl(url: URL) {
+      const config = await resolveDispatcherConfiguration(url);
+      const key = JSON.stringify([url.origin, config.httpProxy, config.httpsProxy, config.noProxy]);
+      if (current?.key === key) return current.dispatcher;
+
+      await close();
+      const dispatcher = new EnvHttpProxyAgent(config);
+      current = { key, dispatcher };
+      return dispatcher;
+    },
+    close,
+  };
+}
+
+export type ProxyDispatcherScope = ReturnType<typeof createProxyDispatcherScope>;

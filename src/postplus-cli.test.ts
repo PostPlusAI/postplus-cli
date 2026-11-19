@@ -17,6 +17,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { after, afterEach, beforeEach, describe, it } from 'node:test';
@@ -6400,6 +6401,81 @@ describe('hosted domain commands', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('reuses one connection for the status reads of each Meta wait and resume', { timeout: 5000 }, async (t) => {
+    const routeKey = 'facebook-ads-library';
+    const operationId = 'original-meta-run';
+    const pending = {
+      routeKey, operationId, accountId: 'account_1',
+      status: 'processing', results_ready: false, settlement_pending: true,
+    };
+    const ready = { ...pending, results_ready: true, output: { items: [] } };
+    const submissions: Socket[] = [];
+    const statusRequests: { body: unknown; socket: Socket }[] = [];
+    const server = createServer(async (request, response) => {
+      if (request.method !== 'POST' || request.url !== '/api/postplus-cli/hosted/research') {
+        response.writeHead(404).end();
+        return;
+      }
+      let raw = '';
+      for await (const chunk of request) raw += chunk;
+      const body = JSON.parse(raw);
+      let payload = pending;
+      if (body.input) {
+        submissions.push(request.socket);
+      } else {
+        statusRequests.push({ body, socket: request.socket });
+        if (statusRequests.length === 4) payload = ready;
+      }
+      response.writeHead(202, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(payload));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise<void>((resolve) => {
+      server.close(resolve);
+      server.closeAllConnections();
+    }));
+    const address = server.address();
+    assert.ok(address && typeof address === 'object');
+    const apiBaseUrl = `http://127.0.0.1:${address.port}`;
+    process.env.POSTPLUS_API_BASE_URL = apiBaseUrl;
+    process.env.http_proxy = '';
+    process.env.https_proxy = '';
+    process.env.no_proxy = '*';
+    const dir = await mkdtemp(resolve(tmpdir(), 'postplus-meta-status-sockets-'));
+    tempDirs.push(dir);
+    const checkpoint = resolve(dir, 'result.json');
+    await setLocalSession({
+      accountId: 'account_1', accountName: 'Account', apiBaseUrl,
+      cliSessionToken: 'fixture-cli-session', sessionExpiresAt: null,
+      userEmail: 'agent@example.com', userId: 'user_1',
+    });
+    const wait = ['--poll-interval-seconds', '0.025', '--wait-seconds', '2'];
+    const assertWait = () => {
+      assert.equal(statusRequests.length, 4);
+      assert.ok(statusRequests.every(({ socket }) => socket === statusRequests[0]?.socket));
+      assert.deepEqual(statusRequests.map(({ body }) => body),
+        Array.from({ length: 4 }, () => ({ routeKey, sourceOperationId: operationId })));
+    };
+
+    assert.equal(await runHostedDomainCommand('research', [
+      'run', routeKey, '--query', 'running shoes', '--hosted-operation-id', operationId,
+      '--output', checkpoint, '--wait', ...wait,
+    ]), 0);
+    assertWait();
+    const submitWaitConnection = statusRequests[0]?.socket;
+    assert.equal(submissions.length, 1);
+    assert.notEqual(submitWaitConnection, submissions[0]);
+    assert.deepEqual(JSON.parse(await readFile(checkpoint, 'utf8')), ready);
+
+    statusRequests.length = 0;
+    await writeFile(checkpoint, JSON.stringify(pending));
+    assert.equal(await runHostedDomainCommand('research', ['run', '--resume-from', checkpoint, ...wait]), 0);
+    assertWait();
+    assert.notEqual(statusRequests[0]?.socket, submitWaitConnection);
+    assert.equal(submissions.length, 1);
+    assert.deepEqual(JSON.parse(await readFile(checkpoint, 'utf8')), ready);
   });
 
   it('rejects a malformed or mismatched Meta ready response and preserves the original checkpoint', async () => {
