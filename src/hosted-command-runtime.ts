@@ -17,6 +17,7 @@ import {
   isPostPlusClientUpgradePayload,
 } from './client-compatibility.js';
 import { PostPlusNetworkRequestError } from './network-diagnostics.js';
+import type { ProxyDispatcherScope } from './proxy-configuration.js';
 import { clearUpdateCheckCache, POSTPLUS_CLIENT_RECOVERY_ATTEMPT_ENV } from './update-check.js';
 
 // In-process execution context for the hosted-lib path (src/hosted-lib.ts). When
@@ -128,6 +129,7 @@ export class HostedProductRequestError extends Error {
 export async function postHostedJson(input: {
   body: unknown;
   debug?: boolean;
+  dispatcherScope?: ProxyDispatcherScope;
   pathName: string;
   skillName: string | null;
   statusRead?: boolean;
@@ -158,6 +160,7 @@ export async function postHostedJson(input: {
     auth,
     signal,
     body: input.body,
+    dispatcherScope: input.dispatcherScope,
     ...(input.debug !== undefined ? { debug: input.debug } : {}),
     method: 'POST',
     pathName: input.pathName,

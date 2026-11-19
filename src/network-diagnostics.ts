@@ -1,5 +1,9 @@
 import { PostPlusFailure } from './failure-contract.js';
-import { createProxyDispatcher, explicitProxyConfiguration } from './proxy-configuration.js';
+import {
+  createProxyDispatcher,
+  explicitProxyConfiguration,
+  type ProxyDispatcherScope,
+} from './proxy-configuration.js';
 const MAX_DEBUG_BODY_CHARS = 2_048;
 const MAX_ERROR_CAUSES = 4;
 const DEFAULT_MAX_REDIRECTS = 5;
@@ -8,6 +12,7 @@ type RedirectPolicy = 'error' | 'follow-https' | 'manual';
 
 export type NetworkRequestOptions = {
   debug?: boolean;
+  dispatcherScope?: ProxyDispatcherScope;
   label: string;
   maxRedirects?: number;
   redirectPolicy: RedirectPolicy;
@@ -58,6 +63,7 @@ export async function fetchWithNetworkDiagnostics(
   let body = init.body;
   const headers = Object.fromEntries(new Headers(init.headers).entries());
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+  const scope = options.redirectPolicy === 'error' ? options.dispatcherScope : undefined;
 
   for (let redirectCount = 0; ; redirectCount += 1) {
     writeDebug(
@@ -65,7 +71,9 @@ export async function fetchWithNetworkDiagnostics(
       `request method=${method} target=${formatDebugUrl(currentUrl, options)}`,
     );
 
-    const dispatcher = await createProxyDispatcher({}, currentUrl).catch((cause: unknown) => {
+    const dispatcher = await (
+      scope?.forUrl(currentUrl) ?? createProxyDispatcher({}, currentUrl)
+    ).catch((cause: unknown) => {
       if (cause instanceof PostPlusFailure) throw cause;
       throw new PostPlusNetworkRequestError({cause,method:'PREFLIGHT',targetUrl:currentUrl.toString(),action:cause instanceof PostPlusFailure ? cause.details.action : undefined});
     });
@@ -88,7 +96,7 @@ export async function fetchWithNetworkDiagnostics(
       writeDebug(options, `error ${wrapped.message}`);
       throw wrapped;
     } finally {
-      void dispatcher.close().catch(() => dispatcher.destroy());
+      if (!scope) void dispatcher.close().catch(() => dispatcher.destroy());
     }
 
     writeDebug(
