@@ -73,6 +73,10 @@ import {
   fetchWithNetworkDiagnostics,
   isNetworkFailure,
 } from './network-diagnostics.js';
+import {
+  createProxyDispatcherScope,
+  type ProxyDispatcherScope,
+} from './proxy-configuration.js';
 
 export type { HostedRequestContext } from './hosted-command-runtime.js';
 
@@ -1854,22 +1858,32 @@ function resolveHostedRunWaitFlags(flags: ParsedFlags): {
   };
 }
 
-function researchPollingOptions(
+async function pollResearchRun(
   routeKey: string | null,
   flags: ParsedFlags,
-  wait: { pollIntervalMs: number; waitBudgetMs: number },
+  input: {
+    pollIntervalMs: number;
+    waitBudgetMs: number;
+    pollOnce: (timeoutMs?: number, dispatcherScope?: ProxyDispatcherScope) => Promise<unknown>;
+  },
 ) {
   const meta = routeKey === META_ADS_RESEARCH_ROUTE;
   const customInterval = flags.values.has('poll-interval-seconds');
-  return {
-    ...wait,
-    pollIntervalMs: meta && !customInterval ? 1000 : wait.pollIntervalMs,
-    initialPollIntervalMs: !meta && !customInterval ? 2000 : undefined,
-    retryTransientErrors: meta,
-    scheduleFromRequestStart: meta,
-    stopWaiting: meta ? hasMetaAdsResults : undefined,
-    readStatus: readResearchRunStatus,
-  };
+  const dispatcherScope = meta ? createProxyDispatcherScope() : undefined;
+  try {
+    return await pollHostedRunUntilSettled({
+      waitBudgetMs: input.waitBudgetMs,
+      pollIntervalMs: meta && !customInterval ? 1000 : input.pollIntervalMs,
+      initialPollIntervalMs: !meta && !customInterval ? 2000 : undefined,
+      retryTransientErrors: meta,
+      scheduleFromRequestStart: meta,
+      stopWaiting: meta ? hasMetaAdsResults : undefined,
+      readStatus: readResearchRunStatus,
+      pollOnce: (timeoutMs) => input.pollOnce(timeoutMs, dispatcherScope),
+    });
+  } finally {
+    await dispatcherScope?.close();
+  }
 }
 
 function resolveHostedSubmitWaitFlags(flags: ParsedFlags): {
@@ -2269,11 +2283,7 @@ async function runResearchRun(
       routeKey,
     });
     assertKnownResearchRoute(targets, resumeRouteKey);
-    const polling = researchPollingOptions(
-      resumeRouteKey,
-      flags,
-      resolveHostedRunWaitFlags(flags),
-    );
+    const wait = resolveHostedRunWaitFlags(flags);
     const meta = resumeRouteKey === META_ADS_RESEARCH_ROUTE;
     let currentHandle = runHandle;
     let currentOperationId = sourceOperationId;
@@ -2283,9 +2293,9 @@ async function runResearchRun(
     return dispatchHostedCommand(
       {
         request: () =>
-          pollHostedRunUntilSettled({
-            ...polling,
-            pollOnce: async (timeoutMs) => {
+          pollResearchRun(resumeRouteKey, flags, {
+            ...wait,
+            pollOnce: async (timeoutMs, dispatcherScope) => {
               let payload: unknown;
               const identity = currentOperationId && (hasDurableMetaIdentity || !currentHandle)
                 ? { sourceOperationId: currentOperationId }
@@ -2297,6 +2307,7 @@ async function runResearchRun(
                 context,
                 statusRead: meta,
                 timeoutMs,
+                dispatcherScope,
               }); } catch (error) {
                 if (currentHandle || !mayRecoverAdmission || !sourceOperationId || !recoveryRequest ||
                     !(error instanceof HostedProductRequestError) || error.httpStatus !== 404 ||
@@ -2441,9 +2452,9 @@ async function runResearchRun(
         let currentHandle = run.runHandle;
         let currentOperationId = run.operationId;
         let hasDurableMetaIdentity = meta && run.resultsReady !== null;
-        return pollHostedRunUntilSettled({
-          ...researchPollingOptions(routeKey, flags, wait),
-          pollOnce: async (timeoutMs) => {
+        return pollResearchRun(routeKey, flags, {
+          ...wait,
+          pollOnce: async (timeoutMs, dispatcherScope) => {
             const identity = currentOperationId && (hasDurableMetaIdentity || !currentHandle)
               ? { sourceOperationId: currentOperationId }
               : { runHandle: currentHandle };
@@ -2454,6 +2465,7 @@ async function runResearchRun(
               context,
               statusRead: meta,
               timeoutMs,
+              dispatcherScope,
             });
             const observed = assertResearchResumePayload(
               payload, verb, routeKey, operationId,

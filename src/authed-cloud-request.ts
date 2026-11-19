@@ -1,5 +1,6 @@
 import { buildPostPlusClientCompatibilityHeaders, isPostPlusClientUpgradePayload, PostPlusClientUpgradeRequiredError } from './client-compatibility.js';
 import { fetchWithNetworkDiagnostics } from './network-diagnostics.js';
+import type { ProxyDispatcherScope } from './proxy-configuration.js';
 import { clearUpdateCheckCache } from './update-check.js';
 import { withResponseMetadata } from './failure-contract.js';
 
@@ -20,6 +21,7 @@ export type AuthedCloudRequestInput = {
    */
   body?: unknown;
   debug?: boolean;
+  dispatcherScope?: ProxyDispatcherScope;
   skillName?: string | null;
   /**
    * In-process override for the skills release id header. When provided (the
@@ -122,6 +124,7 @@ async function issueAuthedCloudRequest(
     },
     {
       ...(input.debug !== undefined ? { debug: input.debug } : {}),
+      dispatcherScope: input.dispatcherScope,
       label: 'cloud',
       redirectPolicy: 'error',
     },
