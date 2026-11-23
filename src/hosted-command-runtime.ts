@@ -502,7 +502,7 @@ export async function pollHostedRunUntilSettled(input: {
   }
 }
 
-function isRetryableHostedStatusError(error: unknown): boolean {
+export function isRetryableHostedStatusError(error: unknown): boolean {
   if (error instanceof HostedProductRequestError) {
     return (
       error.productError.retryable !== false &&

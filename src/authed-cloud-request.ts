@@ -12,6 +12,7 @@ export type AuthedCloudRequestAuth = {
 };
 
 export type AuthedCloudRequestInput = {
+  accept?: string;
   auth: AuthedCloudRequestAuth;
   pathName: string;
   method?: 'GET' | 'POST';
@@ -97,7 +98,7 @@ async function issueAuthedCloudRequest(
   });
   const hasBody = input.body !== undefined;
   const headers: Record<string, string> = {
-    accept: 'application/json',
+    accept: input.accept ?? 'application/json',
     ...compatibilityHeaders,
     authorization: `Bearer ${auth.cliSessionToken}`,
   };

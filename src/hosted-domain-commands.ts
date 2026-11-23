@@ -77,6 +77,10 @@ import {
   createProxyDispatcherScope,
   type ProxyDispatcherScope,
 } from './proxy-configuration.js';
+import {
+  type MetaResearchStreamIdentity,
+  waitForMetaResearchViaSse,
+} from './research-sse-stream.js';
 
 export type { HostedRequestContext } from './hosted-command-runtime.js';
 
@@ -1858,6 +1862,54 @@ function resolveHostedRunWaitFlags(flags: ParsedFlags): {
   };
 }
 
+function createResearchStatusTracker(input: {
+  expectedOperationId?: string | null;
+  hasDurableMetaIdentity: boolean;
+  meta: boolean;
+  onObserved?: () => void;
+  outputPath: string | null;
+  routeKey: string | null;
+  runHandle: string | null | undefined;
+  operationId: string | null | undefined;
+  verb: ResearchVerb;
+  writeCheckpoint: boolean;
+}) {
+  let currentHandle = input.runHandle ?? null;
+  let currentOperationId = input.operationId ?? null;
+  let hasDurableMetaIdentity = input.hasDurableMetaIdentity;
+
+  const getIdentity = (): MetaResearchStreamIdentity =>
+    currentOperationId && (hasDurableMetaIdentity || !currentHandle)
+      ? { sourceOperationId: currentOperationId }
+      : { runHandle: currentHandle! };
+
+  const onPayload = async (payload: unknown) => {
+    const observed = assertResearchResumePayload(
+      payload,
+      input.verb,
+      input.routeKey,
+      input.expectedOperationId ?? currentOperationId,
+    );
+    input.onObserved?.();
+    currentHandle = observed.runHandle ?? currentHandle;
+    if (input.meta) {
+      currentOperationId = observed.operationId ?? currentOperationId;
+      if (observed.resultsReady !== null && currentOperationId) {
+        hasDurableMetaIdentity = true;
+      }
+    }
+    if (input.writeCheckpoint && input.outputPath) {
+      await writeResult(payload, input.outputPath, false);
+    }
+  };
+
+  return {
+    getIdentity,
+    hasRunHandle: () => Boolean(currentHandle),
+    onPayload,
+  };
+}
+
 async function pollResearchRun(
   routeKey: string | null,
   flags: ParsedFlags,
@@ -1865,14 +1917,19 @@ async function pollResearchRun(
     pollIntervalMs: number;
     waitBudgetMs: number;
     pollOnce: (timeoutMs?: number, dispatcherScope?: ProxyDispatcherScope) => Promise<unknown>;
+    sse?: {
+      context?: HostedRequestContext;
+      getIdentity: () => MetaResearchStreamIdentity;
+      onPayload: (payload: unknown) => Promise<void>;
+    };
   },
 ) {
   const meta = routeKey === META_ADS_RESEARCH_ROUTE;
   const customInterval = flags.values.has('poll-interval-seconds');
   const dispatcherScope = meta ? createProxyDispatcherScope() : undefined;
-  try {
-    return await pollHostedRunUntilSettled({
-      waitBudgetMs: input.waitBudgetMs,
+  const pollFallback = (remainingWaitBudgetMs: number) =>
+    pollHostedRunUntilSettled({
+      waitBudgetMs: remainingWaitBudgetMs,
       pollIntervalMs: meta && !customInterval ? 1000 : input.pollIntervalMs,
       initialPollIntervalMs: !meta && !customInterval ? 2000 : undefined,
       retryTransientErrors: meta,
@@ -1881,6 +1938,18 @@ async function pollResearchRun(
       readStatus: readResearchRunStatus,
       pollOnce: (timeoutMs) => input.pollOnce(timeoutMs, dispatcherScope),
     });
+  try {
+    if (meta && !customInterval && input.waitBudgetMs > 0 && input.sse) {
+      return await waitForMetaResearchViaSse({
+        context: input.sse.context,
+        dispatcherScope,
+        fallbackPoll: pollFallback,
+        getIdentity: input.sse.getIdentity,
+        onPayload: input.sse.onPayload,
+        waitBudgetMs: input.waitBudgetMs,
+      });
+    }
+    return await pollFallback(input.waitBudgetMs);
   } finally {
     await dispatcherScope?.close();
   }
@@ -2285,21 +2354,38 @@ async function runResearchRun(
     assertKnownResearchRoute(targets, resumeRouteKey);
     const wait = resolveHostedRunWaitFlags(flags);
     const meta = resumeRouteKey === META_ADS_RESEARCH_ROUTE;
-    let currentHandle = runHandle;
-    let currentOperationId = sourceOperationId;
-    let hasDurableMetaIdentity = meta && !!sourceOperationId;
     let mayRecoverAdmission = !!recoveryRequest;
+    const tracker = createResearchStatusTracker({
+      hasDurableMetaIdentity: meta && !!sourceOperationId,
+      meta,
+      onObserved: () => {
+        mayRecoverAdmission = false;
+      },
+      operationId: sourceOperationId,
+      outputPath,
+      routeKey: resumeRouteKey,
+      runHandle,
+      verb,
+      writeCheckpoint: Boolean(outputPath),
+    });
 
     return dispatchHostedCommand(
       {
         request: () =>
           pollResearchRun(resumeRouteKey, flags, {
             ...wait,
+            ...(mayRecoverAdmission
+              ? {}
+              : {
+                  sse: {
+                    context,
+                    getIdentity: tracker.getIdentity,
+                    onPayload: tracker.onPayload,
+                  },
+                }),
             pollOnce: async (timeoutMs, dispatcherScope) => {
               let payload: unknown;
-              const identity = currentOperationId && (hasDurableMetaIdentity || !currentHandle)
-                ? { sourceOperationId: currentOperationId }
-                : { runHandle: currentHandle };
+              const identity = tracker.getIdentity();
               try { payload = await postHostedJson({
                 body: { routeKey: resumeRouteKey, ...identity },
                 pathName: '/api/postplus-cli/hosted/research',
@@ -2309,7 +2395,7 @@ async function runResearchRun(
                 timeoutMs,
                 dispatcherScope,
               }); } catch (error) {
-                if (currentHandle || !mayRecoverAdmission || !sourceOperationId || !recoveryRequest ||
+                if (tracker.hasRunHandle() || !mayRecoverAdmission || !sourceOperationId || !recoveryRequest ||
                     !(error instanceof HostedProductRequestError) || error.httpStatus !== 404 ||
                     error.productError.code !== 'postplus_cli_hosted_async_run_not_found') throw error;
                 // Typed absence only. The durable unique row admits at most
@@ -2317,16 +2403,7 @@ async function runResearchRun(
                 mayRecoverAdmission = false;
                 payload = await postHostedJson({body: {routeKey: resumeRouteKey, operationId: sourceOperationId, input: recoveryRequest.input}, pathName: '/api/postplus-cli/hosted/research', skillName: recoveryRequest.skillName, context});
               }
-              const run = assertResearchResumePayload(
-                payload, verb, resumeRouteKey, currentOperationId,
-              );
-              mayRecoverAdmission = false;
-              currentHandle = run.runHandle ?? currentHandle;
-              if (meta) {
-                currentOperationId = run.operationId ?? currentOperationId;
-                if (run.resultsReady !== null && currentOperationId) hasDurableMetaIdentity = true;
-              }
-              if (outputPath) await writeResult(payload, outputPath, false);
+              await tracker.onPayload(payload);
               return payload;
             },
           }),
@@ -2449,15 +2526,26 @@ async function runResearchRun(
           await writeResult(submitted, outputPath, false);
           checkpointWritten = true;
         }
-        let currentHandle = run.runHandle;
-        let currentOperationId = run.operationId;
-        let hasDurableMetaIdentity = meta && run.resultsReady !== null;
+        const tracker = createResearchStatusTracker({
+          expectedOperationId: operationId,
+          hasDurableMetaIdentity: meta && run.resultsReady !== null,
+          meta,
+          operationId: run.operationId,
+          outputPath,
+          routeKey,
+          runHandle: run.runHandle,
+          verb,
+          writeCheckpoint: !context && Boolean(outputPath),
+        });
         return pollResearchRun(routeKey, flags, {
           ...wait,
+          sse: {
+            context,
+            getIdentity: tracker.getIdentity,
+            onPayload: tracker.onPayload,
+          },
           pollOnce: async (timeoutMs, dispatcherScope) => {
-            const identity = currentOperationId && (hasDurableMetaIdentity || !currentHandle)
-              ? { sourceOperationId: currentOperationId }
-              : { runHandle: currentHandle };
+            const identity = tracker.getIdentity();
             const payload = await postHostedJson({
               body: { routeKey, ...identity },
               pathName: '/api/postplus-cli/hosted/research',
@@ -2467,15 +2555,7 @@ async function runResearchRun(
               timeoutMs,
               dispatcherScope,
             });
-            const observed = assertResearchResumePayload(
-              payload, verb, routeKey, operationId,
-            );
-            currentHandle = observed.runHandle ?? currentHandle;
-            if (meta) {
-              currentOperationId = observed.operationId ?? currentOperationId;
-              if (observed.resultsReady !== null && currentOperationId) hasDurableMetaIdentity = true;
-            }
-            if (!context && outputPath) await writeResult(payload, outputPath, false);
+            await tracker.onPayload(payload);
             return payload;
           },
         });
