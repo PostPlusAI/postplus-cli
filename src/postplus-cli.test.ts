@@ -6361,11 +6361,17 @@ describe('hosted domain commands', () => {
     const originalFetch = globalThis.fetch;
     const bodies: unknown[] = [];
     const submit = (wait: string[], expectPoll: boolean) => {
-      globalThis.fetch = async (_url, init) => {
+      globalThis.fetch = async (url, init) => {
         const body = JSON.parse(String(init?.body));
         bodies.push(body);
         if (body.input) return Response.json(expectPoll ? processing : ready, { status: 202 });
         assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), processing);
+        if (String(url).endsWith('/stream')) {
+          return new Response(
+            `event: result\ndata: ${JSON.stringify(ready)}\n\n`,
+            { status: 200, headers: { 'content-type': 'text/event-stream' } },
+          );
+        }
         return Response.json(ready, { status: 202 });
       };
       return runHostedDomainCommand('research', [
@@ -6380,7 +6386,7 @@ describe('hosted domain commands', () => {
       bodies.length = 0;
       assert.equal(await submit(['--wait'], true), 0);
       assert.equal(bodies.length, 2);
-      assert.deepEqual(bodies[1], {routeKey, sourceOperationId: operationId});
+      assert.deepEqual(bodies[1], {routeKey, sourceOperationId: operationId, waitMs: 600_000});
       assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), ready);
       bodies.length = 0;
       assert.equal(await submit(['--wait', 'false'], true), 0);
@@ -6397,6 +6403,32 @@ describe('hosted domain commands', () => {
         'run', '--resume-from', outputPath, '--wait-seconds', '0',
       ]), 0);
       assert.deepEqual(bodies, [{routeKey, sourceOperationId: operationId}]);
+      assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), ready);
+
+      // Explicit --poll-interval-seconds skips SSE and polls directly; default --wait falls back on 503.
+      const urls: string[] = [];
+      globalThis.fetch = async (url, init) => {
+        urls.push(String(url));
+        const body = JSON.parse(String(init?.body));
+        if (body.input) return Response.json(processing, { status: 202 });
+        if (String(url).endsWith('/stream')) {
+          return Response.json({ message: 'Gateway unavailable' }, { status: 503 });
+        }
+        return Response.json(ready, { status: 202 });
+      };
+      assert.equal(await runHostedDomainCommand('research', [
+        'run', routeKey, '--query', 'running shoes', '--hosted-operation-id', operationId,
+        '--output', outputPath, '--wait', '--poll-interval-seconds', '0.01',
+      ]), 0);
+      assert.equal(urls.some((u) => u.endsWith('/stream')), false);
+
+      urls.length = 0;
+      assert.equal(await runHostedDomainCommand('research', [
+        'run', routeKey, '--query', 'running shoes', '--hosted-operation-id', operationId,
+        '--output', outputPath, '--wait',
+      ]), 0);
+      assert.equal(urls.some((u) => u.endsWith('/stream')), true);
+      assert.equal(urls.filter((u) => u.endsWith('/research')).length, 2);
       assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), ready);
     } finally {
       globalThis.fetch = originalFetch;
@@ -6550,7 +6582,7 @@ describe('hosted domain commands', () => {
     };
     const waiting = runHostedDomainCommand('research', [
       'run', routeKey, '--query', 'running shoes', '--hosted-operation-id', operationId,
-      '--wait',
+      '--wait', '--poll-interval-seconds', '1',
     ], {
       auth: {apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token'},
     });
@@ -6914,7 +6946,7 @@ describe('hosted domain commands', () => {
         return Response.json({ error: { code: 'postplus_cli_hosted_async_run_not_found', message: 'Original result not found' } }, { status: 404 });
       };
       assert.equal(await runHostedDomainCommand('research', ['run', '--resume-from', outputPath]), 1);
-      assert.deepEqual(missingCalls, [{ routeKey: legacy.routeKey, sourceOperationId: legacy.operationId }]);
+      assert.deepEqual(missingCalls, [{ routeKey: legacy.routeKey, sourceOperationId: legacy.operationId, waitMs: 45_000 }]);
       assert.equal(await readFile(outputPath, 'utf8'), beforeMissing);
     } finally { globalThis.fetch = originalFetch; }
   });
