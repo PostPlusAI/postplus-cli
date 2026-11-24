@@ -39,6 +39,7 @@ export type WaitForMetaResearchViaSseInput = {
   getIdentity: () => MetaResearchStreamIdentity;
   idleTimeoutMs?: number;
   onPayload: (payload: unknown) => Promise<void>;
+  routeKey?: string;
   waitBudgetMs: number;
 };
 
@@ -233,7 +234,7 @@ export async function waitForMetaResearchViaSse(
         auth,
         accept: 'text/event-stream',
         body: {
-          routeKey: 'facebook-ads-library',
+          routeKey: input.routeKey ?? 'facebook-ads-library',
           ...input.getIdentity(),
           waitMs: streamWaitMs,
         },
