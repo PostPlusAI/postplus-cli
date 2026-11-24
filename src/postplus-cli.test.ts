@@ -6613,6 +6613,108 @@ describe('hosted domain commands', () => {
     }
   });
 
+  it('streams preserved Instagram and TikTok research routes via SSE and returns on results_ready', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const [routeKey, extraArgs] of [
+        ['instagram-posts', ['--url', 'https://www.instagram.com/p/C000001/']],
+        ['tiktok-profiles', ['--handle', 'postplus_creator']],
+      ] as const) {
+        const operationId = `op-${routeKey}`;
+        const ready = {
+          routeKey,
+          operationId,
+          runHandle: `sealed-${routeKey}`,
+          status: 'processing',
+          results_ready: true,
+          settlement_pending: true,
+          output: { collectionKey: routeKey, itemCount: 1, items: [{ id: '1' }] },
+        };
+        let streamCalls = 0;
+        globalThis.fetch = async (url, init) => {
+          const parsedUrl = new URL(String(url));
+          const body = JSON.parse(String(init?.body));
+          if (parsedUrl.pathname === '/api/postplus-cli/hosted/research/stream') {
+            streamCalls++;
+            assert.equal(body.routeKey, routeKey);
+            assert.equal(body.sourceOperationId, operationId);
+            assert.equal(typeof body.waitMs, 'number');
+            return new Response(
+              `event: result\ndata: ${JSON.stringify(ready)}\n\n`,
+              {
+                status: 200,
+                headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+              },
+            );
+          }
+          assert.equal(parsedUrl.pathname, '/api/postplus-cli/hosted/research');
+          assert.equal(body.routeKey, routeKey);
+          return Response.json({ ...ready, results_ready: false, output: null });
+        };
+        const result = await runHostedDomainCommand(
+          'research',
+          ['run', routeKey, ...extraArgs, '--hosted-operation-id', operationId, '--wait'],
+          {
+            auth: { apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token' },
+          },
+        );
+        assert.equal(streamCalls, 1);
+        assert.deepEqual(result, ready);
+      }
+
+      // Unpreserved tiktok-ads-top must stay on legacy polling without SSE.
+      let legacyStreamCalls = 0;
+      let legacyPollCalls = 0;
+      const legacyCompleted = {
+        routeKey: 'tiktok-ads-top',
+        operationId: 'op-tiktok-ads-top',
+        runHandle: 'sealed-tiktok-ads-top',
+        status: 'completed',
+        output: { collectionKey: 'tiktok-ads-top', itemCount: 1, items: [{ id: '1' }] },
+      };
+      globalThis.fetch = async (url, init) => {
+        const parsedUrl = new URL(String(url));
+        const body = JSON.parse(String(init?.body));
+        if (parsedUrl.pathname === '/api/postplus-cli/hosted/research/stream') {
+          legacyStreamCalls++;
+          throw new Error('Unexpected SSE call for unpreserved tiktok-ads-top');
+        }
+        assert.equal(parsedUrl.pathname, '/api/postplus-cli/hosted/research');
+        if (body.input) {
+          return Response.json({
+            ...legacyCompleted,
+            status: 'processing',
+            output: null,
+          });
+        }
+        legacyPollCalls++;
+        return Response.json(legacyCompleted);
+      };
+      const legacyResult = await runHostedDomainCommand(
+        'research',
+        [
+          'run',
+          'tiktok-ads-top',
+          '--limit',
+          '5',
+          '--hosted-operation-id',
+          'op-tiktok-ads-top',
+          '--wait',
+          '--poll-interval-seconds',
+          '0.001',
+        ],
+        {
+          auth: { apiBaseUrl: 'https://postplus.test', cliSessionToken: 'cli-session-token' },
+        },
+      );
+      assert.equal(legacyStreamCalls, 0);
+      assert.equal(legacyPollCalls, 1);
+      assert.deepEqual(legacyResult, legacyCompleted);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('retries a transient Meta status read and stops on permission loss', async () => {
     const routeKey = 'facebook-ads-library';
     const operationId = 'meta-original';
