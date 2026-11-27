@@ -101,6 +101,19 @@ function researchMediaReference(value: unknown) {
     : undefined;
 }
 
+/** A stored poster identifies its video only when both are unique in the original slot. */
+export function storedVideoPoster<
+  T extends { kind?: unknown; sort_order?: unknown },
+>(media: T[], video: T) {
+  if (video.kind !== 'video') return undefined;
+  const slot = media.filter((item) => item.sort_order === video.sort_order);
+  const posters = slot.filter((item) => item.kind === 'thumbnail');
+  return posters.length === 1 &&
+    slot.filter((item) => item.kind === 'video').length === 1
+    ? posters[0]
+    : undefined;
+}
+
 export function normalizeAdReport(
   inputs: ReportInput[],
   options: {
@@ -222,25 +235,7 @@ export function normalizeAdReport(
               media.push({
                 kind: str(m.kind),
                 url: url(m.url),
-                poster:
-                  m.kind === 'video' &&
-                  storedMedia.filter(
-                    (item) =>
-                      item.kind === 'video' && item.sort_order === m.sort_order,
-                  ).length === 1 &&
-                  storedMedia.filter(
-                    (item) =>
-                      item.kind === 'thumbnail' &&
-                      item.sort_order === m.sort_order,
-                  ).length === 1
-                    ? url(
-                        storedMedia.find(
-                          (thumbnail) =>
-                            thumbnail.kind === 'thumbnail' &&
-                            thumbnail.sort_order === m.sort_order,
-                        )?.url,
-                      )
-                    : '',
+                poster: url(storedVideoPoster(storedMedia, m)?.url),
                 contentHash: str(m.content_sha256),
               });
         } else {

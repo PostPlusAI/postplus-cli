@@ -1,14 +1,15 @@
 {
   "schemaVersion": 1,
-  "releaseId": "skills-2026-11-05.1",
-  "title": "Shared Brand Kits, company Cloud images and concurrent media batches",
-  "summary": "Create and update shared brand facts from websites or supplied materials, reuse personal files across clients, and submit independent image and video work concurrently with the current generation models.",
+  "releaseId": "skills-2026-11-27.1",
+  "title": "Shared Brand Kits, company Cloud images, concurrent media batches, and Ads guidance",
+  "summary": "Create and update shared brand facts from websites or supplied materials, reuse personal files across clients, submit independent image and video work concurrently, and route paid-creative discovery directly through Facebook Research.",
   "highlights": [
     "Organize website and supplied brand materials with one evidence-based analysis guide, preserving sourced facts, qualified analysis and unrelated human edits.",
     "Save Brand Kit updates for immediate use across Web, CLI and MCP, including custom chapters and the current revision.",
     "Browse, search and organize personal uploads, generated files and imported assets through the shared library; recover saved outputs without generating again.",
     "Use Nano Banana 2.1 by default for unspecified image requests, with Nano Banana 2 Lite and Nano Banana 2 also available for generation and reference edits.",
     "Prepare the complete requested media batch and submit independent image or video jobs concurrently, preserving original task identities and recovery.",
-    "Continue supported social account work through the existing seven connected social channels; public X research remains available through its dedicated research skill."
+    "Continue supported social account work through the existing seven connected social channels; public X research remains available through its dedicated research skill.",
+    "Route paid-creative discovery directly through the facebook-research skill without a fixed first-pass Meta ad sample."
   ]
 }

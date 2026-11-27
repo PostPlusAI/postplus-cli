@@ -9,6 +9,7 @@ import {
   normalizeAdReport,
   renderAdReport,
   reportCreativeGroupKey,
+  storedVideoPoster,
   summarizeAdReport,
 } from './ad-library-report.js';
 import { runAdLibraryCommand } from './ad-library.js';
@@ -754,6 +755,18 @@ test('stored videos use only their matching thumbnail and reject unsafe poster U
   assert.ok(!html.includes('javascript:'));
   payload.items[0]!.media[5]!.url = 'javascript:alert(1)';
   assert.throws(() => renderAdReport(inputs), /Unsafe report URL/);
+  const uniqueThumb = { kind: 'thumbnail', sort_order: 0, url: 'https://example.test/p.jpg' };
+  const uniqueVideo = { kind: 'video', sort_order: 0, url: 'https://example.test/v.mp4' };
+  assert.equal(storedVideoPoster([uniqueVideo, uniqueThumb], uniqueVideo), uniqueThumb);
+  assert.equal(storedVideoPoster([uniqueVideo, uniqueThumb], uniqueThumb), undefined);
+  assert.equal(
+    storedVideoPoster([uniqueVideo, { ...uniqueVideo }, uniqueThumb], uniqueVideo),
+    undefined,
+  );
+  assert.equal(
+    storedVideoPoster([uniqueVideo, uniqueThumb, { ...uniqueThumb }], uniqueVideo),
+    undefined,
+  );
 });
 
 test('timing research signal uses observation time and never equates elapsed time with profitability', () => {
